@@ -58,15 +58,64 @@ def calibre_convert(raw: bytes) -> bytes | None:
     except Exception:
         return None
 
-PAGE = """<html><head><title>PDF to EPUB — free, real chapters</title>
-<meta name="description" content="Free PDF to EPUB with real chapters and TOC for Kindle/Kobo. Text PDFs, no signup.">
-<style>body{font-family:system-ui;max-width:640px;margin:40px auto;padding:0 16px}form{border:2px dashed #888;padding:32px;text-align:center}button{padding:12px 24px;font-size:16px}</style>
-</head><body><h1>PDF to EPUB — free, real chapters</h1>
-<p>Text PDFs only. Scans/OCR, Pro equations, translation skipped for v1. Files deleted after download.</p>
-<form action="/convert" method="post" enctype="multipart/form-data">
-<input type="file" name="f" accept=".pdf" required><br><br>
-<input name="title" placeholder="Title (optional)" maxlength="120"><input name="author" placeholder="Author (optional)" maxlength="120"><br><br>
-<button>Convert</button></form></body></html>"""
+PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF to EPUB — free, real chapters for Kindle</title>
+<meta name="description" content="Free PDF to EPUB with real chapters and TOC for Kindle/Kobo/Apple Books. Text PDFs, no signup, files deleted after download.">
+<style>
+:root{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:40px 20px 64px}
+.hero{text-align:center;margin-bottom:28px}.hero h1{font-size:40px;margin:0 0 8px;letter-spacing:-1px}
+.hero h1 span{color:var(--acc)}.hero p{color:var(--mut);margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;margin-top:24px}
+#drop{border:2px dashed var(--line);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.15s}
+#drop.over{border-color:var(--acc);background:#1d2230}
+#drop b{font-size:18px}#fname{color:var(--mut);margin-top:8px;font-size:14px}
+.row{display:flex;gap:10px;margin-top:14px}.row input{flex:1;background:#0f1319;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:12px}
+button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:14px 22px;font-size:16px;font-weight:700;width:100%;margin-top:14px;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#msg{margin-top:12px;font-size:14px;min-height:20px}#msg.err{color:#ff7b7b}#msg.ok{color:#7be3a8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}
+.feat{background:#0f1319;border:1px solid var(--line);border-radius:12px;padding:14px;font-size:14px}.feat b{display:block;margin-bottom:4px}
+.feat span{color:var(--mut)}.foot{color:var(--mut);font-size:13px;text-align:center;margin-top:28px}.foot a{color:var(--mut)}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.hero h1{font-size:30px}.row{flex-direction:column}}
+</style></head><body><div class="wrap">
+<div class="hero"><h1>PDF to <span>EPUB</span></h1><p>Real chapters + table of contents for Kindle, Kobo, Apple Books. Free, no signup.</p></div>
+<div class="card">
+<div id="drop"><b>Drop PDF here or click to choose</b><div id="fname">PDF up to 50MB, 500 pages</div></div>
+<input id="file" type="file" accept=".pdf" hidden>
+<div class="row"><input id="title" placeholder="Title (optional)" maxlength="120"><input id="author" placeholder="Author (optional)" maxlength="120"></div>
+<button id="go">Convert to EPUB</button>
+<div id="msg"></div>
+</div>
+<div class="grid">
+<div class="feat"><b>Real chapters</b><span>Headings detected, TOC built, headers/footers stripped.</span></div>
+<div class="feat"><b>Private</b><span>In-memory only. Deleted after download. <a href="/privacy" style="color:#9aa4b5">Privacy</a>.</span></div>
+<div class="feat"><b>Kindle-ready</b><span>Send via Send-to-Kindle or copy over USB.</span></div>
+<div class="feat"><b>Free text PDFs</b><span>Scans need OCR — clear error, Calibre fallback on server.</span></div>
+</div>
+<div class="foot">No account · No watermark · <span id="st"></span></div>
+</div><script>
+const drop=document.getElementById('drop'),fi=document.getElementById('file'),fn=document.getElementById('fname'),msg=document.getElementById('msg'),go=document.getElementById('go');
+drop.onclick=()=>fi.click();
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;show()});
+fi.onchange=show;
+function show(){if(fi.files[0])fn.textContent=fi.files[0].name+' · '+(fi.files[0].size/1048576).toFixed(1)+'MB'}
+go.onclick=async()=>{
+ if(!fi.files[0]){msg.className='err';msg.textContent='Choose a PDF first.';return}
+ msg.className='';msg.textContent='Converting…';go.disabled=true;
+ const fd=new FormData();fd.append('f',fi.files[0]);fd.append('title',document.getElementById('title').value);fd.append('author',document.getElementById('author').value);
+ try{const r=await fetch('/convert',{method:'POST',body:fd});
+ if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
+ const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
+ a.download=(fi.files[0].name||'book').replace(/\\.pdf$/i,'')+'.epub';a.click();
+ msg.className='ok';msg.textContent='Done — EPUB downloaded.'}catch(e){msg.className='err';msg.textContent=e.message}
+ go.disabled=false};
+fetch('/stats').then(r=>r.json()).then(s=>{document.getElementById('st').textContent=s.conversions_ok+' books converted'}).catch(()=>{});
+</script></body></html>"""
 
 @app.get("/", response_class=HTMLResponse)
 def index():
