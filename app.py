@@ -21,15 +21,22 @@ MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
 LOG = Path("conversions.log")  # ponytail: append-only counts, no file content stored
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
-def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = ""):
+def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = ""):
     try:
         if LOG.exists() and LOG.stat().st_size > 1_000_000:
             LOG.write_text("")  # ponytail: rotate by trunc, log shipper when paid
         with LOG.open("a") as fh:
             fh.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(),
-                "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80]}) + "\n")
+                "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
+                "ref": ref[:60]}) + "\n")
     except OSError:
         pass  # ponytail: analytics never breaks conversion
+
+def ref_of(request: Request) -> str:
+    # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
+    s = request.query_params.get("s", "")
+    r = (request.headers.get("referer") or "")[:40]
+    return f"{s}|{r}" if s or r else ""
 
 def throttle(request: Request, limit: int = 10, window: int = 60):
     ip = request.client.host if request.client else "?"
@@ -118,7 +125,12 @@ fetch('/stats').then(r=>r.json()).then(s=>{document.getElementById('st').textCon
 </script></body></html>"""
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(request: Request):
+    try:
+        with LOG.open("a") as fh:  # ponytail: visit line, no PII, ref tag only
+            fh.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1, "ref": ref_of(request)}) + "\n")
+    except OSError:
+        pass
     return PAGE
 
 @app.get("/healthz")
@@ -136,19 +148,26 @@ def privacy():
 @app.get("/stats")
 def stats():
     # ponytail: totals from log file, no DB/dashboard lib
-    ok = fail = pages = 0
+    ok = fail = pages = visits = 0
+    refs: dict[str, int] = {}
     try:
         for line in LOG.read_text().splitlines():
             try:
                 r = json.loads(line)
             except ValueError:
                 continue
+            if r.get("visit"):
+                visits += 1
+                key = r.get("ref") or "direct"
+                refs[key] = refs.get(key, 0) + 1
+                continue
             ok += bool(r.get("ok"))
             fail += not r.get("ok")
             pages += int(r.get("pages", 0))
     except OSError:
         pass
-    return {"conversions_ok": ok, "failed": fail, "pages": pages}
+    top = dict(sorted(refs.items(), key=lambda kv: -kv[1])[:10])
+    return {"visits": visits, "refs": top, "conversions_ok": ok, "failed": fail, "pages": pages}
 
 def _lines(doc):
     """Yield (page_no, y0, text, size) for each line."""
@@ -165,22 +184,23 @@ def _lines(doc):
 @app.post("/convert")
 async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form("")):
     throttle(request)
+    ref = ref_of(request)
     raw = await f.read()
     kb_in = len(raw) // 1024
     if len(raw) > MAX_MB * 1024 * 1024:
-        log(False, 0, kb_in, 0, "too big")
+        log(False, 0, kb_in, 0, "too big", ref)
         raise HTTPException(413, f"over {MAX_MB}MB in v1")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
     try:
         doc = pymupdf.open(stream=raw, filetype="pdf")
     except Exception:
-        log(False, 0, kb_in, 0, "unreadable pdf")
+        log(False, 0, kb_in, 0, "unreadable pdf", ref)
         raise HTTPException(400, "unreadable PDF")
     if len(doc) > MAX_PAGES:
         n0 = len(doc)
         doc.close()
-        log(False, n0, kb_in, 0, "too many pages")
+        log(False, n0, kb_in, 0, "too many pages", ref)
         raise HTTPException(413, f"over {MAX_PAGES} pages in v1")
 
     rows = list(_lines(doc))
@@ -190,10 +210,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         doc.close()
         fb = calibre_convert(raw)
         if fb:
-            log(True, npages, kb_in, len(fb) // 1024, "calibre-fallback")
+            log(True, npages, kb_in, len(fb) // 1024, "calibre-fallback", ref)
             return StreamingResponse(BytesIO(fb), media_type="application/epub+zip",
                 headers={"Content-Disposition": "attachment; filename=book.epub"})
-        log(False, npages, kb_in, 0, "scan-no-text")
+        log(False, npages, kb_in, 0, "scan-no-text", ref)
         raise HTTPException(422, "scanned PDF, no selectable text — OCR not in v1 (install calibre for fallback)")
     long = [s for _, _, t, s in rows if len(t) > 40]
     body = Counter(long).most_common(1)[0][0] if long else Counter(s for _, _, _, s in rows).most_common(1)[0][0]
@@ -247,7 +267,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     epub.write_epub(buf, book)
     buf.seek(0)
     # ponytail: nothing stored, files die with request — matches their privacy pitch for free
-    log(True, npages, kb_in, len(buf.getvalue()) // 1024)
+    log(True, npages, kb_in, len(buf.getvalue()) // 1024, "", ref)
     doc.close()
     return StreamingResponse(buf, media_type="application/epub+zip",
         headers={"Content-Disposition": "attachment; filename=book.epub"})
