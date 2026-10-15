@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+pymupdf
+ebooklib
+python-multipart
