@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ import time
 app = FastAPI()
 MAX_MB = 50  # ponytail: 100MB like them later, 50 enough to launch
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
-LOG = Path("conversions.log")  # ponytail: append-only counts, no file content stored
+LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
 def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = ""):
