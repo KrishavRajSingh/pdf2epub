@@ -17,8 +17,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 import time
 
 app = FastAPI()
-MAX_MB = 50  # ponytail: 100MB like them later, 50 enough to launch
+MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
+OCR_MAX_PAGES = 200  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
@@ -66,10 +67,75 @@ def calibre_convert(raw: bytes) -> bytes | None:
     except Exception:
         return None
 
+def ocr_doc(doc) -> list[str] | None:
+    # ponytail: 300dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
+    if not shutil.which("tesseract"):
+        return None
+    out = []
+    for page in doc:
+        try:
+            png = page.get_pixmap(dpi=300).tobytes("png")
+            r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng"],
+                input=png, capture_output=True, timeout=60)
+            out.append(r.stdout.decode("utf-8", "replace") if r.returncode == 0 else "")
+        except Exception:
+            out.append("")
+    return out
+
+def ocr_chapters(pages: list[str]):
+    """Tesseract text -> same (kind, text) rows the text path emits."""
+    # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
+    chapters, cur = [], []
+
+    def flush():
+        if cur:
+            chapters.append(cur.copy())
+            cur.clear()
+
+    for txt in pages:
+        for para in re.split(r"\n\s*\n", txt):
+            lines = [l.strip() for l in para.splitlines() if l.strip()]
+            if not lines:
+                continue
+            text = " ".join(lines)
+            head = re.match(r"^(chapter|part|prologue|epilogue|book)\b", text, re.I) or (
+                text.isupper() and len(text) <= 60 and any(c.isalpha() for c in text))
+            if head and len(text) < 120:
+                flush()
+                cur.append(("h1", text))
+            else:
+                cur.append(("p", text))
+    flush()
+    return chapters
+
+def build_epub(chapters, title: str, author: str) -> bytes:
+    book = epub.EpubBook()
+    book.set_title(title)
+    if author:
+        book.add_author(author)
+    book.set_language("en")
+    items, toc = [], []
+    for i, ch in enumerate(chapters or [[("p", "empty")]]):
+        c = epub.EpubHtml(title=f"ch{i+1}", file_name=f"ch{i+1}.xhtml")
+        c.content = "".join(
+            f"<h1>{html.escape(t)}</h1>" if k == "h1" else f"<h2>{html.escape(t)}</h2>" if k == "h2" else f"<p>{html.escape(t)}</p>"
+            for k, t in ch
+        )
+        book.add_item(c)
+        items.append(c)
+        toc.append(c)
+    book.toc = tuple(toc)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav"] + items
+    buf = BytesIO()
+    epub.write_epub(buf, book)
+    return buf.getvalue()
+
 PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PDF to EPUB — free, real chapters for Kindle</title>
-<meta name="description" content="Free PDF to EPUB with real chapters and TOC for Kindle/Kobo/Apple Books. Text PDFs, no signup, files deleted after download.">
+<meta name="description" content="Free PDF to EPUB with real chapters and TOC for Kindle/Kobo/Apple Books. Text and scanned PDFs (OCR beta), no signup, files deleted after download.">
 <style>
 :root{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -91,7 +157,7 @@ button:disabled{opacity:.5;cursor:wait}
 </style></head><body><div class="wrap">
 <div class="hero"><h1>PDF to <span>EPUB</span></h1><p>Real chapters + table of contents for Kindle, Kobo, Apple Books. Free, no signup.</p></div>
 <div class="card">
-<div id="drop"><b>Drop PDF here or click to choose</b><div id="fname">PDF up to 50MB, 500 pages</div></div>
+<div id="drop"><b>Drop PDF here or click to choose</b><div id="fname">PDF up to 200MB, 500 pages</div></div>
 <input id="file" type="file" accept=".pdf" hidden>
 <div class="row"><input id="title" placeholder="Title (optional)" maxlength="120"><input id="author" placeholder="Author (optional)" maxlength="120"></div>
 <button id="go">Convert to EPUB</button>
@@ -101,7 +167,7 @@ button:disabled{opacity:.5;cursor:wait}
 <div class="feat"><b>Real chapters</b><span>Headings detected, TOC built, headers/footers stripped.</span></div>
 <div class="feat"><b>Private</b><span>In-memory only. Deleted after download. <a href="/privacy" style="color:#9aa4b5">Privacy</a>.</span></div>
 <div class="feat"><b>Kindle-ready</b><span>Send via Send-to-Kindle or copy over USB.</span></div>
-<div class="feat"><b>Free text PDFs</b><span>Scans need OCR — clear error, Calibre fallback on server.</span></div>
+<div class="feat"><b>Scanned books (beta)</b><span>OCR reads book scans up to 200 pages into searchable text.</span></div>
 </div>
 <div class="foot">No account · No watermark · <span id="st"></span></div>
 </div><script>
@@ -149,8 +215,9 @@ def privacy():
 @app.get("/stats")
 def stats():
     # ponytail: totals from log file, no DB/dashboard lib
-    ok = fail = pages = visits = 0
+    ok = fail = pages = visits = ocr = scan_fail = 0
     refs: dict[str, int] = {}
+    ok_by_ref: dict[str, int] = {}
     try:
         for line in LOG.read_text().splitlines():
             try:
@@ -165,10 +232,18 @@ def stats():
             ok += bool(r.get("ok"))
             fail += not r.get("ok")
             pages += int(r.get("pages", 0))
+            c = r.get("err", "")
+            ocr += bool(r.get("ok")) and c == "ocr"
+            scan_fail += (not r.get("ok")) and c.startswith("scan")
+            if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
+                key = (r.get("ref") or "direct").split("|")[0] or "direct"
+                ok_by_ref[key] = ok_by_ref.get(key, 0) + 1
     except OSError:
         pass
     top = dict(sorted(refs.items(), key=lambda kv: -kv[1])[:10])
-    return {"visits": visits, "refs": top, "conversions_ok": ok, "failed": fail, "pages": pages}
+    top_ok = dict(sorted(ok_by_ref.items(), key=lambda kv: -kv[1])[:10])
+    return {"visits": visits, "refs": top, "conversions_ok": ok, "ocr_ok": ocr,
+            "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok}
 
 def _lines(doc):
     """Yield (page_no, y0, text, size) for each line."""
@@ -206,16 +281,28 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
 
     rows = list(_lines(doc))
     npages = len(doc)
+    safe_title = (title or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
     if not rows:
-        # ponytail: try calibre engine before 422, covers scans/complex layout when binary present
+        # scanned PDF: OCR is the only thing that helps before falling back
+        if npages <= OCR_MAX_PAGES:
+            pages_txt = ocr_doc(doc)
+            if pages_txt and sum(len(t) for t in pages_txt) > 200:
+                data = build_epub(ocr_chapters(pages_txt), safe_title, author[:120])
+                log(True, npages, kb_in, len(data) // 1024, "ocr", ref)
+                doc.close()
+                return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
+                    headers={"Content-Disposition": "attachment; filename=book.epub"})
+        # ponytail: calibre still last resort (image-only epub beats error)
         doc.close()
         fb = calibre_convert(raw)
         if fb:
             log(True, npages, kb_in, len(fb) // 1024, "calibre-fallback", ref)
             return StreamingResponse(BytesIO(fb), media_type="application/epub+zip",
                 headers={"Content-Disposition": "attachment; filename=book.epub"})
-        log(False, npages, kb_in, 0, "scan-no-text", ref)
-        raise HTTPException(422, "scanned PDF, no selectable text — OCR not in v1 (install calibre for fallback)")
+        big = npages > OCR_MAX_PAGES
+        log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref)
+        raise HTTPException(422, f"scanned PDF — OCR beta caps at {OCR_MAX_PAGES} pages ({npages} here)"
+            if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
     long = [s for _, _, t, s in rows if len(t) > 40]
     body = Counter(long).most_common(1)[0][0] if long else Counter(s for _, _, _, s in rows).most_common(1)[0][0]
     h1_cut = body * 1.3
@@ -244,33 +331,11 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             cur.append(("p", t))
     flush()
 
-    book = epub.EpubBook()
-    safe_title = (title or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
-    book.set_title(safe_title)
-    if author[:120]:
-        book.add_author(author[:120])
-    book.set_language("en")
-    items, toc = [], []
-    for i, ch in enumerate(chapters or [[("p", "empty")]]):
-        c = epub.EpubHtml(title=f"ch{i+1}", file_name=f"ch{i+1}.xhtml")
-        c.content = "".join(
-            f"<h1>{html.escape(t)}</h1>" if k == "h1" else f"<h2>{html.escape(t)}</h2>" if k == "h2" else f"<p>{html.escape(t)}</p>"
-            for k, t in ch
-        )
-        book.add_item(c)
-        items.append(c)
-        toc.append(c)
-    book.toc = tuple(toc)
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-    book.spine = ["nav"] + items
-    buf = BytesIO()
-    epub.write_epub(buf, book)
-    buf.seek(0)
+    data = build_epub(chapters, safe_title, author[:120])
     # ponytail: nothing stored, files die with request — matches their privacy pitch for free
-    log(True, npages, kb_in, len(buf.getvalue()) // 1024, "", ref)
+    log(True, npages, kb_in, len(data) // 1024, "", ref)
     doc.close()
-    return StreamingResponse(buf, media_type="application/epub+zip",
+    return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
         headers={"Content-Disposition": "attachment; filename=book.epub"})
 
 @app.exception_handler(HTTPException)
