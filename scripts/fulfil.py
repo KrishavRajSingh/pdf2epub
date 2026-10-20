@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 WORK = Path("/tmp/pdf2epub-fulfil")
 WORK.mkdir(exist_ok=True)
 LEADS = ROOT / "growth" / "leads.csv"
-STATE = WORK / "processed.json"
+STATE = ROOT / "growth" / ".fulfil-state.json"  # not /tmp: a reboot must not re-send old EPUBs
 
 MAIL = "krishavrajsingh@gmail.com"
 
