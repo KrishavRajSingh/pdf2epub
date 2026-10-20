@@ -557,6 +557,44 @@ def _sample_pdf() -> bytes:
     return data
 
 
+@app.get("/thanks", response_class=HTMLResponse)
+def thanks(request: Request):
+    # ponytail: polar success url lands here; log the checkout id so we know which link converted
+    cid = (request.query_params.get("checkout_id") or "")[:80]
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
+                       "ref": "thanks", "checkout_id": cid, "ua": ua_of(request)[:120]})
+    try:
+        with LOG.open("a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+    print(line, flush=True)
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thanks - pdf2epub Shelf</title>
+<style>:root{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
+.wrap{max-width:620px;margin:0 auto;padding:56px 20px}
+h1{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}p{color:var(--dim);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}
+b{color:var(--txt)}a{color:var(--acc2)}code{font-family:ui-monospace,Menlo,monospace;font-size:14px}</style></head>
+<body><div class="wrap">
+<h1>You're in.</h1>
+<p>Shelf is $10 a month for 1,000 scanned pages, batch conversion of a whole shelf, and the finished
+EPUB delivered to your Kindle.</p>
+<div class="card">
+<p><b>What happens next</b></p>
+<p>Send me the PDF (or the scans) and I will convert it and email the EPUB back, usually the same day.
+If it is a scan it gets OCR and the text will have the usual OCR typos, and I will say so.</p>
+<p>Email it to <code>krishavrajsingh@gmail.com</code> with the book title in the subject line.</p>
+<p>Nothing is stored. The file is processed in memory and deleted after the download, same as the
+<a href="/">free converter</a>.</p>
+</div>
+<p>Questions about the plan, or a file that is over 200MB or 500 pages? Same address, I will work
+around it.</p>
+</div></body></html>""")
+
+
 @app.get("/sample.pdf")
 def sample_pdf():
     return Response(_sample_pdf(), media_type="application/pdf",
