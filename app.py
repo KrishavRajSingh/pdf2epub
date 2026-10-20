@@ -222,17 +222,13 @@ padding:9px 12px;border-bottom:1px solid var(--line);background:#0e1117}
 .para{margin:12px 0 0;font-size:13.5px;line-height:1.6;color:var(--dim)}
 .para b{color:var(--txt);font-weight:600}
 h2{font-size:19px;letter-spacing:-.3px;margin:44px 0 14px}
-.fixes{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-@media(max-width:640px){.fixes{grid-template-columns:1fr}}
-.fix{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px 16px}
-.fix b{display:block;font-size:14px;margin-bottom:5px}
-.fix p{margin:0;color:var(--dim);font-size:13.2px;line-height:1.55}
-.fix .tag{font-size:11px;color:var(--acc2);font-family:ui-monospace,Menlo,monospace;display:block;margin-bottom:7px}
-.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:4px}
-.step{border-left:2px solid var(--line2);padding-left:14px}
-.step .n{font-size:11.5px;color:var(--acc2);font-family:ui-monospace,Menlo,monospace}
-.step b{display:block;font-size:14px;margin:3px 0 4px}
-.step p{margin:0;color:var(--dim);font-size:13.2px;line-height:1.55}
+.fixes{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:860px){.fixes{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.fixes{grid-template-columns:1fr}}
+.fix{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px 15px}
+.fix b{display:block;font-size:13.8px;line-height:1.35}
+.fix .tag{font-size:11px;color:var(--acc2);font-family:ui-monospace,Menlo,monospace;display:block;margin-bottom:6px}
+.note-line{color:var(--dim);font-size:13.5px;margin:16px 0 0;max-width:70ch}
 .links{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
 .links a{font-size:13.5px;text-decoration:none;border:1px solid var(--line2);border-radius:9px;
 padding:9px 12px;color:var(--dim);background:var(--panel)}
@@ -256,14 +252,12 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 </header>
 
 <h1>Your PDF, as a <span class="em">real book</span>.</h1>
-<p class="lede">Paragraphs stay paragraphs, running headers and page numbers get thrown out, headings
-become chapters with a clickable table of contents. Scans get read with OCR. Free, no signup, and the
-file is deleted the moment you download it.</p>
+<p class="lede">Paragraphs stay paragraphs, headers and page numbers go, headings become chapters.
+Free, no signup, nothing kept.</p>
 <div class="facts mono">
   <span class="fact"><b>200MB</b> / 500 pages</span>
-  <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
   <span class="fact">OCR on scans, <b>free</b></span>
-  <span class="fact">nothing kept</span>
+  <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
 </div>
 
 <div class="grid2">
@@ -298,32 +292,13 @@ file is deleted the moment you download it.</p>
 
 <h2>What it repairs</h2>
 <div class="fixes">
-  <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b>
-    <p>Most converters emit one paragraph per printed line, so a normal book reads like a receipt.
-    Wrapped lines get rejoined and the hyphen at the break goes with them.</p></div>
-  <div class="fix"><span class="tag">headers</span><b>Headers and page numbers out</b>
-    <p>The book title and page number that repeat on every printed page are detected and dropped
-    instead of landing inside the text.</p></div>
-  <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b>
-    <p>Headings are detected by size, so the Kindle's jump to chapter works and the table of contents
-    is filled in.</p></div>
-  <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b>
-    <p>An image only PDF is read with OCR, then split into chapters. Expect the same typos any OCR
-    gives you, but searchable text instead of page photos.</p></div>
+  <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
+  <div class="fix"><span class="tag">headers</span><b>Headers and page numbers out</b></div>
+  <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
+  <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
 </div>
-
-<h2>How it works</h2>
-<div class="steps">
-  <div class="step"><span class="n">01</span><b>Upload or scan</b>
-    <p>A PDF you already have, or photos of the pages of a book you own. Nothing is stored, the file
-    lives in memory for the length of the request.</p></div>
-  <div class="step"><span class="n">02</span><b>Convert</b>
-    <p>Text PDFs go straight through. Scans go through OCR first. Calibre is the fallback when
-    something odd turns up.</p></div>
-  <div class="step"><span class="n">03</span><b>Read it anywhere</b>
-    <p>Send to Kindle by email with the subject "convert", copy it over USB, or open it in Apple
-    Books, Kobo, KOReader or PocketBook.</p></div>
-</div>
+<p class="note-line">Then read it anywhere: send to Kindle by email with the subject "convert", copy it over
+USB, or open it in Apple Books, Kobo, KOReader or PocketBook.</p>
 
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
