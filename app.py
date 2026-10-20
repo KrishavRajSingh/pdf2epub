@@ -26,15 +26,17 @@ LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on R
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
 def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = ""):
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(),
+        "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
+        "ref": ref[:60], "email": email})
     try:
         if LOG.exists() and LOG.stat().st_size > 1_000_000:
             LOG.write_text("")  # ponytail: rotate by trunc, log shipper when paid
         with LOG.open("a") as fh:
-            fh.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(),
-                "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
-                "ref": ref[:60], "email": email}) + "\n")
+            fh.write(line + "\n")
     except OSError:
         pass  # ponytail: analytics never breaks conversion
+    print(line, flush=True)  # ponytail: stdout copy so the counters survive a host move (no volume)
 
 def ref_of(request: Request) -> str:
     # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
@@ -212,11 +214,13 @@ fetch('/stats').then(r=>r.json()).then(s=>{document.getElementById('st').textCon
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1, "ref": ref_of(request)})
     try:
         with LOG.open("a") as fh:  # ponytail: visit line, no PII, ref tag only
-            fh.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1, "ref": ref_of(request)}) + "\n")
+            fh.write(line + "\n")
     except OSError:
         pass
+    print(line, flush=True)  # ponytail: stdout copy, see log()
     return PAGE
 
 SCAN_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
