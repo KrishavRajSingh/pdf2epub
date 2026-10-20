@@ -21,6 +21,7 @@ app = FastAPI()
 MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
 OCR_MAX_PAGES = 200
+OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
@@ -61,14 +62,19 @@ def is_bot(ua: str) -> bool:
     return bool(BOT_UA.search(ua))
 
 
-def throttle(request: Request, limit: int = 10, window: int = 60):
+def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int = 30):
+    # ponytail: day cap so one script cannot burn the trial credit overnight
     ip = request.client.host if request.client else "?"
     now = time.time()
     hits = [t for t in _HITS.get(ip, []) if now - t < window]
+    day = [t for t in _HITS.get(ip, []) if now - t < 86400]
     if len(hits) >= limit:
         raise HTTPException(429, "too many converts, wait a minute")
+    if len(day) >= day_limit:
+        raise HTTPException(429, "30 conversions a day from this connection, try later")
     hits.append(now)
-    _HITS[ip] = hits
+    day.append(now)
+    _HITS[ip] = day
 
 def err_page(msg: str, code: int):
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p><p><a href='/'>back</a></p>", status_code=code)
@@ -95,7 +101,7 @@ def ocr_doc(doc) -> list[str] | None:
     out = []
     for page in doc:
         try:
-            png = page.get_pixmap(dpi=300).tobytes("png")
+            png = page.get_pixmap(dpi=OCR_DPI).tobytes("png")
             r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng"],
                 input=png, capture_output=True, timeout=60)
             out.append(r.stdout.decode("utf-8", "replace") if r.returncode == 0 else "")
