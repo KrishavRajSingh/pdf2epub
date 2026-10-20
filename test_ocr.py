@@ -1,7 +1,7 @@
 """Self-check: synthetic scan PDF (image only, no text layer) -> OCR path -> epub with chapters.
 Run: python3 test_ocr.py"""
 import pymupdf
-from app import ocr_doc, ocr_chapters, build_epub, _lines
+from app import ocr_doc, ocr_chapters, build_epub, _blocks
 
 
 def make_scan() -> bytes:
@@ -18,7 +18,7 @@ def make_scan() -> bytes:
 
 def main():
     doc = pymupdf.open(stream=make_scan(), filetype="pdf")
-    assert not list(_lines(doc)), "fake scan must have no text layer"
+    assert not list(_blocks(doc)), "fake scan must have no text layer"
     pages = ocr_doc(doc)
     assert pages, "tesseract missing"
     text = "\n".join(pages)

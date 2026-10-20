@@ -13,7 +13,7 @@ import tempfile
 import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 import time
 
 app = FastAPI()
@@ -23,14 +23,14 @@ OCR_MAX_PAGES = 200  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) whe
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
-def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = ""):
+def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = ""):
     try:
         if LOG.exists() and LOG.stat().st_size > 1_000_000:
             LOG.write_text("")  # ponytail: rotate by trunc, log shipper when paid
         with LOG.open("a") as fh:
             fh.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(),
                 "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
-                "ref": ref[:60]}) + "\n")
+                "ref": ref[:60], "email": email}) + "\n")
     except OSError:
         pass  # ponytail: analytics never breaks conversion
 
@@ -116,7 +116,9 @@ def build_epub(chapters, title: str, author: str) -> bytes:
     book.set_language("en")
     items, toc = [], []
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
-        c = epub.EpubHtml(title=f"ch{i+1}", file_name=f"ch{i+1}.xhtml")
+        # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
+        name = next((t for k, t in ch if k in ("h1", "h2")), f"ch{i+1}")
+        c = epub.EpubHtml(title=name[:120], file_name=f"ch{i+1}.xhtml")
         c.content = "".join(
             f"<h1>{html.escape(t)}</h1>" if k == "h1" else f"<h2>{html.escape(t)}</h2>" if k == "h2" else f"<p>{html.escape(t)}</p>"
             for k, t in ch
@@ -160,7 +162,9 @@ button:disabled{opacity:.5;cursor:wait}
 <div id="drop"><b>Drop PDF here or click to choose</b><div id="fname">PDF up to 200MB, 500 pages</div></div>
 <input id="file" type="file" accept=".pdf" hidden>
 <div class="row"><input id="title" placeholder="Title (optional)" maxlength="120"><input id="author" placeholder="Author (optional)" maxlength="120"></div>
+<div class="row"><input id="email" placeholder="Email (optional) - only for the paid tier launch and big files" maxlength="120"></div>
 <button id="go">Convert to EPUB</button>
+<button id="sample" style="background:#0f1319;border:1px solid var(--line);color:var(--txt);font-weight:600;margin-top:10px">Try it with a sample PDF</button>
 <div id="msg"></div>
 </div>
 <div class="grid">
@@ -169,9 +173,10 @@ button:disabled{opacity:.5;cursor:wait}
 <div class="feat"><b>Kindle-ready</b><span>Send via Send-to-Kindle or copy over USB.</span></div>
 <div class="feat"><b>Scanned books (beta)</b><span>OCR reads book scans up to 200 pages into searchable text.</span></div>
 </div>
+<div class="feat" style="margin-top:12px"><b>What you get</b><span>One paragraph per paragraph (not one per printed line), running headers and page numbers stripped, headings turned into chapters, and a clickable table of contents. The sample button converts a 4 page PDF so you can check it in 5 seconds.</span></div>
 <div class="foot">No account · No watermark · <span id="st"></span></div>
 </div><script>
-const drop=document.getElementById('drop'),fi=document.getElementById('file'),fn=document.getElementById('fname'),msg=document.getElementById('msg'),go=document.getElementById('go');
+const drop=document.getElementById('drop'),fi=document.getElementById('file'),fn=document.getElementById('fname'),msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
 drop.onclick=()=>fi.click();
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
@@ -181,13 +186,25 @@ function show(){if(fi.files[0])fn.textContent=fi.files[0].name+' · '+(fi.files[
 go.onclick=async()=>{
  if(!fi.files[0]){msg.className='err';msg.textContent='Choose a PDF first.';return}
  msg.className='';msg.textContent='Converting…';go.disabled=true;
- const fd=new FormData();fd.append('f',fi.files[0]);fd.append('title',document.getElementById('title').value);fd.append('author',document.getElementById('author').value);
+ const fd=new FormData();fd.append('f',fi.files[0]);fd.append('title',document.getElementById('title').value);fd.append('author',document.getElementById('author').value);fd.append('email',document.getElementById('email').value);
  try{const r=await fetch('/convert',{method:'POST',body:fd});
  if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
  a.download=(fi.files[0].name||'book').replace(/\\.pdf$/i,'')+'.epub';a.click();
  msg.className='ok';msg.textContent='Done — EPUB downloaded.'}catch(e){msg.className='err';msg.textContent=e.message}
  go.disabled=false};
+smp.onclick=async()=>{
+ msg.className='';msg.textContent='Converting the sample…';smp.disabled=true;go.disabled=true;
+ try{
+  const b=await (await fetch('/sample.pdf')).blob();
+  const fd=new FormData();fd.append('f',new File([b],'sample.pdf',{type:'application/pdf'}));
+  fd.append('title','Sample Book');fd.append('email',document.getElementById('email').value);
+  const r=await fetch('/convert',{method:'POST',body:fd});
+  if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
+  const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sample.epub';a.click();
+  msg.className='ok';msg.textContent='Done. Open sample.epub in Kindle or Apple Books and check the chapter list.'}
+ catch(e){msg.className='err';msg.textContent=e.message}
+ smp.disabled=false;go.disabled=false};
 fetch('/stats').then(r=>r.json()).then(s=>{document.getElementById('st').textContent=s.conversions_ok+' books converted'}).catch(()=>{});
 </script></body></html>"""
 
@@ -200,6 +217,28 @@ def index(request: Request):
         pass
     return PAGE
 
+@app.get("/sample.pdf")
+def sample_pdf():
+    # ponytail: generated on the fly, no binary in repo. Shows the three things we claim:
+    # wrapped lines joined into one paragraph, running header + page number dropped, chapters detected.
+    doc = pymupdf.open()
+    body = ("This is a sample PDF so you can try the converter without hunting for a file. "
+            "If this comes out as one clean paragraph in your reader, the converter joined the "
+            "printed lines back together and dropped the running header.")
+    for i, (head, text) in enumerate([
+        ("Chapter One", body),
+        ("Chapter Two", body + " The second chapter repeats the text on purpose, so you can see two entries in the table of contents."),
+    ]):
+        page = doc.new_page()
+        page.insert_text((72, 60), "Sample Book - a running header", fontsize=9, color=(0.45, 0.45, 0.45))
+        page.insert_text((72, 120), head, fontsize=22)
+        page.insert_textbox(pymupdf.Rect(72, 150, 520, 420), text, fontsize=11)
+        page.insert_text((300, 780), str(i + 1), fontsize=9)
+    data = doc.tobytes()
+    doc.close()
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": "inline; filename=sample.pdf"})
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
@@ -210,12 +249,14 @@ def favicon():
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
-    return "<h1>Privacy</h1><p>Files processed in memory, never stored. Counts only (pages, bytes) logged to conversions.log. No accounts in v1.</p><p><a href='/'>back</a></p>"
+    return ("<h1>Privacy</h1><p>Files processed in memory, never stored. Counts (pages, bytes) logged to conversions.log. "
+            "If you type an email we keep it in the same log, used only to contact you about the paid tier and to email you a file "
+            "if a conversion needs a queue. No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 @app.get("/stats")
 def stats():
     # ponytail: totals from log file, no DB/dashboard lib
-    ok = fail = pages = visits = ocr = scan_fail = 0
+    ok = fail = pages = visits = ocr = scan_fail = emails = 0
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
     try:
@@ -235,6 +276,7 @@ def stats():
             c = r.get("err", "")
             ocr += bool(r.get("ok")) and c == "ocr"
             scan_fail += (not r.get("ok")) and c.startswith("scan")
+            emails += 1 if r.get("email") else 0
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
                 key = (r.get("ref") or "direct").split("|")[0] or "direct"
                 ok_by_ref[key] = ok_by_ref.get(key, 0) + 1
@@ -243,22 +285,46 @@ def stats():
     top = dict(sorted(refs.items(), key=lambda kv: -kv[1])[:10])
     top_ok = dict(sorted(ok_by_ref.items(), key=lambda kv: -kv[1])[:10])
     return {"visits": visits, "refs": top, "conversions_ok": ok, "ocr_ok": ocr,
-            "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok}
+            "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
+            "emails_captured": emails}
 
-def _lines(doc):
-    """Yield (page_no, y0, text, size) for each line."""
+def _join(lines):
+    """Join the wrapped lines of one paragraph; drop the hyphen at a line break."""
+    out = ""
+    for ln in lines:
+        if not out:
+            out = ln
+        elif out.endswith("-"):
+            out = out[:-1] + ln
+        else:
+            out += " " + ln
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _blocks(doc):
+    """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
+
+    ponytail: a visual line is not a paragraph. One wrapped paragraph came out as one
+    <p> per line, which is exactly the "break paragraphs weird" complaint. PDF blocks
+    are the paragraph unit, so join inside the block.
+    """
     for i, page in enumerate(doc):
         for b in page.get_text("dict")["blocks"]:
+            if b.get("type") != 0:
+                continue
+            lines, size = [], 0.0
             for line in b.get("lines", []):
                 txt = "".join(s["text"] for s in line["spans"]).strip()
                 if not txt:
                     continue
-                size = max(s["size"] for s in line["spans"])
-                y0 = line["bbox"][1]
-                yield i, y0, txt, round(size, 1)
+                lines.append(txt)
+                size = max(size, max(s["size"] for s in line["spans"]))
+            if not lines:
+                continue
+            yield i, b["bbox"][1], round(size, 1), _join(lines)
 
 @app.post("/convert")
-async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form("")):
+async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""), email: str = Form("")):
     throttle(request)
     ref = ref_of(request)
     raw = await f.read()
@@ -273,16 +339,20 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     except Exception:
         log(False, 0, kb_in, 0, "unreadable pdf", ref)
         raise HTTPException(400, "unreadable PDF")
+    if doc.needs_pass:
+        doc.close()
+        log(False, 0, kb_in, 0, "encrypted pdf", ref)
+        raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
     if len(doc) > MAX_PAGES:
         n0 = len(doc)
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref)
         raise HTTPException(413, f"over {MAX_PAGES} pages in v1")
 
-    rows = list(_lines(doc))
+    blocks = list(_blocks(doc))
     npages = len(doc)
     safe_title = (title or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
-    if not rows:
+    if not blocks:
         # scanned PDF: OCR is the only thing that helps before falling back
         if npages <= OCR_MAX_PAGES:
             pages_txt = ocr_doc(doc)
@@ -303,14 +373,15 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref)
         raise HTTPException(422, f"scanned PDF — OCR beta caps at {OCR_MAX_PAGES} pages ({npages} here)"
             if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
-    long = [s for _, _, t, s in rows if len(t) > 40]
-    body = Counter(long).most_common(1)[0][0] if long else Counter(s for _, _, _, s in rows).most_common(1)[0][0]
+    long = [sz for _, _, sz, t in blocks if len(t) > 40]
+    body = Counter(long).most_common(1)[0][0] if long else Counter(sz for _, _, sz, _ in blocks).most_common(1)[0][0]
     h1_cut = body * 1.3
     h2_cut = body * 1.12
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
-    tops = Counter(t for p, y, t, _ in rows if y < 60 for p in [p])
-    bots = Counter(t for p, y, t, _ in rows if y > doc[0].rect.height - 60 for p in [p])
+    ph = doc[0].rect.height
+    tops = Counter(t for p, y, sz, t in blocks if y < 60)
+    bots = Counter(t for p, y, sz, t in blocks if y > ph - 60)
     n = len(doc)
     banned = {t for t, c in list(tops.items()) + list(bots.items()) if c > n * 0.5}
 
@@ -319,13 +390,14 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         if cur:
             chapters.append(cur.copy())
             cur.clear()
-    for _, _, t, s in rows:
-        if t in banned or re.fullmatch(r"\d+", t):
+    for _, _, sz, t in blocks:
+        if t in banned or re.fullmatch(r"[\d\s.\-–—]+", t):
             continue  # ponytail: page numbers/running heads dropped, no config
-        if s >= h1_cut and len(t) < 120:
+        if sz >= h1_cut and len(t) < 120:
             flush()
             cur.append(("h1", t))
-        elif s >= h2_cut and len(t) < 120:
+        elif sz >= h2_cut and len(t) < 120:
+            flush()
             cur.append(("h2", t))
         else:
             cur.append(("p", t))
@@ -333,7 +405,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
 
     data = build_epub(chapters, safe_title, author[:120])
     # ponytail: nothing stored, files die with request — matches their privacy pitch for free
-    log(True, npages, kb_in, len(data) // 1024, "", ref)
+    log(True, npages, kb_in, len(data) // 1024, "", ref, email.strip()[:120])
     doc.close()
     return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
         headers={"Content-Disposition": "attachment; filename=book.epub"})
