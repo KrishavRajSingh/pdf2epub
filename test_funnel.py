@@ -47,6 +47,23 @@ def main():
     assert len(paras) == 2, f"expected 2 paragraphs (one per chapter), got {len(paras)}"
     assert "sample PDF so you can try the converter" in paras[0], "paragraph text not joined"
 
+    # phone scan -> OCR -> epub
+    img = pymupdf.open()
+    pg = img.new_page(width=1240, height=1754)
+    pg.insert_text((100, 200), "Chapter 1", fontsize=44)
+    pg.insert_text((100, 300), "The quick brown fox jumps over the lazy dog.", fontsize=32)
+    png = img[0].get_pixmap(dpi=150).tobytes("png")
+    r = client.post("/scan", files=[("files", ("p1.png", png, "image/png"))], data={"title": "Scan"})
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    z2 = zipfile.ZipFile(__import__("io").BytesIO(r.content))
+    h2 = "".join(z2.read(n).decode("utf-8", "replace") for n in z2.namelist() if n.endswith(".xhtml"))
+    assert "Chapter 1" in h2, f"scan heading missing: {h2[:300]}"
+    assert "quick brown fox" in h2.lower(), "scan text missing"
+
+    # guide pages + sitemap
+    for u in ["/scan", "/guides", "/guides/pdf-to-epub", "/sitemap.xml"]:
+        assert client.get(u).status_code == 200, u
+
     # email capture + sample endpoint
     st = client.get("/stats").json()
     assert st["emails_captured"] == 1, st

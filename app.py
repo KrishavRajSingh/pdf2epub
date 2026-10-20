@@ -14,12 +14,14 @@ import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from guides import GUIDES, INDEX_BODY
 import time
 
 app = FastAPI()
 MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
-OCR_MAX_PAGES = 200  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
+OCR_MAX_PAGES = 200
+SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
@@ -174,7 +176,7 @@ button:disabled{opacity:.5;cursor:wait}
 <div class="feat"><b>Scanned books (beta)</b><span>OCR reads book scans up to 200 pages into searchable text.</span></div>
 </div>
 <div class="feat" style="margin-top:12px"><b>What you get</b><span>One paragraph per paragraph (not one per printed line), running headers and page numbers stripped, headings turned into chapters, and a clickable table of contents. The sample button converts a 4 page PDF so you can check it in 5 seconds.</span></div>
-<div class="foot">No account · No watermark · <span id="st"></span></div>
+<div class="foot">No account · No watermark · <a href="/scan" style="color:#b9a7ff">or scan a physical book with your phone</a> · <span id="st"></span></div>
 </div><script>
 const drop=document.getElementById('drop'),fi=document.getElementById('file'),fn=document.getElementById('fname'),msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
 drop.onclick=()=>fi.click();
@@ -216,6 +218,139 @@ def index(request: Request):
     except OSError:
         pass
     return PAGE
+
+SCAN_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scan a book to EPUB - free</title>
+<meta name="description" content="Photograph the pages of a book and get an EPUB with chapters and a table of contents. OCR runs on the pages, nothing is stored.">
+<style>
+:root{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:620px;margin:0 auto;padding:32px 18px 64px}
+h1{font-size:28px;margin:0 0 8px}p.lead{color:var(--mut);margin:0 0 20px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:14px 20px;font-size:16px;font-weight:700;width:100%;margin-top:14px;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+input[type=text]{width:100%;background:#0f1319;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:12px;margin-top:10px}
+#msg{margin-top:12px;font-size:14px;min-height:20px;color:var(--mut)}#msg.err{color:#ff7b7b}#msg.ok{color:#7be3a8}
+.note{color:var(--mut);font-size:13px;margin-top:18px}a{color:#b9a7ff}
+</style></head><body><div class="wrap">
+<h1>Scan a book to EPUB</h1>
+<p class="lead">Photograph the pages of a physical book. The text gets read with OCR, the pages get
+chapters, and you get an EPUB for a Kindle, Kobo or phone. Nothing is stored.</p>
+<div class="card">
+<input id="file" type="file" accept="image/*" capture="environment" multiple>
+<input id="title" type="text" placeholder="Title (optional)">
+<button id="go">Convert pages to EPUB</button>
+<div id="msg">Up to 60 pages per batch. Clear photos, one page per shot.</div>
+</div>
+<p class="note">Prefer a PDF you already have? <a href="/">Convert a PDF</a>. Scans are read with OCR,
+so expect a few typos in the text, same as any OCR.</p>
+<p class="note">Free, no signup, no watermark. The file is deleted after the download.</p>
+</div><script>
+const fi=document.getElementById('file'),go=document.getElementById('go'),msg=document.getElementById('msg');
+go.onclick=async()=>{
+ const files=[...fi.files].filter(f=>f.type.startsWith('image/'));
+ if(!files.length){msg.className='err';msg.textContent='Pick at least one page photo.';return}
+ msg.className='';msg.textContent='Reading '+files.length+' page(s), this takes a minute…';go.disabled=true;
+ try{
+  const fd=new FormData();files.forEach(f=>fd.append('files',f,f.name));
+  fd.append('title',document.getElementById('title').value);
+  const r=await fetch('/scan',{method:'POST',body:fd});
+  if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
+  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='book.epub';a.click();
+  msg.className='ok';msg.textContent='Done. Open the EPUB and check the chapter list.'}
+ catch(e){msg.className='err';msg.textContent=e.message}
+ go.disabled=false};
+</script></body></html>"""
+
+
+@app.get("/scan", response_class=HTMLResponse)
+def scan_page():
+    return SCAN_PAGE
+
+
+@app.post("/scan")
+async def scan(request: Request, files: list[UploadFile] = File(...), title: str = Form("")):
+    # ponytail: phone scan -> OCR -> epub. reuses ocr_doc/ocr_chapters/build_epub, nothing stored.
+    throttle(request, limit=6, window=300)
+    ref = ref_of(request)
+    if len(files) > SCAN_MAX_PAGES:
+        raise HTTPException(413, f"max {SCAN_MAX_PAGES} pages per batch")
+    doc = pymupdf.open()
+    kb_in = 0
+    for f in files:
+        raw = await f.read()
+        kb_in += len(raw) // 1024
+        if not raw:
+            continue
+        try:
+            page = doc.new_page(width=1240, height=1754)  # a4 at 150dpi, matches what most phones shoot
+            page.insert_image(page.rect, stream=raw)
+        except Exception:
+            continue
+    if doc.page_count == 0:
+        doc.close()
+        log(False, 0, kb_in, 0, "no images", ref)
+        raise HTTPException(400, "could not read those images")
+    npages = doc.page_count
+    texts = ocr_doc(doc) or []
+    doc.close()
+    if not any(len(t) for t in texts):
+        log(False, npages, kb_in, 0, "scan-no-text", ref)
+        raise HTTPException(422, "no readable text found, try a clearer photo of the page")
+    data = build_epub(ocr_chapters(texts), (title or "Scanned book")[:120], "")
+    log(True, npages, kb_in, len(data) // 1024, "scan", ref)
+    return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
+        headers={"Content-Disposition": "attachment; filename=book.epub"})
+
+
+@app.get("/guides", response_class=HTMLResponse)
+def guides_index():
+    return guide_page("Guides", "Practical guides for converting PDFs to EPUB, scanning books and getting them onto a reader.", INDEX_BODY, "/guides")
+
+
+@app.get("/guides/{slug}", response_class=HTMLResponse)
+def guide(slug: str):
+    g = GUIDES.get(slug)
+    if not g:
+        raise HTTPException(404, "no such guide")
+    title, desc, body = g
+    return guide_page(title, desc, body, "/guides/" + slug)
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    urls = ["/", "/scan", "/guides"] + ["/guides/" + s for s in GUIDES]
+    body = "".join(f"<url><loc>https://epub.ftak.net{u}</loc></url>" for u in urls)
+    return Response(f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
+                    media_type="application/xml")
+
+
+def guide_page(title: str, desc: str, body: str, canonical: str) -> HTMLResponse:
+    # ponytail: one template for every guide, no framework
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title)}</title>
+<meta name="description" content="{html.escape(desc)}">
+<link rel="canonical" href="https://epub.ftak.net{canonical}">
+<style>
+:root{{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
+.wrap{{max-width:720px;margin:0 auto;padding:36px 20px 72px}}
+h1{{font-size:30px;margin:0 0 18px;letter-spacing:-.5px}}h2{{font-size:20px;margin:30px 0 8px}}p,li{{color:#cfd6e3}}
+code{{background:#0f1319;border:1px solid var(--line);border-radius:6px;padding:1px 5px;font-size:14px}}
+a{{color:#b9a7ff}}.cta{{display:inline-block;background:var(--acc);color:#fff;border-radius:10px;padding:13px 20px;font-weight:700;text-decoration:none;margin-top:10px}}
+.box{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:26px}}
+.foot{{color:var(--mut);font-size:13px;margin-top:34px}}
+</style></head><body><div class="wrap">
+<h1>{html.escape(title)}</h1>
+{body}
+<div class="box"><b>Convert a PDF to EPUB</b><br>Free, no signup, real chapters and a table of contents.
+<a class="cta" href="/">Open the converter</a></div>
+<div class="foot">Other guides: <a href="/guides">all guides</a> · <a href="/scan">scan a physical book</a></div>
+</div></body></html>""")
+
 
 @app.get("/sample.pdf")
 def sample_pdf():
