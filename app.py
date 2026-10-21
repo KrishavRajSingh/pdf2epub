@@ -14,7 +14,10 @@ import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
-from guides import GUIDES, INDEX_BODY
+try:
+    from guides import GUIDES, INDEX_BODY
+except Exception:  # ponytail: a missing file must not take the site down
+    GUIDES, INDEX_BODY = {}, "<p>Guides are unavailable right now.</p>"
 import time
 
 app = FastAPI()
