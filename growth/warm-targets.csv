@@ -1,0 +1,47 @@
+thread,sub,score,comments,op,title,url,ask,n_asks,link_ok
+1w0op19,ebooks,551,153,Repulsive-Funny-737,I’m building basically Stremio for books — looking for people who actually read EPUBs to test it,https://reddit.com/r/ebooks/comments/1w0op19/im_building_basically_stremio_for_books_looking/,"I’ve been building a reading app called **TOMEIO** because I was getting annoyed with how fragmented reading is.
+
+You find a book somewhere, download the EPUB somewhere else, open it in another app, and then your actual library is completely disconnected from ",1,True
+1rp3pb8,kindle,53,106,TheKonamiMan,Do you sideload manga on Kindle? Did update 5.19.2 break your KCC converted manga? READ THIS THREAD,https://reddit.com/r/kindle/comments/1rp3pb8/do_you_sideload_manga_on_kindle_did_update_5192/,"The issue is the new update has altered how AZW type files display images on Kindle. There is no telling if Amazon will change this but, you shouldn't be using that method for manga anymore anyway! There is a way to convert manga to the newest native format Ki",1,False
+16l3o0g,Calibre,40,78,ambrosina,Conversion ACSM to EPUB/pdf,https://reddit.com/r/Calibre/comments/16l3o0g/conversion_acsm_to_epubpdf/,"Try transferring from Calibre to your Kindle by cable, instead of adding the files directly (it's probably not working because of the DRM). If you have deDRM on Calibre then as soon as the file is loaded on Calibre, plug in your kindle, right click the book an",2,False
+1wamp20,ebooks,569,66,Simple-Aardvark3285,4 Sites with free epubs to download,https://reddit.com/r/ebooks/comments/1wamp20/4_sites_with_free_epubs_to_download/,"A few sites I use for free epubs, figured I'd share in case anyone finds them useful:
+
+* **eReaderIQ Freebies** [https://www.ereaderiq.com/freebies](https://www.ereaderiq.com/freebies) Tracks free Kindle books on Amazon, updated daily. Great for current bestse",1,True
+1mg799q,ereader,151,52,phyvealive,Where is the perfect Dark Mode?,https://reddit.com/r/ereader/comments/1mg799q/where_is_the_perfect_dark_mode/,"I convert everything I can to 'Dark Mode'. Browsers, apps, eBooks. 
+
+If it can be made white text on black, I do it, even Reddit. 
+
+Sadly, due to it's front lighting, ePaper can only manage a dark grey and can't quite satisfy me. 
+
+Text is still readable, but ",3,False
+1x39d2e,ebooks,19,51,p_jaro,"PDF to EPUB converters, experiences & quality?",https://reddit.com/r/ebooks/comments/1x39d2e/pdf_to_epub_converters_experiences_quality/,"So I have a book in PDF form that I really wanna read, but PDF is so clumsy, I read currently in Apple Books, planning on buying a pocketbook verse.
+
+I just figured out that PDF to EPUB converters are a thing, I feel like they will be kinda shit though. Has an",3,True
+1rj4g7a,ereader,87,47,SadWriter0,"What is the absolute best budget e-reader by tier? Looking for the ""cheapest you'd actually recommend""",https://reddit.com/r/ereader/comments/1rj4g7a/what_is_the_absolute_best_budget_ereader_by_tier/,"Hey everyone,
+
+I'm looking to get my first e-reader and trying to navigate the budget market (including AliExpress brands, used, or refurbished). I don't want to overspend, but I also want to avoid e-waste.
+
+I mostly plan to read standard epubs (a lot of perso",2,False
+1qxmzy4,ereader,72,45,Customer-Worldly,"KCC Comic Converter: true fullscreen manga, deeper blacks, and better image quality on eink at smaller file size: every option explained/quick tutorial!",https://reddit.com/r/ereader/comments/1qxmzy4/kcc_comic_converter_true_fullscreen_manga_deeper/,"* Kindle Comic Converter (KCC) optimizes black & white (or color) comics and manga for E-ink ereaders like Kindle, Kobo, ReMarkable, and more. 
+* Pages display in fullscreen without margins, with proper fixed layout support. 
+* Supported input formats include ",1,False
+1hc2utk,Calibre,25,43,Aeorane,Converting PDF to EPUB,https://reddit.com/r/Calibre/comments/1hc2utk/converting_pdf_to_epub/,"I have a significant library in my Calibre (>1000 documents), however when I was building it I focused on downloading PDFs to work with my old Kindle. Years later, I'm wishing I chose EPUB instead.
+
+I know I can convert PDF to EPUB using Calibre, but my questi",1,False
+1tlu322,kindle,4,37,metacognitive_guy,Any advanced tool to decently convert PDF academic papers to EPUB?,https://reddit.com/r/kindle/comments/1tlu322/any_advanced_tool_to_decently_convert_pdf/,"I'd like to read some academic papers on my Kindle. Trying so with the original PDF files is obviously an impossible feature, so I'm looking for some tool that might extract all the info from the originals and format them into a nice-looking EPUB, ready to be ",1,False
+1uzcek2,Calibre,17,35,DirectorSorry6273,How do I convert pdfs to EPUB?,https://reddit.com/r/Calibre/comments/1uzcek2/how_do_i_convert_pdfs_to_epub/,"I’ve tried several times to convert some PDF manga to EPUB using calibre and even KCC but it always gets stuck, is this a problem with my computer or something else? it gets stuck at 1% saying “converting to html” and never moves forward.",5,False
+1sa7guk,kindle,2,32,Ambitious_Steak3522,Is there any good PDF to EPUB / MOBI converter?,https://reddit.com/r/kindle/comments/1sa7guk/is_there_any_good_pdf_to_epub_mobi_converter/,"hi all, i need a PDF to EPUB or MOBI converter that actually works. all the stuff i tried like Calibre or online converters just mess everything up, repeat page numbers, break paragraphs weird, fonts all over the place. 
+
+anyone know something that does it bet",4,False
+1tlu4y1,Calibre,12,32,metacognitive_guy,Any tool to decently convert PDF academic papers to EPUB?,https://reddit.com/r/Calibre/comments/1tlu4y1/any_tool_to_decently_convert_pdf_academic_papers/,"I'd like to read some academic papers on my Kindle. Trying so with the original PDF files is obviously an impossible feature, so I'm looking for some tool that might extract all the info from the originals and format them into a nice-looking EPUB, ready to be ",3,False
+1h8j49f,kindle,0,31,ammeliebe,Do you think at some point Amazon will no longer support sending any PDF/EPUB file to Kindles? ,https://reddit.com/r/kindle/comments/1h8j49f/do_you_think_at_some_point_amazon_will_no_longer/,"One of the things I like the most about my Kindle is that I can not only easily buy books on Amazon, but I can also email my own PDF/EPUB files (whether files I wrote myself or I downloaded). Considering how greedy big corporations are, before buying my Kindle",1,False
+1wo017r,kindle,44,31,lones0,Built a free tool to clean up messy PDFs/EPUBs for Kindle & Kobo — would love some testers,https://reddit.com/r/kindle/comments/1wo017r/built_a_free_tool_to_clean_up_messy_pdfsepubs_for/,"Built a small tool called PureEPUB because I got tired of PDFs and messy EPUBs looking broken on my e-reader — mid-sentence line breaks, OCR junk, mangled quotes, the usual.
+
+​It reflows the text properly and spits out device-specific files: clean EPUB for Kin",1,False
+1squt7n,kindle,0,30,Dutchie_609,Which E reader should I buy?,https://reddit.com/r/kindle/comments/1squt7n/which_e_reader_should_i_buy/,"Okay so anybody help me?
+
+I've been thinking about the Kobo Clara but I feel like the 6 inch will be too small so I'm looking for a bigger screen.
+
+But the Libra Colour is like 90 euro's more and I don't need colour. But the Libra 2 doesn't get sold anymore. A",2,False
+1vqoth7,ebooks,56,29,PoolLow9937,Anyone else keep their own EPUB/PDF library instead of buying into a store?,https://reddit.com/r/ebooks/comments/1vqoth7/anyone_else_keep_their_own_epubpdf_library/,"I've been off Kindle for about two years now, reading my own EPUB and PDF files. What I keep running into isn't the reading itself — most readers handle that fine — it's everything around it. Highlights live inside whichever app I used. Books I read before I s",3,True
+1vqi568,Calibre,1,27,Punnan,Can you please help me in converting a pdf to epub?,https://reddit.com/r/Calibre/comments/1vqi568/can_you_please_help_me_in_converting_a_pdf_to_epub/,"I have been trying to use calibre, but I always seem to get it wrong. Can someone here please help me convert this book from pdf to epub?",4,False

@@ -5,6 +5,17 @@ burning about $0.01/hour at current traffic, so the site survives a while on its
 queue is a separate problem (Railway paused all builds platform-wide, 2026-10-20) and it resolves
 itself.
 
+## STATUS (2026-10-20, live now)
+- Polar product **"pdf2epub Shelf" $10/mo** created in the `opencorp` org (India works: Polar pays out via
+  Stripe Connect Express, Stripe standalone is invite-only in India).
+- Checkout link: `https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs`
+- Success URL -> `https://epub.ftak.net/thanks?checkout_id={CHECKOUT_ID}` (new `/thanks` route logs the
+  checkout id, so we know which link converted; queued for deploy).
+- Fulfilment loop: `scripts/fulfil.py --watch` (running) reads Gmail for PDF attachments, converts with
+  the fixed pipeline, emails the EPUB back, logs every lead to `growth/leads.csv`.
+- Offer posted: r/ebooks `1x39d2e`, r/InternetArchive `1wwtsj5`, X `2112630460589478016`.
+- Warm thread list for the next posts: `growth/warm-targets.csv` (18 threads, ranked by comments).
+
 ## The cheapest path to a first customer: convert it yourself
 The fixed pipeline is on this Mac right now. `scripts/manual_convert.py` uses the same code the site
 uses, so a manual conversion costs **zero** hosting and produces the same fixed EPUB.
