@@ -624,7 +624,7 @@ def stats():
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
     uas: dict[str, int] = {}
-    visits_bot = visits_human = 0
+    visits_bot = visits_human = visits_unknown = 0
     conv_bot = conv_human = 0
     try:
         for line in LOG.read_text().splitlines():
@@ -637,7 +637,9 @@ def stats():
                 visits += 1
                 key = r.get("ref") or "direct"
                 refs[key] = refs.get(key, 0) + 1
-                if is_bot(ua):
+                if not ua:
+                    visits_unknown += 1  # ponytail: older log lines have no ua, do not call them bots
+                elif is_bot(ua):
                     visits_bot += 1
                 else:
                     visits_human += 1
@@ -666,6 +668,7 @@ def stats():
             "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
             "emails_captured": emails,
             "visits_human": visits_human, "visits_bot": visits_bot,
+            "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
             "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8])}
 
