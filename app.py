@@ -46,7 +46,12 @@ def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str =
 def ref_of(request: Request) -> str:
     # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
     s = request.query_params.get("s", "")
-    r = (request.headers.get("referer") or "")[:40]
+    r = (request.headers.get("referer") or "")[:80]
+    if not s:
+        # ponytail: the tag lives on the landing page url, the convert POST carries it in referer
+        m = re.search(r"[?&]s=([^&#]+)", r)
+        if m:
+            s = m.group(1)
     return f"{s}|{r}" if s or r else ""
 
 BOT_UA = re.compile(r"bot|crawl|spider|slurp|curl|wget|python-requests|httpclient|scrapy|"
@@ -67,7 +72,8 @@ def is_bot(ua: str) -> bool:
 
 def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int = 30):
     # ponytail: day cap so one script cannot burn the trial credit overnight
-    ip = request.client.host if request.client else "?"
+    # ponytail: behind railway request.client.host is the rotating proxy ip, so the day cap never fired
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "?")
     now = time.time()
     hits = [t for t in _HITS.get(ip, []) if now - t < window]
     day = [t for t in _HITS.get(ip, []) if now - t < 86400]
@@ -80,7 +86,11 @@ def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int
     _HITS[ip] = day
 
 def err_page(msg: str, code: int):
-    return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p><p><a href='/'>back</a></p>", status_code=code)
+    # ponytail: the cap rejections are where the paid tier gets pitched, so keep the mail link
+    return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
+        "<p>Too big for the free converter? Email it to me and I'll convert it by hand: "
+        "<a href='mailto:krishavrajsingh@gmail.com?subject=PDF%20to%20EPUB'>krishavrajsingh@gmail.com</a></p>"
+        "<p><a href='/'>back</a></p>", status_code=code)
 
 def calibre_convert(raw: bytes) -> bytes | None:
     # ponytail: shell to gold-standard engine when ours gives up, None if binary missing/fails
@@ -138,19 +148,24 @@ def ocr_chapters(pages: list[str]):
     flush()
     return chapters
 
+def _clean(t: str) -> str:
+    # ponytail: PDF text can carry control chars, lxml refuses them in XML -> 500 on a good file
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", t or "")
+
+
 def build_epub(chapters, title: str, author: str) -> bytes:
     book = epub.EpubBook()
-    book.set_title(title)
+    book.set_title(_clean(title)[:120])
     if author:
-        book.add_author(author)
+        book.add_author(_clean(author)[:120])
     book.set_language("en")
     items, toc = [], []
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
         name = next((t for k, t in ch if k in ("h1", "h2")), f"ch{i+1}")
-        c = epub.EpubHtml(title=name[:120], file_name=f"ch{i+1}.xhtml")
+        c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
         c.content = "".join(
-            f"<h1>{html.escape(t)}</h1>" if k == "h1" else f"<h2>{html.escape(t)}</h2>" if k == "h2" else f"<p>{html.escape(t)}</p>"
+            f"<h1>{html.escape(_clean(t))}</h1>" if k == "h1" else f"<h2>{html.escape(_clean(t))}</h2>" if k == "h2" else f"<p>{html.escape(_clean(t))}</p>"
             for k, t in ch
         )
         book.add_item(c)
@@ -337,7 +352,7 @@ go.onclick=async()=>{
  fd.append('author',document.getElementById('author').value);
  fd.append('email',document.getElementById('email').value);
  try{
-  const r=await fetch('/convert',{method:'POST',body:fd});
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd});
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
@@ -350,7 +365,7 @@ smp.onclick=async()=>{
   const b=await (await fetch('/sample.pdf')).blob();
   const fd=new FormData();fd.append('f',new File([b],'sample.pdf',{type:'application/pdf'}));
   fd.append('title','Sample Book');fd.append('email',document.getElementById('email').value);
-  const r=await fetch('/convert',{method:'POST',body:fd});
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd});
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sample.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open sample.epub and check the chapter list.'}
@@ -443,7 +458,7 @@ go.onclick=async()=>{
  try{
   const fd=new FormData();files.forEach(f=>fd.append('files',f,f.name));
   fd.append('title',document.getElementById('title').value);
-  const r=await fetch('/scan',{method:'POST',body:fd});
+  const r=await fetch('/scan'+location.search,{method:'POST',body:fd});
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='book.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open the EPUB and check the chapter list.'}
@@ -603,14 +618,15 @@ def sample_pdf():
     return Response(_sample_pdf(), media_type="application/pdf",
                     headers={"Content-Disposition": "inline; filename=sample.pdf"})
 
-@app.get("/robots.txt", response_class=HTMLResponse)
+@app.get("/robots.txt")
 def robots():
     # ponytail: fastapi does not serve static files, so the rule lives here
-    return ("User-agent: *\nAllow: /\n\nSitemap: https://epub.ftak.net/sitemap.xml\n",
-            {"Content-Type": "text/plain; charset=utf-8"})
+    return Response("User-agent: *\nAllow: /\n\nSitemap: https://epub.ftak.net/sitemap.xml\n",
+                    media_type="text/plain")
 
 
 @app.get("/healthz")
+@app.get("/health")
 def healthz():
     return {"ok": True}
 
@@ -755,8 +771,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     raw = await f.read()
     kb_in = len(raw) // 1024
     if len(raw) > MAX_MB * 1024 * 1024:
-        log(False, 0, kb_in, 0, "too big", ref, request=request)
-        raise HTTPException(413, f"over {MAX_MB}MB in v1")
+        log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
+        raise HTTPException(413, f"over {MAX_MB}MB in v1 - email it to krishavrajsingh@gmail.com and I'll convert it by hand")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
     try:
@@ -771,8 +787,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     if len(doc) > MAX_PAGES:
         n0 = len(doc)
         doc.close()
-        log(False, n0, kb_in, 0, "too many pages", ref, request=request)
-        raise HTTPException(413, f"over {MAX_PAGES} pages in v1")
+        log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
+        raise HTTPException(413, f"over {MAX_PAGES} pages in v1 - email it to krishavrajsingh@gmail.com and I'll convert it by hand")
 
     blocks = list(_blocks(doc))
     npages = len(doc)

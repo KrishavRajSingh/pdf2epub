@@ -70,6 +70,28 @@ def main():
     s = client.get("/sample.pdf")
     assert s.status_code == 200 and s.content[:4] == b"%PDF", "sample.pdf broken"
 
+    # control chars in the PDF text must not 500 (lxml refuses them in XML)
+    ctrl = pymupdf.open()
+    cp = ctrl.new_page()
+    cp.insert_text((72, 100), "Chapter\x0cOne", fontsize=22)
+    cp.insert_text((72, 140), "Body text here.", fontsize=12)
+    craw = ctrl.tobytes()
+    ctrl.close()
+    r2 = client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")},
+                     data={"title": "Ti\x07tle"})
+    assert r2.status_code == 200, (r2.status_code, r2.text[:200])
+
+    # the ?s= tag must survive the landing page -> convert POST, else no channel is measurable
+    client.get("/?s=post-ereader")
+    client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")},
+                headers={"referer": "https://epub.ftak.net/?s=post-ereader"})
+    assert client.get("/stats").json()["ok_by_ref"].get("post-ereader"), "ref tag lost"
+
+    # throttle must key on the real client ip, not the rotating railway proxy ip
+    codes = [client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")},
+                         headers={"x-forwarded-for": "203.0.113.9"}).status_code for _ in range(12)]
+    assert 429 in codes, f"throttle never fired: {codes}"
+
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves")
 
 
