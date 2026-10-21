@@ -603,6 +603,13 @@ def sample_pdf():
     return Response(_sample_pdf(), media_type="application/pdf",
                     headers={"Content-Disposition": "inline; filename=sample.pdf"})
 
+@app.get("/robots.txt", response_class=HTMLResponse)
+def robots():
+    # ponytail: fastapi does not serve static files, so the rule lives here
+    return ("User-agent: *\nAllow: /\n\nSitemap: https://epub.ftak.net/sitemap.xml\n",
+            {"Content-Type": "text/plain; charset=utf-8"})
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
