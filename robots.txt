@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://epub.ftak.net/sitemap.xml
