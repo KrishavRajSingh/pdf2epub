@@ -19,7 +19,7 @@ for attempt in $(seq 1 2880); do           # 2880 x 60s = 48 hours
   out=$(timeout 150 railway redeploy --from-source --yes 2>&1 | tr '\n' ' ')
   echo "[$(date '+%H:%M:%S')] attempt $attempt: $out" >>"$LOG"
   case "$out" in
-    *paused*) sleep 60; continue ;;
+    *[Pp]aused*) sleep 60; continue ;;
     *"Failed to fetch"*|*"error sending request"*) sleep 60; continue ;;   # railway api unreachable, not a deploy
     *Unauthorized*) sleep 60; continue ;;   # railway invalidated the oauth token, `railway login` fixes it
   esac
