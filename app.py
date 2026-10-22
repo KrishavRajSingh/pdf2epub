@@ -219,10 +219,17 @@ def build_epub(chapters, title: str, author: str) -> bytes:
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
         name = next((t for k, t in ch if k in ("h1", "h2")), f"ch{i+1}")
         c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
-        c.content = "".join(
+        parts = [
             f"<h1>{html.escape(_clean(t))}</h1>" if k == "h1" else f"<h2>{html.escape(_clean(t))}</h2>" if k == "h2" else f"<p>{html.escape(_clean(t))}</p>"
-            for k, t in ch
-        )
+            for k, t in ch if k != "fn"
+        ]
+        notes = [t for k, t in ch if k == "fn"]
+        if notes:
+            # ponytail: notes stay out of the prose and keep their page order; no back-links yet
+            parts.append('<div style="margin-top:2.5em;border-top:1px solid #999;padding-top:.5em;font-size:.85em">'
+                         '<p style="font-weight:700">Notes</p>'
+                         + "".join(f"<p>{html.escape(_clean(t))}</p>" for t in notes) + "</div>")
+        c.content = "".join(parts)
         book.add_item(c)
         items.append(c)
         toc.append(c)
@@ -877,6 +884,18 @@ def _join(lines):
     return re.sub(r"\s+", " ", out).strip()
 
 
+SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def _span_text(s):
+    # ponytail: flattening spans loses the superscript flag, so a footnote marker reads as a
+    # normal digit glued to the sentence ("argument.12"). unicode keeps it visibly raised.
+    t = s["text"]
+    if s["flags"] & 1 and t.strip().isdigit() and len(t.strip()) <= 3:
+        return t.translate(SUP)
+    return t
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -890,7 +909,7 @@ def _blocks(doc):
                 continue
             lines, size = [], 0.0
             for line in b.get("lines", []):
-                txt = "".join(s["text"] for s in line["spans"]).strip()
+                txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if not txt:
                     continue
                 lines.append(txt)
@@ -900,11 +919,19 @@ def _blocks(doc):
             yield i, b["bbox"][1], round(size, 1), _join(lines)
 
 def _structure(blocks, doc):
-    """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof."""
+    """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
+
+    Footnote blocks (smaller type at the bottom of a page, starting with a marker) are moved
+    to the end of the chapter they belong to, under a "Notes" block. Kept as ("fn", text).
+    """
     long = [sz for _, _, sz, t in blocks if len(t) > 40]
     body = Counter(long).most_common(1)[0][0] if long else Counter(sz for _, _, sz, _ in blocks).most_common(1)[0][0]
     h1_cut = body * 1.3
     h2_cut = body * 1.12
+    # ponytail: small-font blocks at page bottom that open with a note marker. captions and
+    # tables rarely start with "12 ", so the false-positive cost is a moved paragraph, not loss.
+    fn_cut = body * 0.95
+    fn_mark = re.compile(r"^(?:\d{1,3}(?!\d)[.)]?|[a-zA-Z][.)]|\*|∗|†|‡|§|¶)\s*\S")
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -913,15 +940,22 @@ def _structure(blocks, doc):
     n = len(doc)
     banned = {t for t, c in list(tops.items()) + list(bots.items()) if c > n * 0.5}
 
-    chapters, cur = [], []
+    chapters, cur, cur_notes = [], [], []
     def flush():
         if cur:
+            cur.extend(("fn", t) for t in cur_notes)
             chapters.append(cur.copy())
             cur.clear()
-    for _, _, sz, t in blocks:
+        cur_notes.clear()
+    for pno, y, sz, t in blocks:
         if t in banned or re.fullmatch(r"[\d\s.\-–—]+", t):
             continue  # ponytail: page numbers/running heads dropped, no config
-        if sz >= h1_cut and len(t) < 120:
+        # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
+        # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
+        # / superscript-marker check if that shows up in real books.
+        if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55:
+            cur_notes.append(t)
+        elif sz >= h1_cut and len(t) < 120:
             flush()
             cur.append(("h1", t))
         elif sz >= h2_cut and len(t) < 120:
