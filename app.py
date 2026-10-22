@@ -931,7 +931,12 @@ def _structure(blocks, doc):
     # ponytail: small-font blocks at page bottom that open with a note marker. captions and
     # tables rarely start with "12 ", so the false-positive cost is a moved paragraph, not loss.
     fn_cut = body * 0.95
-    fn_mark = re.compile(r"^(?:\d{1,3}(?!\d)[.)]?|[a-zA-Z][.)]|\*|∗|†|‡|§|¶)\s*\S")
+    fn_mark = re.compile(r"^(?:\d{1,3}(?!\d)[.)]?|[a-zA-Z][.)]|\*|∗|†|‡|§|¶)\s*[A-Za-z\"“‘(]")
+    # ponytail: a page of nothing but small type is a TOC or an index, not a page with notes
+    body_pages = Counter(p for p, _, sz, _ in blocks if sz >= fn_cut)
+    # headings set in the body font ("CHAPTER 1" alone on its page) would otherwise split nothing
+    head_word = re.compile(r"^(chapter|part|book|prologue|epilogue|introduction|conclusion|"
+                           r"bibliography|references|appendix|index)\b[\s\dIVXLC.:-]*$", re.I)
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -953,9 +958,10 @@ def _structure(blocks, doc):
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
         # / superscript-marker check if that shows up in real books.
-        if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55:
+        if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55 \
+           and body_pages[pno] >= 3 and re.search(r"[a-z]{3}", t):
             cur_notes.append(t)
-        elif sz >= h1_cut and len(t) < 120:
+        elif (sz >= h1_cut or head_word.match(t)) and len(t) < 120:
             flush()
             cur.append(("h1", t))
         elif sz >= h2_cut and len(t) < 120:

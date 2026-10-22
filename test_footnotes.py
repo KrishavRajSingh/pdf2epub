@@ -7,7 +7,7 @@ from app import _blocks, _structure, _span_text, build_epub
 def make_pdf() -> bytes:
     doc = pymupdf.open()
     p = doc.new_page(width=612, height=792)
-    p.insert_text((72, 72), "Chapter 1", fontsize=20)
+    p.insert_text((72, 72), "Chapter 1", fontsize=11)  # body-font heading, the Palmer case
     for y in range(110, 620, 20):
         p.insert_text((72, y), "This is body prose that belongs in the paragraph flow of the chapter.",
                       fontsize=11)
@@ -24,6 +24,7 @@ def main():
     doc = pymupdf.open(stream=make_pdf(), filetype="pdf")
     chapters = _structure(list(_blocks(doc)), doc)
     ch = chapters[0]
+    assert any(k == "h1" and t == "Chapter 1" for k, t in ch), "body-font heading lost"
     kinds = [k for k, _ in ch]
     notes = [t for k, t in ch if k == "fn"]
     assert len(notes) == 2, f"expected 2 notes, got {notes}"
