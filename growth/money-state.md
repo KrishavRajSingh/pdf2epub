@@ -121,3 +121,39 @@ deepculture issue #243 put epub.ftak.net in the Bonus slot and produced 68 conve
 minutes from one reader. That slot is sold (Classified Ad, see passionfroot.me/deepculture) and it
 is repeatable for the cost of one slot. **The next issue should link `/shelf`, not `/`.** Reddit
 posts got 1 and 0 upvotes; the HN post got 875 visits and 0 conversions.
+
+## The wait (Railway outage, from 2026-10-20)
+
+Railway paused all builds platform-wide and then disclosed a security incident: an unauthorized
+third party accessed encrypted environment variables and may have decrypted some of them. Builds
+and deployments are frozen while they rotate credentials. Their own notice: rotate your env vars
+and registry credentials, review your logs.
+
+**Our exposure from the breach: none.** The pdf2epub service has exactly two env vars
+(`LOG_DIR=/data`, `PORT=8000`), neither a secret, so there is nothing to rotate. No tokens in
+git history or the working tree. Polar, GitHub and Gmail are separate accounts.
+
+**The live build keeps serving through the pause** (visits and conversions are still ticking,
+volume data intact). Nothing is lost, but every fix is stuck behind the freeze.
+
+**Three loops are running on the Mac and will do the work the moment the freeze lifts:**
+
+| loop | what it does | when it fires |
+|---|---|---|
+| `scripts/railway_deploy_watch.sh` | retries `railway redeploy --from-source` every 60s, then verifies `robots.txt` + `/health` | the instant builds reopen |
+| `scripts/fulfil.py --watch` | converts any PDF that arrives by email and emails the EPUB back | every 60s, and it needs no deploy |
+| `scripts/keys.py watch` | pulls leads off the railway log and emails them an offer | every 5 min, and it needs no deploy |
+
+Note the CLI session expires and auto-refreshes; the watcher retries on `Unauthorized` rather
+than pretending a deploy happened. That was one of three watcher bugs fixed (the other two: a
+missed `"Unauthorized"` branch that made it burn 20 minutes per attempt, and a case-sensitive
+match on Railway's capitalised `"Paused temporarily"`).
+
+**Do not buy the deepculture slot until the deploy lands.** The slot links to `/shelf`, and
+`/shelf` is a 404 until the freeze lifts. A paid placement pointing at a 404 is a wasted slot.
+
+**While waiting, the two things that pay out without a deploy:**
+- `fulfil.py` is live on the Mac. Someone who emails a PDF gets an EPUB back today, with the
+  Shelf offer in the email.
+- `keys.py grant <email>` mints a key and emails it, pushing it to the railway volume over
+  SFTP so the live site accepts it.
