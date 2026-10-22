@@ -5,7 +5,7 @@
   <key>ProgramArguments</key><array><string>/Users/chirkoot/free/pdf2epub/scripts/railway_deploy_watch.sh</string></array>
   <key>WorkingDirectory</key><string>/Users/chirkoot/free/pdf2epub</string>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>StandardOutPath</key><string>/tmp/pdf2epub-deploywatch.out</string>
   <key>StandardErrorPath</key><string>/tmp/pdf2epub-deploywatch.err</string>
   <key>EnvironmentVariables</key><dict>
