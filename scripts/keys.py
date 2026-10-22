@@ -104,6 +104,20 @@ Krishav""")
     return key
 
 
+def lead_route_live() -> bool:
+    """Is the /lead route deployed yet? it only exists after the build lands."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(SITE + "/shelf", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status == 200
+    except urllib.error.HTTPError as e:
+        return e.code == 200
+    except Exception:
+        return False
+
+
 def pull_leads() -> list:
     """Read lead lines off the live log.
 
@@ -172,6 +186,12 @@ def main():
     if cmd == "watch":
         while True:
             try:
+                # ponytail: /lead only exists once the build lands, so until then there is
+                # nothing to pull. check first, so this loop costs one http call, not a
+                # 196KB download every five minutes for a route that 404s.
+                if not lead_route_live():
+                    time.sleep(300)
+                    continue
                 chase_leads()
             except Exception as e:
                 print("loop error:", str(e)[:200])

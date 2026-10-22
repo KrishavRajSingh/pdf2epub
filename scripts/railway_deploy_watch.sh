@@ -13,15 +13,17 @@ LOG=/tmp/railway-deploy-watch.log
 MARKER='epub.ftak.net/sitemap.xml'   # ponytail: the marker must exist only in the new build,
 # else the check passes against the old one and the deploy looks done when it is not
 
-for attempt in $(seq 1 2880); do           # 2880 x 60s = 48 hours
+for attempt in $(seq 1 576); do            # 576 x 300s = 48 hours
   # why 48h: railway re-enables builds per tier (enterprise, pro, hobby, then free/trial last),
   # and this workspace is on the free trial, so it is in the final wave with no published ETA.
+  # why 5 min not 60s: their api is in a major outage, 2880 calls a day is rude. the build
+  # itself takes minutes, so a 5 min poll costs nothing in deploy time.
   out=$(timeout 150 railway redeploy --from-source --yes 2>&1 | tr '\n' ' ')
   echo "[$(date '+%H:%M:%S')] attempt $attempt: $out" >>"$LOG"
   case "$out" in
-    *[Pp]aused*) sleep 60; continue ;;
-    *"Failed to fetch"*|*"error sending request"*) sleep 60; continue ;;   # railway api unreachable, not a deploy
-    *Unauthorized*) sleep 60; continue ;;   # railway invalidated the oauth token, `railway login` fixes it
+    *[Pp]aused*) sleep 300; continue ;;
+    *"Failed to fetch"*|*"error sending request"*) sleep 300; continue ;;   # railway api unreachable, not a deploy
+    *Unauthorized*) sleep 300; continue ;;   # railway invalidated the oauth token, `railway login` fixes it
   esac
   echo "[$(date '+%H:%M:%S')] deploy accepted, waiting for the new build to serve" >>"$LOG"
   for _ in $(seq 1 80); do

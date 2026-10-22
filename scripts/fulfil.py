@@ -171,11 +171,13 @@ def process_once():
 
 if __name__ == "__main__":
     if "--watch" in sys.argv:
+        # ponytail: 60s spawns a python subprocess per poll and there has never been a
+        # request to fulfil. 5 min is still fast enough for a person waiting on an email.
         while True:
             try:
                 process_once()
             except Exception as e:
                 print("error:", str(e)[:300])
-            time.sleep(60)
+            time.sleep(300)
     else:
         process_once()
