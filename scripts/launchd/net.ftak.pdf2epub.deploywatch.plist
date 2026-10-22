@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>net.ftak.pdf2epub.deploywatch</string>
+  <key>ProgramArguments</key><array><string>/Users/chirkoot/free/pdf2epub/scripts/railway_deploy_watch.sh</string></array>
+  <key>WorkingDirectory</key><string>/Users/chirkoot/free/pdf2epub</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/pdf2epub-deploywatch.out</string>
+  <key>StandardErrorPath</key><string>/tmp/pdf2epub-deploywatch.err</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/Users/chirkoot/.hermes/node/bin:/opt/homebrew/bin:/Users/chirkoot/.pyenv/shims:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>/Users/chirkoot</string>
+  </dict>
+</dict></plist>
