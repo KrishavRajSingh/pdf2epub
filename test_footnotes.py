@@ -14,6 +14,10 @@ def make_pdf() -> bytes:
     p.insert_text((72, 700), "1 A footnote about the sources and the method used here.",
                   fontsize=8)
     p.insert_text((72, 716), "2 Another note, second in the page order.", fontsize=8)
+    p.insert_text((72, 770), "Downloaded from https://www.cambridge.org/core. University, on "
+                  "14 Apr 2020, subject to the Cambridge Core terms of use, available at "
+                  "https://www.cambridge.org/core/terms.", fontsize=6)
+    doc.new_page()  # second page: a footer seen once is not a repeated running head
     return doc.tobytes()
 
 
@@ -31,6 +35,7 @@ def main():
     assert notes[0].startswith("1 A footnote"), notes
     assert kinds.index("fn") == len(kinds) - 2, f"notes not at chapter end: {kinds}"
     assert all("footnote about" not in t for k, t in ch if k != "fn"), "note leaked into prose"
+    assert all("Downloaded from" not in t for k, t in ch), "publisher footer leaked into prose"
 
     data = build_epub(chapters, "T", "A")
     assert data[:2] == b"PK", "not an epub zip"

@@ -937,6 +937,9 @@ def _structure(blocks, doc):
     # headings set in the body font ("CHAPTER 1" alone on its page) would otherwise split nothing
     head_word = re.compile(r"^(chapter|part|book|prologue|epilogue|introduction|conclusion|"
                            r"bibliography|references|appendix|index)\b[\s\dIVXLC.:-]*$", re.I)
+    # ponytail: publisher page furniture changes per page (DOI, download date), so the repeated
+    # header/footer counter never catches it; "Downloaded from <url>" is the common watermark.
+    boiler = re.compile(r"^downloaded from\s+https?://|^https?://doi\.org/", re.I)
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -953,7 +956,7 @@ def _structure(blocks, doc):
             cur.clear()
         cur_notes.clear()
     for pno, y, sz, t in blocks:
-        if t in banned or re.fullmatch(r"[\d\s.\-–—]+", t):
+        if t in banned or boiler.search(t) or re.fullmatch(r"[\d\s.\-–—]+", t):
             continue  # ponytail: page numbers/running heads dropped, no config
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
