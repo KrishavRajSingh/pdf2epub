@@ -11,8 +11,16 @@ One browser session on 2026-10-21 converted **68 PDFs / 12,908 pages in 32 minut
 the Shelf customer: 1,000 pages/month for $10.
 
 Source of that traffic: `?utm_source=substack&utm_medium=email` — the **deepculture** newsletter
-issue #243 (26,000 subscribers, 35% CTR, published Oct 20). Every other channel produced nothing:
-`?s=hn` sent 875 visits and **0** conversions, Reddit posts 1 and 0 upvotes.
+issue #243 (26,000 subscribers, 35% CTR, published Oct 20) put epub.ftak.net in its Bonus slot.
+Every other channel produced nothing: `?s=hn` sent 875 visits and **0** conversions, Reddit posts
+1 and 0 upvotes.
+
+deepculture is a third-party newsletter, not ours (checked 2026-10-22: it features other people's
+products in the same slot — kooler.me, bigwords.page, playtakt.app — and Krishav's own
+"Japan/Singapore" curated line is a retweet he posted on X, not deepculture copy; the deepculture
+feed contains no such line). So the lever is not "email our list", it is **buy the slot**: the
+Bonus slot is sold as a Classified Ad, and one placement produced 68 conversions in 32 minutes.
+Check `https://www.passionfroot.me/deepculture` for the rate.
 
 ## What was broken (all fixed)
 
@@ -51,9 +59,17 @@ difference is the output quality (real chapters, real paragraphs).
    - the deepculture issue #243 already linked `epub.ftak.net` and produced 68 conversions —
      **it never mentioned a paid tier.** The next issue should link `/shelf` directly.
    - Reddit/X posts point at the free tool. One of them should point at `/shelf`.
-3. **The 26,000-person list.** deepculture issue #243 shipped one free-tool link and the
-   conversions came. Issue #244 can ship a `/shelf` link to the same list. That is the single
-   biggest unexploited asset in the whole funnel and it costs nothing but an issue.
+3. **The deepculture slot, again.** Issue #243 shipped one free-tool link and 68 conversions
+   came. The slot is sold (Classified Ad) — the next issue can carry the same link pointing at
+   `/shelf` instead of `/`. That is the only channel with proven conversion volume, and it is
+   repeatable for the cost of one slot. Ask for the rate; a Classified Ad is far cheaper than the
+   $10/mo a single Shelf subscriber pays.
+4. **The throttle must not cut a shelf owner.** The pending build keys the throttle on the real
+   client IP. At 10/min and 30/day it would have 429'd the 68-in-32-minutes burst at file 31 —
+   more than half the revenue event. Now 30/min and 300/day.
+5. **fulfil.py must not answer the bank.** Its query was any PDF attachment, so a bank statement
+   or broker alert from anyone would have been converted to EPUB and mailed back with a $10 pitch.
+   It now only acts on mail that reads like a request.
 
 ## The rule for the free path
 

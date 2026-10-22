@@ -81,6 +81,20 @@ def log_lead(row):
         w.writerow(row)
 
 
+REQUEST_WORDS = re.compile(r"pdf|epub|ebook|kindle|convert|book|scan|reader", re.I)
+
+
+def is_request(email: str, subject: str, body: str) -> bool:
+    """Only act on mail that actually asks for a conversion.
+
+    ponytail: the inbox also holds bank and broker PDFs (PNB, nse_alerts). Without this
+    filter we would convert a bank statement and email it back with a $10 pitch.
+    """
+    if re.search(r"noreply|no-reply|do-not-reply|alerts?|notifications?|statement|invoice|receipt", email, re.I):
+        return False
+    return bool(REQUEST_WORDS.search(subject + " " + body[:2000]))
+
+
 def process_once():
     st = state()
     msgs = gws("gmail", "users", "messages", "list", params=json.dumps(
@@ -99,6 +113,15 @@ def process_once():
         email = (m_ or re.match(r"([^\s]+)", frm))
         email = email.group(1) if email else frm
         subject = headers.get("subject", "")
+        body = ""
+        for part in (msg.get("payload", {}) or {}).get("parts", []) or []:
+            if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+                body = base64.urlsafe_b64decode(part["body"]["data"] + "=" * (-len(part["body"]["data"]) % 4)).decode("utf8", "replace")
+                break
+        if not is_request(email, subject, body):
+            st[mid] = "skipped-not-a-request"
+            save_state(st)
+            continue
         pdfs = find_pdfs(msg.get("payload") or {})
         for fn, aid in pdfs[:1]:
             att = gws("gmail", "users", "messages", "attachments", "get",

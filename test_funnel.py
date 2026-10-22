@@ -101,10 +101,13 @@ def main():
                 headers={"referer": "https://epub.ftak.net/?s=post-ereader"})
     assert client.get("/stats").json()["ok_by_ref"].get("post-ereader"), "ref tag lost"
 
-    # throttle must key on the real client ip, not the rotating railway proxy ip
+    # throttle must key on the real client ip, not the rotating railway proxy ip.
+    # the limit is 30/min: the real shelf owner did 9/min peak, 68 in 32 minutes,
+    # so the cap must not fire below that or it kills the revenue event.
     codes = [client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")},
-                         headers={"x-forwarded-for": "203.0.113.9"}).status_code for _ in range(12)]
+                         headers={"x-forwarded-for": "203.0.113.9"}).status_code for _ in range(35)]
     assert 429 in codes, f"throttle never fired: {codes}"
+    assert codes[:30].count(200) == 30, f"throttle cut a legitimate burst too early: {codes}"
 
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves")
 

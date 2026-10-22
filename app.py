@@ -72,9 +72,11 @@ def is_bot(ua: str) -> bool:
     return bool(BOT_UA.search(ua))
 
 
-def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int = 30):
+def throttle(request: Request, limit: int = 30, window: int = 60, day_limit: int = 300):
     # ponytail: day cap so one script cannot burn the trial credit overnight
     # ponytail: behind railway request.client.host is the rotating proxy ip, so the day cap never fired
+    # ponytail: the real shelf owner did 68 files in 32 min (9/min peak) from one ip, so a 10/min
+    # and 30/day cap would have cut that revenue event in half. generous, the page cap is the real limit
     ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "?")
     now = time.time()
     hits = [t for t in _HITS.get(ip, []) if now - t < window]
@@ -82,7 +84,7 @@ def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int
     if len(hits) >= limit:
         raise HTTPException(429, "too many converts, wait a minute")
     if len(day) >= day_limit:
-        raise HTTPException(429, "30 conversions a day from this connection, try later")
+        raise HTTPException(429, "too many conversions a day from this connection, try later")
     hits.append(now)
     day.append(now)
     _HITS[ip] = day
