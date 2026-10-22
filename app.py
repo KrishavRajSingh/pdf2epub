@@ -13,7 +13,7 @@ import tempfile
 import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 try:
     from guides import GUIDES, INDEX_BODY
 except Exception:  # ponytail: a missing file must not take the site down
@@ -26,6 +26,8 @@ MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
 OCR_MAX_PAGES = 200
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
+SHELF_URL = "https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs"  # ponytail: the W-upgVW4 variant in reddit-posts.md is a 404, this one checks out
+SHELF_MAIL = "krishavrajsingh@gmail.com"
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
@@ -88,8 +90,10 @@ def throttle(request: Request, limit: int = 10, window: int = 60, day_limit: int
 def err_page(msg: str, code: int):
     # ponytail: the cap rejections are where the paid tier gets pitched, so keep the mail link
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
-        "<p>Too big for the free converter? Email it to me and I'll convert it by hand: "
-        "<a href='mailto:krishavrajsingh@gmail.com?subject=PDF%20to%20EPUB'>krishavrajsingh@gmail.com</a></p>"
+        "<p>Too big for the free converter? Two ways: email it to me and I'll convert it by hand: "
+        f"<a href='mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB'>{SHELF_MAIL}</a> "
+        "&mdash; or take <b>Shelf</b>, $10/month for 1,000 pages, batch conversion of a whole shelf "
+        f"and delivery to your Kindle: <a href='{SHELF_URL}'>subscribe</a>.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
 
 def calibre_convert(raw: bytes) -> bytes | None:
@@ -326,6 +330,7 @@ USB, or open it in Apple Books, Kobo, KOReader or PocketBook.</p>
 
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
+  <a href="/shelf">Shelf: $10/mo, 1,000 pages a month</a>
   <a href="/guides">Guides</a>
   <a href="/guides/send-pdf-to-kindle">Getting a PDF onto a Kindle</a>
   <a href="/guides/pdf-to-epub-vs-calibre">vs Calibre</a>
@@ -339,6 +344,28 @@ USB, or open it in Apple Books, Kobo, KOReader or PocketBook.</p>
 </div><script>
 const drop=document.getElementById('drop'),fi=document.getElementById('file'),
  msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
+// ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
+const PITCH='Too big for the free converter (200MB / 500 pages). Two ways: '
+ +'<a href="mailto:krishavrajsingh@gmail.com?subject=PDF%20to%20EPUB">email it to me</a> '
+ +'and I will convert it by hand, or take <b>Shelf</b>, $10/month for 1,000 pages, batch '
+ +'conversion of a whole shelf and delivery to your Kindle: <a href="__SHELF__">subscribe</a>.'
+ +'<br><br><input id="leadmail" type="email" placeholder="your email, I will convert it by hand" '
+ +'style="max-width:340px;background:#0b0e14;border:1px solid #242a36;color:#eef1f7;'
+ +'border-radius:10px;padding:10px 12px;font:inherit;font-size:14px"> '
+ +'<button id="leadbtn" style="margin-top:8px;background:#8b6cff;color:#fff;border:0;'
+ +'border-radius:10px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
+ +'Send me the PDF</button>';
+document.addEventListener('click',async(e)=>{
+ if(e.target.id!=='leadbtn')return;
+ const em=document.getElementById('leadmail');
+ if(!em||!em.value)return;
+ e.target.disabled=true;
+ const fd=new FormData();fd.append('email',em.value);fd.append('reason','cap');
+ const r=await fetch('/lead',{method:'POST',body:fd});
+ msg.className='ok';msg.textContent=r.ok
+  ?'Got it. Email the PDF to krishavrajsingh@gmail.com and I will convert it by hand.'
+  :'Put an email in the box first.';
+ e.target.disabled=false;});
 drop.onclick=()=>fi.click();
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
@@ -357,7 +384,8 @@ go.onclick=async()=>{
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
   msg.className='ok';msg.textContent='Done. EPUB downloaded.'}
- catch(e){msg.className='err';msg.textContent=e.message}
+ catch(e){msg.className='err';msg.textContent=e.message;
+  if(/^413/.test(e.message))msg.innerHTML=PITCH}
  go.disabled=false};
 smp.onclick=async()=>{
  msg.className='';msg.textContent='Converting the sample...';smp.disabled=true;go.disabled=true;
@@ -406,6 +434,7 @@ def _page() -> str:
             .replace("__EPARAS__", str(pr["eparas"]))
             .replace("__TOCN__", str(len(pr["toc"])))
             .replace("__TOC__", toc)
+            .replace("__SHELF__", SHELF_URL)
             .replace("__FIRST__", html.escape(pr["first"])))
 
 
@@ -462,7 +491,8 @@ go.onclick=async()=>{
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='book.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open the EPUB and check the chapter list.'}
- catch(e){msg.className='err';msg.textContent=e.message}
+ catch(e){msg.className='err';msg.textContent=e.message;
+  if(/^413/.test(e.message))msg.innerHTML=PITCH}
  go.disabled=false};
 </script></body></html>"""
 
@@ -523,7 +553,7 @@ def guide(slug: str):
 
 @app.get("/sitemap.xml")
 def sitemap():
-    urls = ["/", "/scan", "/guides"] + ["/guides/" + s for s in GUIDES]
+    urls = ["/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
     body = "".join(f"<url><loc>https://epub.ftak.net{u}</loc></url>" for u in urls)
     return Response(f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
                     media_type="application/xml")
@@ -613,6 +643,71 @@ around it.</p>
 </div></body></html>""")
 
 
+@app.post("/lead")
+async def lead(request: Request, email: str = Form(""), pages: int = Form(0), reason: str = Form("")):
+    # ponytail: the cap rejection is the moment of intent, so take the email right there
+    e = email.strip()[:120]
+    if not e:
+        return JSONResponse({"ok": False}, status_code=400)
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ok": False, "pages": pages,
+                       "in": 0, "out": 0, "err": "lead:" + reason[:60], "ref": ref_of(request),
+                       "email": e, "ua": ua_of(request)[:120]})
+    try:
+        with LOG.open("a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+    print(line, flush=True)
+    return {"ok": True}
+
+
+@app.get("/shelf", response_class=HTMLResponse)
+def shelf(request: Request):
+    # ponytail: the paid tier needs a linkable page, otherwise only the founder can point people at it
+    ref = ref_of(request)
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
+                       "ref": "shelf" + ("|" + ref if ref else ""), "ua": ua_of(request)[:120]})
+    try:
+        with LOG.open("a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+    print(line, flush=True)
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shelf - pdf2epub</title>
+<meta name="description" content="Shelf: $10/month for 1,000 scanned pages, batch conversion of a whole shelf, and the finished EPUB delivered to your Kindle.">
+<link rel="canonical" href="https://epub.ftak.net/shelf">
+<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff;--ok:#5fd39a}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);
+font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
+.wrap{{max-width:640px;margin:0 auto;padding:56px 20px}}
+h1{{font-size:30px;letter-spacing:-.6px;margin:0 0 10px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:#a98fff}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px}}
+.btn{{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;border-radius:11px;
+padding:13px 20px;font-weight:650;margin-top:8px}}
+ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}</style></head>
+<body><div class="wrap">
+<h1>Shelf</h1>
+<p>The free converter stays free. Shelf is for the people who have a shelf.</p>
+<div class="card">
+<p><b>$10 a month, included</b></p>
+<ul>
+<li>1,000 scanned pages a month. No credits, no page maths, no account limits.</li>
+<li>Batch: drop 50 scans, get 50 EPUBs back.</li>
+<li>Repair: re-run and fix a conversion as many times as you want.</li>
+<li>Send-to-Kindle delivery: the finished EPUB goes to your Kindle address.</li>
+<li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
+</ul>
+<a class="btn" href="{SHELF_URL}">Subscribe - $10/month</a>
+</div>
+<p>Not ready to pay? <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">Email me the PDF</a>
+and I will convert it by hand, usually the same day.</p>
+<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>
+</div></body></html>""")
+
+
 @app.get("/sample.pdf")
 def sample_pdf():
     return Response(_sample_pdf(), media_type="application/pdf",
@@ -644,6 +739,7 @@ def privacy():
 def stats():
     # ponytail: totals from log file, no DB/dashboard lib
     ok = fail = pages = visits = ocr = scan_fail = emails = 0
+    leads = cap_rejects = checkouts = 0
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
     uas: dict[str, int] = {}
@@ -658,6 +754,7 @@ def stats():
             ua = r.get("ua") or ""
             if r.get("visit"):
                 visits += 1
+                checkouts += 1 if r.get("checkout_id") else 0  # ponytail: polar lands on /thanks with the id
                 key = r.get("ref") or "direct"
                 refs[key] = refs.get(key, 0) + 1
                 if not ua:
@@ -676,6 +773,8 @@ def stats():
             ocr += bool(r.get("ok")) and c == "ocr"
             scan_fail += (not r.get("ok")) and c.startswith("scan")
             emails += 1 if r.get("email") else 0
+            leads += 1 if c.startswith("lead") else 0
+            cap_rejects += 1 if c in ("too many pages", "too big") else 0
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
                 key = (r.get("ref") or "direct").split("|")[0] or "direct"
                 ok_by_ref[key] = ok_by_ref.get(key, 0) + 1
@@ -689,7 +788,8 @@ def stats():
     top_ok = dict(sorted(ok_by_ref.items(), key=lambda kv: -kv[1])[:10])
     return {"visits": visits, "refs": top, "conversions_ok": ok, "ocr_ok": ocr,
             "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
-            "emails_captured": emails,
+            "emails_captured": emails, "leads": leads, "cap_rejects": cap_rejects,
+            "checkouts": checkouts,
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,

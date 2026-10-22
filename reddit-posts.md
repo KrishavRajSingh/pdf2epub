@@ -195,7 +195,8 @@ Railway paused all builds platform-wide (status.railway.com, Major Outage 17:18 
 is committed but not live. Live site still runs the build that breaks paragraphs per printed line, so
 the offer leads with **manual conversion**, not the site.
 
-- Polar: "pdf2epub Shelf" $10/mo, link `https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgVW4bGVXJKz98tp2q8PTs`
+- Polar: "pdf2epub Shelf" $10/mo, link `https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs`
+  - ponytail: the W-upgVW4 variant of this id is a 404 (verified 2026-10-22). YW4 is the live one.
   (success URL -> /thanks, logs checkout_id). India is fine on Polar (Connect Express), Stripe standalone is invite-only.
 - Offer posted (email in, EPUB out, free, by hand): r/ebooks `1x39d2e`, r/InternetArchive `1wwtsj5` (the
   digitiser crowd: early 1900s Shakespeare collection), X `2112630460589478016`.

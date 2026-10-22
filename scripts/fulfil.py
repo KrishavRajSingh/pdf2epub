@@ -118,8 +118,9 @@ def process_once():
                     + ".\n\nSend it to your Kindle with the subject line \"convert\", or copy it over USB. "
                     "Nothing is stored, the file dies with this request.\n\n"
                     "If you have more than the one book, I am opening 10 spots at $10/month for a "
-                    "1,000 page batch with batch conversion and direct delivery to your Kindle. "
-                    "Worth it, or one book at a time is enough?\n\nKrishav")
+                    "1,000 page batch with batch conversion and direct delivery to your Kindle: "
+                    "https://epub.ftak.net/shelf (subscribe with a card) or reply to this email "
+                    "and I will set it up by hand. Worth it, or one book at a time is enough?\n\nKrishav")
             gws("gmail", "+send", "--to", email, "--subject", f"Your EPUB: {title}", "--body", body,
                 "-a", str(out))
             log_lead({"email": email, "subject": subject[:120], "file": fn, "kb": len(epub) // 1024,

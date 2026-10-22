@@ -70,6 +70,20 @@ def main():
     s = client.get("/sample.pdf")
     assert s.status_code == 200 and s.content[:4] == b"%PDF", "sample.pdf broken"
 
+    # the money path: a shelf page to point at, a live checkout link in it, and a
+    # lead captured at the moment the free converter refuses a big file
+    shelf = client.get("/shelf")
+    assert shelf.status_code == 200, "no /shelf page to point people at"
+    assert "buy.polar.sh" in shelf.text, "shelf page has no checkout link"
+    land = client.get("/").text
+    assert "/shelf" in land, "landing page does not mention the paid tier"
+    assert client.post("/lead", data={"email": "", "reason": "cap"}).status_code == 400, "lead takes no email"
+    assert client.post("/lead", data={"email": "r@e.com", "reason": "cap"}).status_code == 200
+    st2 = client.get("/stats").json()
+    assert st2["leads"] == 1, st2
+    client.get("/thanks?checkout_id=polar_c_TEST")
+    assert client.get("/stats").json()["checkouts"] == 1, "checkout not counted"
+
     # control chars in the PDF text must not 500 (lxml refuses them in XML)
     ctrl = pymupdf.open()
     cp = ctrl.new_page()
