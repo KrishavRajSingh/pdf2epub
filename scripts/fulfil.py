@@ -17,7 +17,9 @@ WORK.mkdir(exist_ok=True)
 LEADS = ROOT / "growth" / "leads.csv"
 STATE = ROOT / "growth" / ".fulfil-state.json"  # not /tmp: a reboot must not re-send old EPUBs
 
-MAIL = "krishavrajsingh@gmail.com"
+import app as pdf2epub  # ponytail: the checkout link lives here, and it must not drift
+
+MAIL = pdf2epub.SHELF_MAIL
 
 
 def gws(*args, **kw):
@@ -55,20 +57,23 @@ def find_pdfs(msg):
     return out
 
 
-def convert(raw: bytes, title: str) -> bytes:
+def convert(raw: bytes, title: str) -> tuple[bytes, bool]:
+    """Return the epub and whether the text came from OCR."""
     import pymupdf
     import app as pdf2epub
     doc = pymupdf.open(stream=raw, filetype="pdf")
     blocks = list(pdf2epub._blocks(doc))
     if blocks:
         chapters = pdf2epub._structure(blocks, doc)
+        was_ocr = False
     else:
         pages = pdf2epub.ocr_doc(doc) or []
         chapters = pdf2epub.ocr_chapters(pages)
+        was_ocr = True
     doc.close()
     if not chapters:
         raise RuntimeError("nothing readable in that pdf")
-    return pdf2epub.build_epub(chapters, title or "book", "")
+    return pdf2epub.build_epub(chapters, title or "book", ""), was_ocr
 
 
 def log_lead(row):
@@ -131,20 +136,20 @@ def process_once():
             src = WORK / f"{mid}.pdf"
             src.write_bytes(raw)
             title = re.sub(r"\.pdf$", "", fn, flags=re.I)
-            epub = convert(raw, title)
+            epub, was_ocr = convert(raw, title)
             out = WORK / f"{mid}.epub"
             out.write_bytes(epub)
             body = (f"Here is {title}.epub.\n\n"
                     f"What the converter did: {len(epub)//1024} KB, paragraphs rejoined, running headers and "
                     f"page numbers removed, headings turned into chapters with a table of contents"
-                    + (", text read with OCR because the file is a scan" if not pdf2epub._blocks else "")
+                    + (", text read with OCR because the file is a scan" if was_ocr else "")
                     + ".\n\nSend it to your Kindle with the subject line \"convert\", or copy it over USB. "
                     "Nothing is stored, the file dies with this request.\n\n"
                     "If you are working through a shelf rather than one book, the free converter stops at "
                     "500 pages per file, and you will hit that ceiling on the bigger ones. Shelf is $10 a "
                     "month for 1,000 pages of your own, no per-file ceiling, batch conversion of a whole "
                     "shelf, and the EPUB sent straight to your Kindle: "
-                    "https://epub.ftak.net/shelf (subscribe with a card) or reply to this email "
+                    f"{pdf2epub.SHELF_URL} (subscribe with a card) or reply to this email "
                     "and I will set it up by hand. Worth it, or one book at a time is enough?\n\nKrishav")
             gws("gmail", "+send", "--to", email, "--subject", f"Your EPUB: {title}", "--body", body,
                 "-a", str(out))

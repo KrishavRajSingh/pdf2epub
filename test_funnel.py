@@ -132,7 +132,29 @@ def main():
     again = client.get(f"/thanks?checkout_id={cid}").text
     assert re.search(r"\?k=([0-9A-Za-z_-]+)</code>", again).group(1) == key, "key changed on refresh"
 
-    print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap")
+    # the fulfilment email is the highest intent email in the system and it runs on the mac,
+    # not on railway. it must point at a link that works and it must not crash.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fulfil", Path(__file__).parent / "scripts" / "fulfil.py")
+    fulfil = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fulfil)
+    assert fulfil.pdf2epub.SHELF_URL in fulfil.pdf2epub.SHELF_URL, "no checkout url"
+    epub, was_ocr = fulfil.convert(make_pdf(), "Test Book")
+    assert len(epub) > 0 and was_ocr is False, (len(epub), was_ocr)
+    # a scanned pdf must report that it was OCR'd, so the email can warn about the typos
+    src = pymupdf.open()
+    for i in range(2):
+        p = src.new_page(width=1240, height=1754)
+        p.insert_text((100, 200), f"Scanned chapter {i}", fontsize=44)
+    imgpdf = pymupdf.open()
+    for i in range(2):
+        pix = src[i].get_pixmap(dpi=150)
+        pg = imgpdf.new_page(width=1240, height=1754)
+        pg.insert_image(pg.rect, stream=pix.tobytes("png"))
+    epub2, was_ocr2 = fulfil.convert(imgpdf.tobytes(), "Scanned Book")
+    assert was_ocr2 is True, "a scanned pdf must be reported as OCR"
+
+    print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 
 
 if __name__ == "__main__":
