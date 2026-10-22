@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -28,8 +29,56 @@ OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; tri
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 SHELF_URL = "https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs"  # ponytail: the W-upgVW4 variant in reddit-posts.md is a 404, this one checks out
 SHELF_MAIL = "krishavrajsingh@gmail.com"
+# ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
+# the key is a secret string we mail them, they put it in the url as ?k=KEY
+SHELF_KEYS = Path(os.environ.get("LOG_DIR", ".")) / "shelf-keys.txt"  # one key per line
+SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 500, which is what a textbook is
+SHELF_MAX_MB = 500
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
+
+
+def shelf_key(request: Request) -> str:
+    """Return the subscriber's key if the request carries a valid one.
+
+    ponytail: the key rides in the url, so check the query string and the referer, because the
+    form posts to /convert + location.search and some clients drop the query on the post.
+    """
+    k = (request.query_params.get("k") or "").strip()
+    if not k:
+        m = re.search(r"[?&]k=([0-9A-Za-z_-]{6,64})", (request.headers.get("referer") or "")[:120])
+        k = m.group(1) if m else ""
+    if not k:
+        return ""
+    try:
+        keys = {ln.split()[-1] for ln in SHELF_KEYS.read_text().splitlines() if ln.split()}
+    except OSError:
+        return ""
+    return k if k in keys else ""
+
+
+def issue_key(checkout_id: str) -> str:
+    """Mint a key for a paid checkout, once per checkout id.
+
+    ponytail: no accounts, no db, no polar api call. the key is a random string in a file on the
+    volume, and the checkout id is remembered so a refresh of the page does not mint a second one.
+    """
+    try:
+        done = SHELF_KEYS.read_text()
+    except OSError:
+        done = ""
+    m = re.search(rf"^{re.escape(checkout_id)}\s+(\S+)$", done, re.M)
+    if m:
+        return m.group(1)
+    key = secrets.token_urlsafe(15)
+    try:
+        with SHELF_KEYS.open("a") as fh:
+            fh.write(f"{checkout_id} {key}\n")
+    except OSError:
+        pass
+    print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "key_issued": checkout_id,
+                      "ua": ""}), flush=True)
+    return key
 
 def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = "",
         request: Request = None):
@@ -300,7 +349,7 @@ Free, no signup, nothing kept.</p>
       <input id="title" placeholder="Title (optional)" maxlength="120">
       <input id="author" placeholder="Author (optional)" maxlength="120">
     </div>
-    <div class="row"><input id="email" placeholder="Email (optional) - paid tier launch and big files only"></div>
+    <div class="row"><input id="email" placeholder="Email (optional) - for big files and the paid tier"></div>
     <button class="go" id="go">Convert to EPUB</button>
     <button class="ghost-btn" id="sample">Try it with a sample PDF</button>
     <div id="msg"></div>
@@ -619,29 +668,42 @@ def thanks(request: Request):
     except OSError:
         pass
     print(line, flush=True)
-    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+    # ponytail: hand the subscriber their key here. polar sends ?checkout_id=polar_c_xxx, so a
+    # junk request gets no key. the key is what lifts the per-file ceiling, no account needed.
+    key = ""
+    if re.match(r"^polar_c_[0-9A-Za-z]{20,80}$", cid or ""):
+        key = issue_key(cid)
+    key_html = ""
+    if key:
+        key_html = (f'<div class="card"><p><b>Your Shelf key</b></p>'
+            f'<p>Put this on the end of the converter link and your uploads get the paid limits '
+            f'(2,000 pages per file, 500MB):</p>'
+            f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
+            f'<p>No account, no password. If you lose it, reply to the email I sent you and I will '
+            f'send it again.</p></div>')
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Thanks - pdf2epub Shelf</title>
-<style>:root{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
-.wrap{max-width:620px;margin:0 auto;padding:56px 20px}
-h1{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}p{color:var(--dim);margin:0 0 14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}
-b{color:var(--txt)}a{color:var(--acc2)}code{font-family:ui-monospace,Menlo,monospace;font-size:14px}</style></head>
+<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
+.wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
+h1{{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:var(--acc2)}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}</style></head>
 <body><div class="wrap">
 <h1>You're in.</h1>
-<p>Shelf is $10 a month for 1,000 scanned pages, batch conversion of a whole shelf, and the finished
-EPUB delivered to your Kindle.</p>
+<p>Shelf is $10 a month for 1,000 pages of your own, no per-file ceiling, batch conversion of a
+whole shelf, and the finished EPUB delivered to your Kindle.</p>
+{key_html}
 <div class="card">
 <p><b>What happens next</b></p>
 <p>Send me the PDF (or the scans) and I will convert it and email the EPUB back, usually the same day.
 If it is a scan it gets OCR and the text will have the usual OCR typos, and I will say so.</p>
-<p>Email it to <code>krishavrajsingh@gmail.com</code> with the book title in the subject line.</p>
+<p>Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line.</p>
 <p>Nothing is stored. The file is processed in memory and deleted after the download, same as the
 <a href="/">free converter</a>.</p>
 </div>
-<p>Questions about the plan, or a file that is over 200MB or 500 pages? Same address, I will work
-around it.</p>
+<p>Questions about the plan, or a file that is over 500MB? Same address, I will work around it.</p>
 </div></body></html>""")
 
 
@@ -696,14 +758,19 @@ ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}</style></head>
 <div class="card">
 <p><b>$10 a month, included</b></p>
 <ul>
-<li>1,000 scanned pages a month. No credits, no page maths, no account limits.</li>
-<li>Batch: drop 50 scans, get 50 EPUBs back.</li>
+<li>1,000 pages a month of your own. No credits, no page maths.</li>
+<li><b>No per-file ceiling.</b> The free converter stops at 500 pages, which is where a textbook
+sits. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
+<li>Batch: send me a shelf of PDFs, get the EPUBs back.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
 <li>Send-to-Kindle delivery: the finished EPUB goes to your Kindle address.</li>
 <li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
 </ul>
 <a class="btn" href="{SHELF_URL}">Subscribe - $10/month</a>
 </div>
+<p><b>What you get when you subscribe:</b> a private key for your account. Put it on the end of
+the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
+limits. No account, no password, nothing to set up.</p>
 <p>Not ready to pay? <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">Email me the PDF</a>
 and I will convert it by hand, usually the same day.</p>
 <p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>
@@ -870,11 +937,15 @@ def _structure(blocks, doc):
 async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""), email: str = Form("")):
     throttle(request)
     ref = ref_of(request)
+    key = shelf_key(request)  # ponytail: a paying subscriber gets a bigger ceiling, no account needed
+    max_pages = SHELF_MAX_PAGES if key else MAX_PAGES
+    max_mb = SHELF_MAX_MB if key else MAX_MB
     raw = await f.read()
     kb_in = len(raw) // 1024
-    if len(raw) > MAX_MB * 1024 * 1024:
+    if len(raw) > max_mb * 1024 * 1024:
         log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {MAX_MB}MB in v1 - email it to krishavrajsingh@gmail.com and I'll convert it by hand")
+        raise HTTPException(413, f"over {max_mb}MB - email it to {SHELF_MAIL} and I'll convert it by hand"
+            if not key else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I'll do it")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
     try:
@@ -886,11 +957,12 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         doc.close()
         log(False, 0, kb_in, 0, "encrypted pdf", ref, request=request)
         raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
-    if len(doc) > MAX_PAGES:
+    if len(doc) > max_pages:
         n0 = len(doc)
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {MAX_PAGES} pages in v1 - email it to krishavrajsingh@gmail.com and I'll convert it by hand")
+        raise HTTPException(413, f"over {max_pages} pages - email it to {SHELF_MAIL} and I'll convert it by hand"
+            if not key else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
 
     blocks = list(_blocks(doc))
     npages = len(doc)

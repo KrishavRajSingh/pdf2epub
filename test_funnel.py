@@ -109,7 +109,30 @@ def main():
     assert 429 in codes, f"throttle never fired: {codes}"
     assert codes[:30].count(200) == 30, f"throttle cut a legitimate burst too early: {codes}"
 
-    print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves")
+    # the paid tier: a key from a real checkout lifts the per-file ceiling, a junk one does not
+    big = pymupdf.open()
+    for i in range(600):  # over the 500-page free cap, under the 2000-page paid cap
+        big.new_page().insert_text((72, 100), f"page {i}", fontsize=11)
+    braw = big.tobytes()
+    big.close()
+
+    def convert_with(q):
+        return client.post("/convert" + q, files={"f": ("b.pdf", braw, "application/pdf")}).status_code
+
+    assert convert_with("") == 413, "free tier should stop a 600 page pdf"
+    assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
+    junk = client.get("/thanks?checkout_id=nonsense").text
+    assert "Shelf key" not in junk, "a junk checkout id must not mint a key"
+    cid = "polar_c_OKg9x4z0oQeMJ1zTeKMr1UAhmb5VGlVV74Byn0xg8y8"
+    page = client.get(f"/thanks?checkout_id={cid}").text
+    assert "Shelf key" in page, "a real checkout id must mint a key"
+    key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
+    assert convert_with(f"?k={key}") == 200, "a paid key must lift the 500 page cap"
+    # same checkout must not mint a second key on a page refresh
+    again = client.get(f"/thanks?checkout_id={cid}").text
+    assert re.search(r"\?k=([0-9A-Za-z_-]+)</code>", again).group(1) == key, "key changed on refresh"
+
+    print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap")
 
 
 if __name__ == "__main__":

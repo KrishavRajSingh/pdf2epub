@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 conversions.log
 server.log
+growth/shelf-keys.txt
+growth/.key-emails-sent.txt
+growth/.leads-seen.txt
