@@ -52,11 +52,40 @@ def mail_to(to: str, subject: str, body: str):
     gws("gmail", "+send", "--to", to, "--subject", subject, "--body", body)
 
 
+def push_key(key: str):
+    """Put the key where the live site reads it: the railway volume at /data.
+
+    ponytail: the site on railway reads /data/shelf-keys.txt, this script runs on the mac.
+    without this the key is minted in a file nobody serves.
+    """
+    local = ROOT / "growth" / "shelf-keys.txt"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    with local.open("a") as fh:
+        fh.write(f"manual {key}\n")
+    # the remote file is the one the site reads, so merge into it and upload the whole thing
+    tmp = ROOT / "growth" / ".shelf-keys.download"
+    subprocess.run(["railway", "service", "files", "download", "/data/shelf-keys.txt", str(tmp)],
+                   capture_output=True, text=True)
+    body = tmp.read_text() if tmp.exists() else ""
+    tmp.unlink(missing_ok=True)
+    if key in body:
+        return key
+    merged = (body.rstrip("\n") + f"\nmanual {key}\n") if body else f"manual {key}\n"
+    up = ROOT / "growth" / ".shelf-keys.upload"
+    up.write_text(merged)
+    r = subprocess.run(["railway", "service", "files", "upload", str(up), "/data/shelf-keys.txt",
+                        "--overwrite"], capture_output=True, text=True)
+    up.unlink(missing_ok=True)
+    if r.returncode != 0:
+        print(f"  warning: could not push key to the volume: {r.stderr[-160:]}")
+        print("  the key is in growth/shelf-keys.txt, copy it to /data/shelf-keys.txt by hand")
+    return key
+
+
 def grant(email: str):
     """Mint a key, email it, and print it."""
     key = pdf2epub.secrets.token_urlsafe(15)
-    with pdf2epub.SHELF_KEYS.open("a") as fh:
-        fh.write(f"manual {key}\n")
+    push_key(key)
     link = f"{SITE}/?k={key}"
     mail_to(email, "Your pdf2epub Shelf key", f"""Here is your Shelf key.
 
@@ -76,20 +105,30 @@ Krishav""")
 
 
 def pull_leads() -> list:
-    """Read lead lines off the railway log. the log file on the volume is the real source,
-    but the stdout copy is what we can reach from here."""
-    out = subprocess.run(["railway", "logs", "--service", "pdf2epub", "--lines", "2000"],
-                         capture_output=True, text=True)
-    if out.returncode != 0:
-        return []
+    """Read lead lines off the live log.
+
+    ponytail: the log file on the railway volume is the source of truth and it has every line
+    in it, so download it rather than scraping stdout, which only holds the recent tail.
+    """
+    tmp = ROOT / "growth" / ".conversions.download"
+    r = subprocess.run(["railway", "service", "files", "download", "/data/conversions.log", str(tmp)],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not tmp.exists():
+        # fall back to stdout when the download is not possible
+        out = subprocess.run(["railway", "logs", "--service", "pdf2epub", "--lines", "2000"],
+                             capture_output=True, text=True)
+        text = out.stdout
+    else:
+        text = tmp.read_text(errors="replace")
+        tmp.unlink(missing_ok=True)
     leads = []
-    for m in re.finditer(r'\{[^\n]*"err":\s*"lead:[^"]*"[^\n]*\}', out.stdout):
+    for m in re.finditer(r'\{[^\n]*"err":\s*"lead:[^"]*"[^\n]*\}', text):
         try:
-            r = json.loads(m.group(0))
+            r2 = json.loads(m.group(0))
         except ValueError:
             continue
-        if r.get("email"):
-            leads.append(r)
+        if r2.get("email"):
+            leads.append(r2)
     return leads
 
 
