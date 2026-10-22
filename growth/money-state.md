@@ -76,3 +76,48 @@ difference is the output quality (real chapters, real paragraphs).
 The free converter stays free and un-walled (see `PRODUCT.md`). The pitch appears only where the
 free path has already failed the user: the cap rejection, the fulfilment email, and `/shelf`.
 Never a signup, never a paywall, never a modal.
+
+## The product decision (2026-10-22)
+
+**Free stays at 500 pages per file. On purpose.** The 7 cap rejections were books of 528–570
+pages, just over the line. Raising the free cap to 600 would convert all 7 and let the one buyer
+we have convert all 68 of their books free, forever, and never pay for anything. **One book free,
+a shelf paid** is the only line that sells.
+
+**Shelf is $10/mo for 1,000 pages, no per-file ceiling.** The ceiling is the product: the free
+tier stops at 500 pages, which is exactly where a textbook sits. Shelf goes to 2,000 pages per
+file and 500MB, so the big ones go through. Priced at parity with convert2epub ($11 per 1,000
+OCR credits) but the buyer gets their 564-page books converted instead of doing it in Calibre
+themselves. Their time is the currency.
+
+**How a subscriber gets access: a key, not an account.** No accounts, no database, no signup:
+- Polar redirects to `/thanks?checkout_id=polar_c_xxx`
+- a real checkout id mints a key, one key per checkout, written to `shelf-keys.txt` on the volume
+- the key goes in the url: `epub.ftak.net/?k=KEY`, and it lifts the ceiling on `/convert`
+- a junk checkout id mints nothing; a junk key lifts nothing
+
+**The key has to reach the buyer, or they have paid for nothing.** Two paths, both live:
+- `/thanks` shows the key on the page
+- `scripts/keys.py grant <email>` emails it (verified end-to-end: mail sent, body correct)
+
+**A lead has to be chased.** Someone who types an email into the cap-rejection box is a buyer we
+would otherwise never reach. `scripts/keys.py leads` pulls lead lines off the railway log and
+emails them an offer; `scripts/keys.py watch` runs it every 5 minutes. Run it as a background job.
+
+### What is still not true
+
+- **Batch conversion is not built.** `/convert` takes one file. The offer says "send me a shelf
+  and I will convert it" — that path is the manual one (`scripts/fulfil.py`), which is real, but
+  it is not a product feature. Do not sell batch until `/convert` takes many files.
+- **Kindle delivery is not built.** The offer says the EPUB is sent to the reader's Kindle
+  address. Today the fulfilment email says "send it to your Kindle with the subject line convert",
+  which is the manual instruction. Either build the delivery or soften the wording.
+- **1,000 pages a month is not metered.** The key lifts the ceiling; nothing counts pages. Until
+  there is a counter, honour it by hand: `growth/leads.csv` plus the conversion log.
+
+### The channel that works, and it is not Reddit
+
+deepculture issue #243 put epub.ftak.net in the Bonus slot and produced 68 conversions in 32
+minutes from one reader. That slot is sold (Classified Ad, see passionfroot.me/deepculture) and it
+is repeatable for the cost of one slot. **The next issue should link `/shelf`, not `/`.** Reddit
+posts got 1 and 0 upvotes; the HN post got 875 visits and 0 conversions.
