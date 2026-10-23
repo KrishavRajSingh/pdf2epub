@@ -7,6 +7,7 @@ from app import _blocks, _structure, _span_text, build_epub
 def make_pdf() -> bytes:
     doc = pymupdf.open()
     p = doc.new_page(width=612, height=792)
+    p.insert_text((72, 20), "1 Test Book", fontsize=9)  # running head, differs per page
     p.insert_text((72, 72), "Chapter 1", fontsize=11)  # body-font heading, the Palmer case
     for y in range(110, 620, 20):
         p.insert_text((72, y), "This is body prose that belongs in the paragraph flow of the chapter.",
@@ -14,10 +15,11 @@ def make_pdf() -> bytes:
     p.insert_text((72, 700), "1 A footnote about the sources and the method used here.",
                   fontsize=8)
     p.insert_text((72, 716), "2 Another note, second in the page order.", fontsize=8)
-    p.insert_text((72, 770), "Downloaded from https://www.cambridge.org/core. University, on "
-                  "14 Apr 2020, subject to the Cambridge Core terms of use, available at "
-                  "https://www.cambridge.org/core/terms.", fontsize=6)
-    doc.new_page()  # second page: a footer seen once is not a repeated running head
+    p.insert_text((72, 770), "terms of use, available at https:/www.cambridge.org/core/terms. "
+                  "Downloaded from https:/www.cambridge.org/core. University, on 14 Apr 2020.",
+                  fontsize=6)
+    q = doc.new_page()  # second page: a footer seen once is not a repeated running head
+    q.insert_text((72, 20), "2 Test Book", fontsize=9)
     return doc.tobytes()
 
 
@@ -36,6 +38,7 @@ def main():
     assert kinds.index("fn") == len(kinds) - 2, f"notes not at chapter end: {kinds}"
     assert all("footnote about" not in t for k, t in ch if k != "fn"), "note leaked into prose"
     assert all("Downloaded from" not in t for k, t in ch), "publisher footer leaked into prose"
+    assert all("Test Book" not in t for k, t in ch), "running head leaked into prose"
 
     data = build_epub(chapters, "T", "A")
     assert data[:2] == b"PK", "not an epub zip"

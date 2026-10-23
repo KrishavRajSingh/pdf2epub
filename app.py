@@ -939,7 +939,8 @@ def _structure(blocks, doc):
                            r"bibliography|references|appendix|index)\b[\s\dIVXLC.:-]*$", re.I)
     # ponytail: publisher page furniture changes per page (DOI, download date), so the repeated
     # header/footer counter never catches it; "Downloaded from <url>" is the common watermark.
-    boiler = re.compile(r"^downloaded from\s+https?://|^https?://doi\.org/", re.I)
+    # Cambridge puts the "terms of use" line first in the same block, so match it anywhere.
+    boiler = re.compile(r"downloaded from\s+https?:/{1,2}|^https?://doi\.org/", re.I)
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -958,6 +959,10 @@ def _structure(blocks, doc):
     for pno, y, sz, t in blocks:
         if t in banned or boiler.search(t) or re.fullmatch(r"[\d\s.\-–—]+", t):
             continue  # ponytail: page numbers/running heads dropped, no config
+        # ponytail: a running head carries its page number, so the text differs on every page
+        # and the repeated-header counter misses it; it sits at the top edge in smaller type.
+        if y < 60 and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
+            continue
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
         # / superscript-marker check if that shows up in real books.
