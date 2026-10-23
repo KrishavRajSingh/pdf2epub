@@ -98,13 +98,14 @@ def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str =
 
 def ref_of(request: Request) -> str:
     # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
-    s = request.query_params.get("s", "")
-    r = (request.headers.get("referer") or "")[:80]
+    raw = request.headers.get("referer") or ""
+    s = request.query_params.get("s", "") or request.query_params.get("utm_source", "")
     if not s:
-        # ponytail: the tag lives on the landing page url, the convert POST carries it in referer
-        m = re.search(r"[?&]s=([^&#]+)", r)
+        # ponytail: newsletter links carry utm_source, and the convert POST keeps the query
+        m = re.search(r"[?&](?:s|utm_source)=([^&#]+)", raw)
         if m:
             s = m.group(1)
+    r = raw[:80]
     return f"{s}|{r}" if s or r else ""
 
 BOT_UA = re.compile(r"bot|crawl|spider|slurp|curl|wget|python-requests|httpclient|scrapy|"
@@ -824,22 +825,27 @@ ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}</style></head>
 <body><div class="wrap">
 <h1>Shelf</h1>
 <p>The free converter stays free. Shelf is for the people who have a shelf.</p>
+<p>One reader put 68 books through the free converter in 32 minutes. Seven of the uploads
+hit the 500-page cap. Shelf is for that reader.</p>
 <div class="card">
 <p><b>$10 a month, included</b></p>
 <ul>
-<li>1,000 pages a month of your own. No credits, no page maths.</li>
+<li>1,000 pages a month included. If you go over, email me and we will sort it out.</li>
 <li><b>No per-file ceiling.</b> The free converter stops at 500 pages, which is where a textbook
 sits. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
-<li>Batch: send me a shelf of PDFs, get the EPUBs back.</li>
+<li>Batch by email: send me a shelf of PDFs, get the EPUBs back.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
-<li>Send-to-Kindle delivery: the finished EPUB goes to your Kindle address.</li>
+<li>Send-to-Kindle help: send me the EPUB and your Kindle address, and I will send it on.</li>
 <li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
 </ul>
 <a class="btn" href="{SHELF_URL}">Subscribe - $10/month</a>
 </div>
-<p><b>What you get when you subscribe:</b> a private key for your account. Put it on the end of
+<p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
 limits. No account, no password, nothing to set up.</p>
+<p><b>Batch and Kindle delivery are email-assisted for now.</b> Send the files and your Kindle
+address to <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">{SHELF_MAIL}</a>, and I will
+send the EPUBs back, usually the same day.</p>
 <p>Not ready to pay? <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">Email me the PDF</a>
 and I will convert it by hand, usually the same day.</p>
 <p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>

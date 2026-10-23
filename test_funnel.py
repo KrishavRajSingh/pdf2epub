@@ -28,6 +28,16 @@ def make_pdf() -> bytes:
 
 
 def main():
+    from starlette.requests import Request
+
+    def req(qs="", ref=""):
+        return Request({"type": "http", "query_string": qs.encode(),
+                        "headers": [(b"referer", ref.encode())]})
+
+    assert pdf2epub.ref_of(req("", "https://epub.ftak.net/?utm_source=substack&utm_medium=email")) == \
+        "substack|https://epub.ftak.net/?utm_source=substack&utm_medium=email"
+    assert pdf2epub.ref_of(req("s=deepculture", "")) == "deepculture|"
+
     client = TestClient(pdf2epub.app)
     r = client.post("/convert", files={"f": ("sample.pdf", make_pdf(), "application/pdf")},
                     data={"title": "Sample Book", "email": "t@example.com"})
