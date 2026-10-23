@@ -214,15 +214,32 @@ def build_epub(chapters, title: str, author: str) -> bytes:
     if author:
         book.add_author(_clean(author)[:120])
     book.set_language("en")
-    items, toc = [], []
+    items, toc, fig_no = [], [], 0
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
         name = next((t for k, t in ch if k in ("h1", "h2")), f"ch{i+1}")
         c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
-        parts = [
-            f"<h1>{html.escape(_clean(t))}</h1>" if k == "h1" else f"<h2>{html.escape(_clean(t))}</h2>" if k == "h2" else f"<p>{html.escape(_clean(t))}</p>"
-            for k, t in ch if k != "fn"
-        ]
+        parts = []
+        for k, t in ch:
+            if k == "fn":
+                continue
+            if k == "img":
+                png, cap = t if isinstance(t, tuple) else (t, "")
+                fig_no += 1
+                fn = f"fig{fig_no}.png"
+                book.add_item(epub.EpubItem(uid=f"fig{fig_no}", file_name=fn,
+                                            media_type="image/png", content=png))
+                cap_html = (f'<figcaption style="font-size:.9em;margin-top:.4em">'
+                            f'{html.escape(_clean(cap))}</figcaption>') if cap else ""
+                parts.append(f'<figure style="text-align:center;margin:1.2em 0">'
+                             f'<img src="{fn}" style="max-width:100%;height:auto" '
+                             f'alt="Figure from the book"/>{cap_html}</figure>')
+            elif k == "h1":
+                parts.append(f"<h1>{html.escape(_clean(t))}</h1>")
+            elif k == "h2":
+                parts.append(f"<h2>{html.escape(_clean(t))}</h2>")
+            else:
+                parts.append(f"<p>{html.escape(_clean(t))}</p>")
         notes = [t for k, t in ch if k == "fn"]
         if notes:
             # ponytail: notes stay out of the prose and keep their page order; no back-links yet
@@ -381,6 +398,7 @@ Free, no signup, nothing kept.</p>
   <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
   <div class="fix"><span class="tag">headers</span><b>Headers and page numbers out</b></div>
   <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
+  <div class="fix"><span class="tag">figures</span><b>Maps and figures stay in text PDFs</b></div>
   <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
 </div>
 <p class="note-line">Then read it anywhere: send to Kindle by email with the subject "convert", copy it over
@@ -896,15 +914,123 @@ def _span_text(s):
     return t
 
 
+FIG_SCALE = 3  # 3x keeps 4pt map labels readable; this book's 23 figures add ~6MB
+CAPTION_RE = re.compile(r"^(map|figure|fig\.?|table|plate|chart|diagram)\b", re.I)
+
+
+def _body_size(doc):
+    """Dominant font size of long lines, estimated once for the whole document."""
+    sizes = []
+    for page in doc:
+        for b in page.get_text("dict")["blocks"]:
+            if b.get("type") != 0:
+                continue
+            for line in b.get("lines", []):
+                txt = "".join(s["text"] for s in line["spans"]).strip()
+                if len(txt) >= 40:
+                    sizes.append(max(s["size"] for s in line["spans"]))
+    return Counter(sizes).most_common(1)[0][0] if sizes else 0
+
+
+def _page_rect(page, rect):
+    """Map a text/drawing rect to the page's rendered orientation."""
+    return rect * page.rotation_matrix if page.rotation else rect
+
+
+def _figure_rect(page, blocks, body):
+    """Clip rect for a page that is mostly a figure, else None.
+
+    Maps in this book are vector drawings with the labels as tiny text blocks. The EPUB had no
+    images at all, so the map vanished and its labels leaked into the prose. Rendering the
+    region keeps the map and the labels in one picture.
+    """
+    area = page.rect.width * page.rect.height
+    rects = []
+    for info in page.get_image_info():
+        r = pymupdf.Rect(info["bbox"])
+        if (r.width * r.height) / area > 0.03:
+            rects.append(r)
+    drawings = page.get_drawings()
+    if len(drawings) >= 15:
+        rs = [d["rect"] for d in drawings]
+        u = pymupdf.Rect(min(r.x0 for r in rs), min(r.y0 for r in rs),
+                         max(r.x1 for r in rs), max(r.y1 for r in rs))
+        if (u.width * u.height) / area > 0.10:
+            rects.append(u)
+    if not rects:
+        return None
+    u = rects[0]
+    for r in rects[1:]:
+        u |= r
+    # ponytail: a full-page scan (cover, index) already has a text layer; rasterising it would
+    # hide the text, so leave those alone.
+    if (u.width * u.height) / area > 0.8:
+        return None
+    # A page of prose with an equation or a rule through it is not a figure. If body-size text
+    # sits inside the box, keep the text and skip the picture (math books hit this hard). Short
+    # map labels do not count; a paragraph does. The 9pt floor catches 9.5pt exercise text in
+    # books whose main body size is 10.5pt.
+    min_body = min(body * 0.95, 9.0) if body else 9.0
+    body_chars = 0
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        r = pymupdf.Rect(b["bbox"])
+        if not u.contains(pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)):
+            continue
+        for line in b.get("lines", []):
+            spans = line["spans"]
+            text = "".join(s["text"] for s in spans).strip()
+            if len(text) >= 10 and max(s["size"] for s in spans) >= min_body:
+                body_chars += len(text)
+    if body_chars >= 80:
+        return None
+    return u & page.mediabox
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
     ponytail: a visual line is not a paragraph. One wrapped paragraph came out as one
     <p> per line, which is exactly the "break paragraphs weird" complaint. PDF blocks
-    are the paragraph unit, so join inside the block.
+    are the paragraph unit, so join inside the block. Figure pages yield one extra block
+    with size -1 and a (PNG bytes, caption) tuple as text.
     """
+    body = _body_size(doc)
     for i, page in enumerate(doc):
-        for b in page.get_text("dict")["blocks"]:
+        raw = page.get_text("dict")["blocks"]
+        fig = _figure_rect(page, raw, body)
+        fig_page = _page_rect(page, fig) if fig else None
+        cap, cap_page = "", None
+        if fig:
+            # Put a "Map 4.1 ..." caption under its picture. PDF block order is not y-sorted,
+            # so without this the caption can land a paragraph after the map. Captions on
+            # landscape pages sit beside the figure in PDF space, so compare on the page.
+            for cb in raw:
+                if cb.get("type") != 0:
+                    continue
+                cr = pymupdf.Rect(cb["bbox"])
+                cr_page = _page_rect(page, cr)
+                if not (fig_page.y1 - 2 <= cr_page.y0 <= fig_page.y1 + 35):
+                    continue
+                lines = ["".join(_span_text(s) for s in line["spans"]).strip()
+                         for line in cb.get("lines", [])]
+                txt = _join([x for x in lines if x])
+                if CAPTION_RE.match(txt):
+                    cap, cap_page = txt, cr_page
+                    break
+        fig_done = False
+        for b in raw:
+            if fig and not fig_done and b["bbox"][1] > fig.y1:
+                pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
+                yield i, fig.y0, -1.0, (pm.tobytes("png"), cap)
+                fig_done = True
+            if fig:
+                r = pymupdf.Rect(b["bbox"])
+                center = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+                center = center * page.rotation_matrix if page.rotation else center
+                if fig_page.contains(center) or (cap_page and cap_page.contains(center)):
+                    continue  # labels and caption are baked into the figure or its figcaption
             if b.get("type") != 0:
                 continue
             lines, size = [], 0.0
@@ -917,6 +1043,9 @@ def _blocks(doc):
             if not lines:
                 continue
             yield i, b["bbox"][1], round(size, 1), _join(lines)
+        if fig and not fig_done:
+            pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
+            yield i, fig.y0, -1.0, (pm.tobytes("png"), cap)
 
 def _structure(blocks, doc):
     """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
@@ -924,7 +1053,7 @@ def _structure(blocks, doc):
     Footnote blocks (smaller type at the bottom of a page, starting with a marker) are moved
     to the end of the chapter they belong to, under a "Notes" block. Kept as ("fn", text).
     """
-    long = [sz for _, _, sz, t in blocks if len(t) > 40]
+    long = [sz for _, _, sz, t in blocks if sz > 0 and len(t) > 40]
     body = Counter(long).most_common(1)[0][0] if long else Counter(sz for _, _, sz, _ in blocks).most_common(1)[0][0]
     h1_cut = body * 1.3
     h2_cut = body * 1.12
@@ -957,6 +1086,9 @@ def _structure(blocks, doc):
             cur.clear()
         cur_notes.clear()
     for pno, y, sz, t in blocks:
+        if sz < 0:
+            cur.append(("img", t))
+            continue
         if t in banned or boiler.search(t) or re.fullmatch(r"[\d\s.\-–—]+", t):
             continue  # ponytail: page numbers/running heads dropped, no config
         # ponytail: a running head carries its page number, so the text differs on every page
