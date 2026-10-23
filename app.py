@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+import csv
 import html
 import json
 import os
@@ -26,6 +27,7 @@ MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise whe
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
 OCR_MAX_PAGES = 200
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
+SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 SHELF_URL = "https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs"  # ponytail: the W-upgVW4 variant in reddit-posts.md is a 404, this one checks out
 SHELF_MAIL = "krishavrajsingh@gmail.com"
@@ -162,22 +164,58 @@ def calibre_convert(raw: bytes) -> bytes | None:
     except Exception:
         return None
 
-def ocr_doc(doc) -> list[str] | None:
-    # ponytail: 300dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
+def _ocr_page(page):
+    """Render one page and return (text, ink coverage) from Tesseract's TSV output."""
+    try:
+        pix = page.get_pixmap(dpi=OCR_DPI)
+        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng", "tsv"],
+            input=pix.tobytes("png"), capture_output=True, timeout=60)
+    except Exception:
+        return "", 0.0
+    if r.returncode != 0:
+        return "", 0.0
+    lines = {}
+    ink = 0
+    for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t"):
+        if len(row) < 12 or row[0] != "5" or not row[11].strip():
+            continue
+        try:
+            left, top, width, height = int(row[6]), int(row[7]), int(row[8]), int(row[9])
+        except ValueError:
+            continue
+        lines.setdefault((row[2], row[3], row[4]), []).append((left, row[11].strip()))
+        ink += width * height
+    paras = [" ".join(t for _, t in sorted(v)) for _, v in
+             sorted(lines.items(), key=lambda kv: tuple(int(x) for x in kv[0]))]
+    cov = ink / (pix.width * pix.height) if pix.width and pix.height else 0.0
+    return "\n\n".join(paras), cov
+
+def ocr_doc(doc, layout: bool = False) -> list | None:
+    # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
         return None
     out = []
     for page in doc:
-        try:
-            png = page.get_pixmap(dpi=OCR_DPI).tobytes("png")
-            r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng"],
-                input=png, capture_output=True, timeout=60)
-            out.append(r.stdout.decode("utf-8", "replace") if r.returncode == 0 else "")
-        except Exception:
-            out.append("")
+        text, cov = _ocr_page(page)
+        out.append((text, cov) if layout else text)
     return out
 
-def ocr_chapters(pages: list[str]):
+def _scan_figures(doc, pages):
+    """PNG for low-ink scan pages (maps, plates, tables), so OCR does not turn them into prose."""
+    figs = {}
+    for i, (text, cov) in enumerate(pages):
+        clean = re.sub(r"\s+", " ", text).strip()
+        if len(clean) < 3 or cov >= 0.12:
+            continue
+        if re.match(r"^(chapter|part|prologue|epilogue|book)\b", clean, re.I):
+            continue  # keep sparse chapter openers as text so the TOC still gets them
+        # A map can OCR into one huge garbage line; very low ink still means picture.
+        if len(clean) >= 1800 and cov >= 0.03:
+            continue
+        figs[i] = doc[i].get_pixmap(dpi=SCAN_FIG_DPI).tobytes("png")
+    return figs
+
+def ocr_chapters(pages: list[str], figures: dict | None = None):
     """Tesseract text -> same (kind, text) rows the text path emits."""
     # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
     chapters, cur = [], []
@@ -187,7 +225,10 @@ def ocr_chapters(pages: list[str]):
             chapters.append(cur.copy())
             cur.clear()
 
-    for txt in pages:
+    for i, txt in enumerate(pages):
+        if figures and i in figures:
+            cur.append(("img", (figures[i], "")))
+            continue
         for para in re.split(r"\n\s*\n", txt):
             lines = [l.strip() for l in para.splitlines() if l.strip()]
             if not lines:
@@ -398,7 +439,7 @@ Free, no signup, nothing kept.</p>
   <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
   <div class="fix"><span class="tag">headers</span><b>Headers and page numbers out</b></div>
   <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
-  <div class="fix"><span class="tag">figures</span><b>Maps and figures stay in text PDFs</b></div>
+  <div class="fix"><span class="tag">figures</span><b>Maps and figures stay in text PDFs and scans</b></div>
   <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
 </div>
 <p class="note-line">Then read it anywhere: send to Kindle by email with the subject "convert", copy it over
@@ -543,8 +584,8 @@ input[type=text]{width:100%;background:#0f1319;border:1px solid var(--line);colo
 .note{color:var(--mut);font-size:13px;margin-top:18px}a{color:#b9a7ff}
 </style></head><body><div class="wrap">
 <h1>Scan a book to EPUB</h1>
-<p class="lead">Photograph the pages of a physical book. The text gets read with OCR, the pages get
-chapters, and you get an EPUB for a Kindle, Kobo or phone. Nothing is stored.</p>
+<p class="lead">Photograph the pages of a physical book. The text gets read with OCR, map and
+figure pages stay as images, and you get an EPUB for a Kindle, Kobo or phone. Nothing is stored.</p>
 <div class="card">
 <input id="file" type="file" accept="image/*" capture="environment" multiple>
 <input id="title" type="text" placeholder="Title (optional)">
@@ -602,13 +643,16 @@ async def scan(request: Request, files: list[UploadFile] = File(...), title: str
         log(False, 0, kb_in, 0, "no images", ref, request=request)
         raise HTTPException(400, "could not read those images")
     npages = doc.page_count
-    texts = ocr_doc(doc) or []
-    doc.close()
+    pages = ocr_doc(doc, layout=True) or []
+    texts = [t for t, _ in pages]
     if not any(len(t) for t in texts):
+        doc.close()
         log(False, npages, kb_in, 0, "scan-no-text", ref, request=request)
         raise HTTPException(422, "no readable text found, try a clearer photo of the page")
-    data = build_epub(ocr_chapters(texts), (title or "Scanned book")[:120], "")
-    log(True, npages, kb_in, len(data) // 1024, "scan", ref, request=request)
+    figs = _scan_figures(doc, pages)
+    doc.close()
+    data = build_epub(ocr_chapters(texts, figs), (title or "Scanned book")[:120], "")
+    log(True, npages, kb_in, len(data) // 1024, "scan+fig" if figs else "scan", ref, request=request)
     return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
         headers={"Content-Disposition": "attachment; filename=book.epub"})
 
@@ -1150,10 +1194,13 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     if not blocks:
         # scanned PDF: OCR is the only thing that helps before falling back
         if npages <= OCR_MAX_PAGES:
-            pages_txt = ocr_doc(doc)
-            if pages_txt and sum(len(t) for t in pages_txt) > 200:
-                data = build_epub(ocr_chapters(pages_txt), safe_title, author[:120])
-                log(True, npages, kb_in, len(data) // 1024, "ocr", ref, request=request)
+            pages = ocr_doc(doc, layout=True) or []
+            texts = [t for t, _ in pages]
+            if texts and sum(len(t) for t in texts) > 200:
+                figs = _scan_figures(doc, pages)
+                data = build_epub(ocr_chapters(texts, figs), safe_title, author[:120])
+                log(True, npages, kb_in, len(data) // 1024, "ocr+fig" if figs else "ocr",
+                    ref, request=request)
                 doc.close()
                 return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
                     headers={"Content-Disposition": "attachment; filename=book.epub"})
