@@ -6,3 +6,5 @@ server.log
 growth/shelf-keys.txt
 growth/.key-emails-sent.txt
 growth/.leads-seen.txt
+growth/.conversions.download
+growth/.fulfil-state.json
