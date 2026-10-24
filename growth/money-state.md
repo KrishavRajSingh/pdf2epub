@@ -2,7 +2,7 @@
 
 Updated 2026-10-24. Answers: **yes**, but the current version was leaking the buyer in four
 places. All four are fixed in the commits below and are live in deployment
-`6aea39b6-ccbc-42f2-a183-5b33251fe673`.
+`126c2633-cd55-4f80-a4ae-5172bc06054a`.
 
 ## The evidence that it can
 
@@ -163,7 +163,7 @@ volume data intact). Nothing is lost, but every fix is stuck behind the freeze.
 
 | loop | what it does | status |
 |---|---|---|
-| `scripts/railway_deploy_watch.sh` | redeploys when builds reopen | done; deployment `6aea39b6` is live |
+| `scripts/railway_deploy_watch.sh` | redeploys when builds reopen | done; deployment `126c2633` is live |
 | `scripts/fulfil.py --watch` | converted any PDF emailed in and sent the EPUB back | **paused** 2026-10-24; free fulfilment undercut Shelf |
 | `scripts/keys.py watch` | pulls leads off the railway log and emails them an offer | running |
 
