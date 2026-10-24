@@ -1,7 +1,8 @@
 # Money state — can the current version make money?
 
-Updated 2026-10-22. Answers: **yes**, but the current version was leaking the buyer in four
-places. All four are fixed in the commits below and land with the next deploy.
+Updated 2026-10-24. Answers: **yes**, but the current version was leaking the buyer in four
+places. All four are fixed in the commits below and are live in deployment
+`6aea39b6-ccbc-42f2-a183-5b33251fe673`.
 
 ## The evidence that it can
 
@@ -22,25 +23,45 @@ feed contains no such line). So the lever is not "email our list", it is **buy t
 Bonus slot is sold as a Classified Ad, and one placement produced 68 conversions in 32 minutes.
 Check `https://www.passionfroot.me/deepculture` for the rate.
 
+## Funnel, 2026-10-24 (log to 05:10 UTC)
+
+After removing monitoring and script traffic (PingWatch 429 visits, python-urllib 56, known bots):
+
+- 439 real human visits, 85 conversions, 0 paid.
+- One Substack reader did 71 of the 85 conversions (13,199 pages) and hit the 500-page cap 7
+  times. They paid nothing. They got 71 books free before the paywall fired.
+- Everyone else: 398 visits, 14 conversions (3.5%), 1 cap reject, 0 leads, 0 checkouts.
+- HN: 1,013 visits (105 with a UA, 900 older lines with no UA), 0 conversions.
+- Reddit post: 23 visits, 0 conversions.
+- Shelf: 3 real visits, 0 checkouts. The 67 Shelf visits in the old count were mostly bots and
+  PingWatch, not buyers.
+- Cap page: 8 real cap rejects, 7 from the power reader. The old "email me for a quote" got no
+  replies.
+- Checkouts: 2 probes (`abc`, `polar_c_probe`), 0 real. No paid customer yet.
+
+Drop-off is not the landing page. The free converter works. The drop is (1) HN traffic that never
+tried it, (2) one power reader who took 71 books for free and left, and (3) a Shelf page with almost
+no real traffic. The $5 offer is aimed at (2) and at the 500-page wall; it cannot fix (1) or (3).
+
 ## What was broken (all fixed)
 
 | # | Leak | Was | Now |
 |---|---|---|---|
 | 1 | Checkout link in `reddit-posts.md` | `...WupgVW4...` → **404** | one link, `...WupgYW4...`, verified 200 |
 | 2 | Fulfilment email had no pay link | "$10/month" and no URL | links `/shelf` |
-| 3 | Cap rejection showed raw JSON | `{"detail":"over 500 pages in v1"}` | `err_page` + in-page `PITCH` with mail + subscribe |
+| 3 | Cap rejection showed raw JSON | `{"detail":"over 500 pages in v1"}` | `err_page` + in-page `PITCH` with $5 one-book checkout + subscribe |
 | 4 | Paid tier unreachable from the site | no route, no link | `/shelf` page, linked from the landing page and the sitemap |
 
-Plus the thing that was missing entirely: **email capture at the moment of intent.**
-`/lead` (POST email, reason) logs the address, and the cap-rejection panel asks for it. Before
-this, 82 conversions produced **0 emails** — the field was optional and worded as a footnote.
+Plus the thing that was missing entirely: **a way to pay at the moment of intent.**
+The cap panel now leads with the $5 checkout. The old `/lead` quote form is still there for files
+over 2,000 pages, but it produced **0 leads** in three days, so it is no longer the primary path.
 
 ## Now measurable
 
 `/stats` gained three numbers, because the money leak was invisible until now:
 - `leads` — emails captured via `/lead`
 - `cap_rejects` — requests that hit the 200MB / 500-page cap (the intent signal)
-- `checkouts` — `/thanks` hits carrying a Polar `checkout_id` (money)
+- `checkouts` — `/thanks` or `/onebook` hits carrying a Polar `checkout_id` (money)
 
 Also `refs` now shows `shelf` and `thanks` separately, so a newsletter link to `/shelf` is
 attributable.
@@ -53,23 +74,25 @@ difference is the output quality (real chapters, real paragraphs).
 
 ## What is still missing to make the first sale
 
-1. **The deploy.** Every fix above is in git and waiting on Railway (builds paused platform-wide
-   since Oct 20, security-incident related). The watcher will deploy it.
-2. **A published pay link.** `/shelf` exists now, but nothing points at it from outside:
-   - the deepculture issue #243 already linked `epub.ftak.net` and produced 68 conversions —
-     **it never mentioned a paid tier.** The next issue should link `/shelf` directly.
-   - Reddit/X posts point at the free tool. One of them should point at `/shelf`.
-3. **The deepculture slot, again.** Issue #243 shipped one free-tool link and 68 conversions
-   came. The slot is sold (Classified Ad) — the next issue can carry the same link pointing at
-   `/shelf` instead of `/`. That is the only channel with proven conversion volume, and it is
-   repeatable for the cost of one slot. Ask for the rate; a Classified Ad is far cheaper than the
-   $10/mo a single Shelf subscriber pays.
-4. **The throttle must not cut a shelf owner.** The pending build keys the throttle on the real
+1. **A one-time price for one big book.** Approved and shipped 2026-10-24. Polar product
+   `pdf2epub One Book`, $5 one-time, product ID `8cb16014-52cc-4c29-9aef-080db6cd1274`, checkout
+   `https://buy.polar.sh/polar_cl_jbOBnMGlP6YfIdXUuSk4y5SLqffq73NpiGB1E3nrvCi`. The buyer pays
+   first, lands on `/onebook`, emails the PDF, and gets a manual conversion up to 2,000 pages. No
+   key, no account. The cap page and `/shelf` both offer it.
+2. **Traffic.** The deploy is live and the pay link exists, but there is no stream of buyers.
+   deepculture issue #243 produced 68 conversions from one reader and no sale; HN and Reddit
+   produced almost no conversions. The next free channel is the 5 newsletter pitches already
+   sent (follow up Oct 27-28) and the guides, which are indexed but too new to rank.
+3. **A paid customer has to be able to buy without email.** The current key path works, but the
+   checkout still says `Opencorp`, not `pdf2epub`. A separate Polar org is the clean fix and
+   needs new payout setup.
+4. **The throttle must not cut a shelf owner.** The live build keys the throttle on the real
    client IP. At 10/min and 30/day it would have 429'd the 68-in-32-minutes burst at file 31 —
    more than half the revenue event. Now 30/min and 300/day.
-5. **fulfil.py must not answer the bank.** Its query was any PDF attachment, so a bank statement
-   or broker alert from anyone would have been converted to EPUB and mailed back with a $10 pitch.
-   It now only acts on mail that reads like a request.
+5. **Free email fulfilment is paused.** `scripts/fulfil.py --watch` used to email a free EPUB to
+   anyone who sent a PDF. That contradicted the new cap-page quote and undercut Shelf, so the
+   launchd job is booted out. Run `python3 scripts/fulfil.py --once` by hand after a paid order.
+   Do not restart the watcher until it checks for a paid key.
 
 ## The rule for the free path
 
@@ -136,24 +159,23 @@ git history or the working tree. Polar, GitHub and Gmail are separate accounts.
 **The live build keeps serving through the pause** (visits and conversions are still ticking,
 volume data intact). Nothing is lost, but every fix is stuck behind the freeze.
 
-**Three loops are running on the Mac and will do the work the moment the freeze lifts:**
+**Loops on the Mac after the freeze:**
 
-| loop | what it does | when it fires |
+| loop | what it does | status |
 |---|---|---|
-| `scripts/railway_deploy_watch.sh` | retries `railway redeploy --from-source` every 60s, then verifies `robots.txt` + `/health` | the instant builds reopen |
-| `scripts/fulfil.py --watch` | converts any PDF that arrives by email and emails the EPUB back | every 60s, and it needs no deploy |
-| `scripts/keys.py watch` | pulls leads off the railway log and emails them an offer | every 5 min, and it needs no deploy |
+| `scripts/railway_deploy_watch.sh` | redeploys when builds reopen | done; deployment `6aea39b6` is live |
+| `scripts/fulfil.py --watch` | converted any PDF emailed in and sent the EPUB back | **paused** 2026-10-24; free fulfilment undercut Shelf |
+| `scripts/keys.py watch` | pulls leads off the railway log and emails them an offer | running |
 
 Note the CLI session expires and auto-refreshes; the watcher retries on `Unauthorized` rather
 than pretending a deploy happened. That was one of three watcher bugs fixed (the other two: a
 missed `"Unauthorized"` branch that made it burn 20 minutes per attempt, and a case-sensitive
 match on Railway's capitalised `"Paused temporarily"`).
 
-**Do not buy the deepculture slot until the deploy lands.** The slot links to `/shelf`, and
-`/shelf` is a 404 until the freeze lifts. A paid placement pointing at a 404 is a wasted slot.
+**Do not buy the deepculture slot.** Growth is free-only for now. The slot worked for usage, not
+for sales: one reader converted 71 books and paid nothing.
 
-**While waiting, the two things that pay out without a deploy:**
-- `fulfil.py` is live on the Mac. Someone who emails a PDF gets an EPUB back today, with the
-  Shelf offer in the email.
+**The two things that pay out without a deploy:**
 - `keys.py grant <email>` mints a key and emails it, pushing it to the railway volume over
   SFTP so the live site accepts it.
+- `keys.py watch` chases captured leads. `fulfil.py --once` is run by hand after a paid order.

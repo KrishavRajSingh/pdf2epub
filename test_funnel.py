@@ -85,8 +85,10 @@ def main():
     shelf = client.get("/shelf")
     assert shelf.status_code == 200, "no /shelf page to point people at"
     assert "buy.polar.sh" in shelf.text, "shelf page has no checkout link"
-    assert "quote a one-time" in shelf.text and "by hand" not in shelf.text, \
-        "shelf still gives away the paid conversion"
+    assert pdf2epub.ONETIME_URL in shelf.text, "shelf page has no one-book link"
+    assert "$5" in shelf.text and "by hand" in shelf.text, \
+        "shelf page does not pitch the $5 one-book job"
+    assert "quote a one-time" not in shelf.text, "shelf still quotes a one-time conversion"
     land = client.get("/").text
     assert "/shelf" in land, "landing page does not mention the paid tier"
     assert client.post("/lead", data={"email": "", "reason": "cap"}).status_code == 400, "lead takes no email"
@@ -95,6 +97,11 @@ def main():
     assert st2["leads"] == 1, st2
     client.get("/thanks?checkout_id=polar_c_TEST")
     assert client.get("/stats").json()["checkouts"] == 1, "checkout not counted"
+    one = client.get("/onebook?checkout_id=polar_c_ONETIME1234567890abcdef")
+    assert one.status_code == 200 and "One book" in one.text and "Email the PDF" in one.text, \
+        "one-book success page missing"
+    assert "Shelf key" not in one.text, "one-book success page must not mint a shelf key"
+    assert client.get("/stats").json()["checkouts"] == 2, "one-book checkout not counted"
 
     # control chars in the PDF text must not 500 (lxml refuses them in XML)
     ctrl = pymupdf.open()
@@ -134,9 +141,10 @@ def main():
     assert convert_with("") == 413, "free tier should stop a 600 page pdf"
     cap = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")},
                       headers={"accept": "text/html"})
-    assert cap.status_code == 413 and "quote a one-time conversion" in cap.text, \
-        "cap rejection does not pitch the paid conversion"
-    assert "by hand" not in cap.text, "cap rejection still offers free manual work"
+    assert cap.status_code == 413 and "$5" in cap.text and pdf2epub.ONETIME_URL in cap.text, \
+        "cap rejection does not pitch the $5 one-book job"
+    assert "quote a one-time conversion" not in cap.text, \
+        "cap rejection still quotes instead of selling"
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"

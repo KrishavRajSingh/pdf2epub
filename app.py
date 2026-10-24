@@ -30,6 +30,7 @@ OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; tri
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 SHELF_URL = "https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs"  # ponytail: the W-upgVW4 variant in reddit-posts.md is a 404, this one checks out
+ONETIME_URL = "https://buy.polar.sh/polar_cl_jbOBnMGlP6YfIdXUuSk4y5SLqffq73NpiGB1E3nrvCi"  # $5 one book, manual, paid before delivery
 SHELF_MAIL = "krishavrajsingh@gmail.com"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
 # the key is a secret string we mail them, they put it in the url as ?k=KEY
@@ -108,8 +109,9 @@ def ref_of(request: Request) -> str:
     r = raw[:80]
     return f"{s}|{r}" if s or r else ""
 
-BOT_UA = re.compile(r"bot|crawl|spider|slurp|curl|wget|python-requests|httpclient|scrapy|"
-                     r"headless|phantom|facebookexternalhit|embedly|quora link preview|"
+BOT_UA = re.compile(r"bot|crawl|spider|slurp|curl|wget|python-requests|python-urllib|"
+                     r"httpclient|scrapy|headless|phantom|pingwatch|pingdom|uptimerobot|"
+                     r"statuscake|betteruptime|facebookexternalhit|embedly|quora link preview|"
                      r"whatsapp|telegrambot|discordbot|twitterbot|linkedinbot|applebot|"
                      r"ahrefs|semrush|mj12|dotbot|petal|bytespider|gptbot|ccbot|perplexity", re.I)
 
@@ -142,10 +144,10 @@ def throttle(request: Request, limit: int = 30, window: int = 60, day_limit: int
     _HITS[ip] = day
 
 def err_page(msg: str, code: int):
-    # ponytail: the cap rejections are where the paid tier gets pitched, so keep the mail link
+    # ponytail: the cap rejections are where the paid tier gets pitched, so keep the checkout links
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
-        "<p>Too big for the free converter? <b>One book:</b> email it to me and I will quote a "
-        f"one-time conversion: <a href='mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB'>email</a>. "
+        "<p>Too big for the free converter? <b>One book:</b> $5 once, then email it to me and I "
+        f"will convert it by hand: <a href='{ONETIME_URL}'>one book - $5</a>. "
         "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
         f"whole shelf and delivery to your Kindle: <a href='{SHELF_URL}'>subscribe</a>.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
@@ -464,16 +466,18 @@ const drop=document.getElementById('drop'),fi=document.getElementById('file'),
  msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 const PITCH='Too big for the free converter (200MB / 500 pages).<br><br>'
- +'<b>One big book?</b> <a id="capmail" href="mailto:__MAIL__?subject=PDF%20to%20EPUB">'
- +'Email it to me</a> and I will quote a one-time conversion.<br>'
+ +'<b>One big book?</b> $5 once, then email it to me and I will convert it by hand: '
+ +'<a href="__ONETIME__">one book - $5</a>.<br>'
  +'<b>A whole shelf?</b> Shelf is $10/month for 1,000 pages, batch conversion, and Kindle '
  +'delivery: <a href="__SHELF__">subscribe</a>.'
- +'<br><br><input id="leadmail" type="email" placeholder="your email for a one-off quote" '
+ +'<br><br><span style="font-size:13px;color:#9aa4b5">Bigger than 2,000 pages or a rough scan? '
+ +'Leave your email for a custom quote.</span><br>'
+ +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#0b0e14;border:1px solid #242a36;color:#eef1f7;'
  +'border-radius:10px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="margin-top:8px;background:#8b6cff;color:#fff;border:0;'
  +'border-radius:10px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
- +'Get a quote</button>';
+ +'Ask</button>';
 document.addEventListener('click',async(e)=>{
  if(e.target.id!=='leadbtn')return;
  const em=document.getElementById('leadmail');
@@ -483,7 +487,7 @@ document.addEventListener('click',async(e)=>{
  if(window.capPages)fd.append('pages',window.capPages);
  const r=await fetch('/lead',{method:'POST',body:fd});
  msg.className='ok';msg.innerHTML=r.ok
-  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> and I will reply with a one-time price.'
+  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> with the page count and I will reply with a price.'
   :'Put an email in the box first.';
  e.target.disabled=false;});
 drop.onclick=()=>fi.click();
@@ -509,8 +513,6 @@ go.onclick=async()=>{
    window.capPages=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
    window.capName=(f&&f.name)||'book';
    msg.innerHTML=PITCH;
-   const cm=document.getElementById('capmail');
-   if(cm)cm.href='mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+window.capName);
   }}
  go.disabled=false};
 smp.onclick=async()=>{
@@ -562,6 +564,7 @@ def _page() -> str:
             .replace("__TOC__", toc)
             .replace("__MAIL__", SHELF_MAIL)
             .replace("__SHELF__", SHELF_URL)
+            .replace("__ONETIME__", ONETIME_URL)
             .replace("__FIRST__", html.escape(pr["first"])))
 
 
@@ -786,6 +789,46 @@ If it is a scan it gets OCR and the text will have the usual OCR typos, and I wi
 </div></body></html>""")
 
 
+@app.get("/onebook", response_class=HTMLResponse)
+def onebook(request: Request):
+    # ponytail: separate polar success page for the $5 manual conversion, so it never mints a Shelf key
+    cid = (request.query_params.get("checkout_id") or "")[:80]
+    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
+                       "ref": "onebook", "checkout_id": cid, "ua": ua_of(request)[:120]})
+    try:
+        with LOG.open("a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+    print(line, flush=True)
+    cid_html = (f"<p>Checkout ID: <code>{html.escape(cid)}</code></p>" if cid else
+                "<p>If you just paid and there is no checkout ID in the address, reply to the Polar receipt.</p>")
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One book - pdf2epub</title>
+<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
+.wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
+h1{{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:#a98fff}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}</style></head>
+<body><div class="wrap">
+<h1>One book.</h1>
+<p>Paid once. Send the PDF and I will convert it by hand.</p>
+<div class="card">
+<p><b>Email the PDF to <code>{SHELF_MAIL}</code></b></p>
+<p>Use the subject <b>One book</b>. Send it from the email you paid with, or include the checkout ID
+below so I can match it.</p>
+{cid_html}
+<p>Up to 2,000 pages. Scans get OCR, and hard scans have OCR typos; I will say so before I send it.</p>
+<p>I will email the EPUB back, usually the same day.</p>
+</div>
+<p>Bigger than 2,000 pages, or a rough scan? Email me the page count first and I will tell you if it
+is doable.</p>
+<p><a href="/">Back to the free converter</a></p>
+</div></body></html>""")
+
+
 @app.post("/lead")
 async def lead(request: Request, email: str = Form(""), pages: int = Form(0), reason: str = Form("")):
     # ponytail: the cap rejection is the moment of intent, so take the email right there
@@ -855,9 +898,15 @@ limits. No account, no password, nothing to set up.</p>
 <p><b>Batch and Kindle delivery are email-assisted for now.</b> Send the files and your Kindle
 address to <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">{SHELF_MAIL}</a>, and I will
 send the EPUBs back, usually the same day.</p>
-<p>Have one big book instead of a shelf?
+<div class="card">
+<p><b>One big book, not a shelf?</b></p>
+<p>Pay $5 once. Email the PDF and I will convert it by hand and send the EPUB back, usually the
+same day. Up to 2,000 pages. Scans get OCR.</p>
+<a class="btn" href="{ONETIME_URL}">One book - $5</a>
+</div>
+<p>Bigger than 2,000 pages or a rough scan?
 <a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
-and I will quote a one-time conversion.</p>
+and I will quote it.</p>
 <p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>
 </div></body></html>""")
 
@@ -1184,7 +1233,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     kb_in = len(raw) // 1024
     if len(raw) > max_mb * 1024 * 1024:
         log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_mb}MB - email it to {SHELF_MAIL} and I will quote a one-time conversion"
+        raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages): {ONETIME_URL}"
             if not key else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
@@ -1201,7 +1250,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         n0 = len(doc)
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - email it to {SHELF_MAIL} and I will quote a one-time conversion"
+        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages): {ONETIME_URL}"
             if not key else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
 
     blocks = list(_blocks(doc))
