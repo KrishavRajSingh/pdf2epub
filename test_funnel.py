@@ -85,6 +85,8 @@ def main():
     shelf = client.get("/shelf")
     assert shelf.status_code == 200, "no /shelf page to point people at"
     assert "buy.polar.sh" in shelf.text, "shelf page has no checkout link"
+    assert "quote a one-time" in shelf.text and "by hand" not in shelf.text, \
+        "shelf still gives away the paid conversion"
     land = client.get("/").text
     assert "/shelf" in land, "landing page does not mention the paid tier"
     assert client.post("/lead", data={"email": "", "reason": "cap"}).status_code == 400, "lead takes no email"
@@ -130,6 +132,11 @@ def main():
         return client.post("/convert" + q, files={"f": ("b.pdf", braw, "application/pdf")}).status_code
 
     assert convert_with("") == 413, "free tier should stop a 600 page pdf"
+    cap = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")},
+                      headers={"accept": "text/html"})
+    assert cap.status_code == 413 and "quote a one-time conversion" in cap.text, \
+        "cap rejection does not pitch the paid conversion"
+    assert "by hand" not in cap.text, "cap rejection still offers free manual work"
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"

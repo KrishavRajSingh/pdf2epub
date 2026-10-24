@@ -144,10 +144,10 @@ def throttle(request: Request, limit: int = 30, window: int = 60, day_limit: int
 def err_page(msg: str, code: int):
     # ponytail: the cap rejections are where the paid tier gets pitched, so keep the mail link
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
-        "<p>Too big for the free converter? Two ways: email it to me and I'll convert it by hand: "
-        f"<a href='mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB'>{SHELF_MAIL}</a> "
-        "&mdash; or take <b>Shelf</b>, $10/month for 1,000 pages, batch conversion of a whole shelf "
-        f"and delivery to your Kindle: <a href='{SHELF_URL}'>subscribe</a>.</p>"
+        "<p>Too big for the free converter? <b>One book:</b> email it to me and I will quote a "
+        f"one-time conversion: <a href='mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB'>email</a>. "
+        "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
+        f"whole shelf and delivery to your Kindle: <a href='{SHELF_URL}'>subscribe</a>.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
 
 def calibre_convert(raw: bytes) -> bytes | None:
@@ -463,25 +463,27 @@ USB, or open it in Apple Books, Kobo, KOReader or PocketBook.</p>
 const drop=document.getElementById('drop'),fi=document.getElementById('file'),
  msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
-const PITCH='Too big for the free converter (200MB / 500 pages). Two ways: '
- +'<a href="mailto:krishavrajsingh@gmail.com?subject=PDF%20to%20EPUB">email it to me</a> '
- +'and I will convert it by hand, or take <b>Shelf</b>, $10/month for 1,000 pages, batch '
- +'conversion of a whole shelf and delivery to your Kindle: <a href="__SHELF__">subscribe</a>.'
- +'<br><br><input id="leadmail" type="email" placeholder="your email, I will convert it by hand" '
+const PITCH='Too big for the free converter (200MB / 500 pages).<br><br>'
+ +'<b>One big book?</b> <a id="capmail" href="mailto:__MAIL__?subject=PDF%20to%20EPUB">'
+ +'Email it to me</a> and I will quote a one-time conversion.<br>'
+ +'<b>A whole shelf?</b> Shelf is $10/month for 1,000 pages, batch conversion, and Kindle '
+ +'delivery: <a href="__SHELF__">subscribe</a>.'
+ +'<br><br><input id="leadmail" type="email" placeholder="your email for a one-off quote" '
  +'style="max-width:340px;background:#0b0e14;border:1px solid #242a36;color:#eef1f7;'
  +'border-radius:10px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="margin-top:8px;background:#8b6cff;color:#fff;border:0;'
  +'border-radius:10px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
- +'Send me the PDF</button>';
+ +'Get a quote</button>';
 document.addEventListener('click',async(e)=>{
  if(e.target.id!=='leadbtn')return;
  const em=document.getElementById('leadmail');
  if(!em||!em.value)return;
  e.target.disabled=true;
  const fd=new FormData();fd.append('email',em.value);fd.append('reason','cap');
+ if(window.capPages)fd.append('pages',window.capPages);
  const r=await fetch('/lead',{method:'POST',body:fd});
- msg.className='ok';msg.textContent=r.ok
-  ?'Got it. Email the PDF to krishavrajsingh@gmail.com and I will convert it by hand.'
+ msg.className='ok';msg.innerHTML=r.ok
+  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> and I will reply with a one-time price.'
   :'Put an email in the box first.';
  e.target.disabled=false;});
 drop.onclick=()=>fi.click();
@@ -503,7 +505,13 @@ go.onclick=async()=>{
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
   msg.className='ok';msg.textContent='Done. EPUB downloaded.'}
  catch(e){msg.className='err';msg.textContent=e.message;
-  if(/^413/.test(e.message))msg.innerHTML=PITCH}
+  if(/^413/.test(e.message)){
+   window.capPages=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
+   window.capName=(f&&f.name)||'book';
+   msg.innerHTML=PITCH;
+   const cm=document.getElementById('capmail');
+   if(cm)cm.href='mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+window.capName);
+  }}
  go.disabled=false};
 smp.onclick=async()=>{
  msg.className='';msg.textContent='Converting the sample...';smp.disabled=true;go.disabled=true;
@@ -552,6 +560,7 @@ def _page() -> str:
             .replace("__EPARAS__", str(pr["eparas"]))
             .replace("__TOCN__", str(len(pr["toc"])))
             .replace("__TOC__", toc)
+            .replace("__MAIL__", SHELF_MAIL)
             .replace("__SHELF__", SHELF_URL)
             .replace("__FIRST__", html.escape(pr["first"])))
 
@@ -846,8 +855,9 @@ limits. No account, no password, nothing to set up.</p>
 <p><b>Batch and Kindle delivery are email-assisted for now.</b> Send the files and your Kindle
 address to <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">{SHELF_MAIL}</a>, and I will
 send the EPUBs back, usually the same day.</p>
-<p>Not ready to pay? <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">Email me the PDF</a>
-and I will convert it by hand, usually the same day.</p>
+<p>Have one big book instead of a shelf?
+<a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
+and I will quote a one-time conversion.</p>
 <p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>
 </div></body></html>""")
 
@@ -1174,8 +1184,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     kb_in = len(raw) // 1024
     if len(raw) > max_mb * 1024 * 1024:
         log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_mb}MB - email it to {SHELF_MAIL} and I'll convert it by hand"
-            if not key else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I'll do it")
+        raise HTTPException(413, f"over {max_mb}MB - email it to {SHELF_MAIL} and I will quote a one-time conversion"
+            if not key else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
     try:
@@ -1191,7 +1201,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         n0 = len(doc)
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_pages} pages - email it to {SHELF_MAIL} and I'll convert it by hand"
+        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - email it to {SHELF_MAIL} and I will quote a one-time conversion"
             if not key else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
 
     blocks = list(_blocks(doc))
