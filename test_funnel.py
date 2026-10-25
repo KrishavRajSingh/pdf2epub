@@ -73,6 +73,8 @@ def main():
     # guide pages + sitemap
     for u in ["/scan", "/guides", "/guides/pdf-to-epub", "/sitemap.xml"]:
         assert client.get(u).status_code == 200, u
+    # indexnow: the engines fetch the key file to prove we own the host
+    assert client.get(f"/{pdf2epub.INDEXNOW_KEY}.txt").text == pdf2epub.INDEXNOW_KEY, "indexnow key not served"
 
     # email capture + sample endpoint
     st = client.get("/stats").json()

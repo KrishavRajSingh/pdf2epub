@@ -798,9 +798,22 @@ def guide(slug: str):
     return guide_page(title, desc, body, "/guides/" + slug)
 
 
+# ponytail: IndexNow key is public by design, the file only proves we own the host
+INDEXNOW_KEY = "ad136bf29681a09265f8e9bd56452473"
+
+
+def site_urls() -> list[str]:
+    return ["/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
+
+
+@app.get(f"/{INDEXNOW_KEY}.txt")
+def indexnow_key():
+    return Response(INDEXNOW_KEY, media_type="text/plain")
+
+
 @app.get("/sitemap.xml")
 def sitemap():
-    urls = ["/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
+    urls = site_urls()
     body = "".join(f"<url><loc>https://epub.ftak.net{u}</loc></url>" for u in urls)
     return Response(f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
                     media_type="application/xml")
