@@ -89,8 +89,10 @@ def paid_checkout(cid: str, product_id: str) -> bool:
         pass
     if not POLAR_TOKEN:
         return False
+    # ponytail: cloudflare bans python-urllib's default UA (error 1010), so name ourselves
     req = urllib.request.Request(POLAR_ORDERS + "?limit=1&checkout_id=" + cid,
-                                 headers={"Authorization": "Bearer " + POLAR_TOKEN})
+                                 headers={"Authorization": "Bearer " + POLAR_TOKEN,
+                                          "User-Agent": "pdf2epub/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             items = (json.load(r) or {}).get("items") or []
