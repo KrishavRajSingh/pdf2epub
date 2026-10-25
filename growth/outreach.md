@@ -30,7 +30,7 @@ Full list and pitch text: `growth/newsletter-pitches.md`.
 | Contact | Route | Tag | Status |
 |---|---|---|---|
 | Liliputing, Brad Linder | contact form | `?s=liliputing` | Sent via form, confirmation "Thanks for contacting us!" |
-| Ebook Friendly | contact form | `?s=ebookfriendly` | Form filled in Chrome, **not submitted** (needs your click) |
+| Ebook Friendly | contact form | `?s=ebookfriendly` | Sent via form by you (page showed contact-form-sent) |
 | Software Testing Help | info@softwaretestinghelp.com | `?s=sth` | Gmail draft, not sent |
 | FixThePhoto, Eva Williams | Eva.Williams@fixthephoto.com | `?s=fixthephoto` | Gmail draft, not sent |
 | Auraist | auraist@substack.com | `?s=auraist` | Gmail draft, not sent |
