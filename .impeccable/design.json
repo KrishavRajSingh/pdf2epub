@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-25T00:00:00Z",
+  "title": "Design System: pdf2epub",
+  "extensions": {
+    "colorMeta": {
+      "paper": { "role": "neutral", "displayName": "Warm Paper", "canonical": "#faf7f0", "tonalRamp": ["#121110", "#2c2b29", "#494744", "#686662", "#888681", "#aaa7a2", "#cdcac4", "#f1eee7"] },
+      "panel": { "role": "neutral", "displayName": "Sheet", "canonical": "#fffdf8", "tonalRamp": ["#121210", "#2c2b29", "#484845", "#676663", "#878683", "#a9a7a4", "#cccac6", "#f0eee9"] },
+      "well": { "role": "neutral", "displayName": "Well", "canonical": "#f4f0e7", "tonalRamp": ["#12110f", "#2d2b28", "#494743", "#686661", "#898680", "#aba7a0", "#cecac2", "#f2eee5"] },
+      "line": { "role": "neutral", "displayName": "Hairline", "canonical": "#e4ded2", "tonalRamp": ["#13110e", "#2d2b26", "#4a4741", "#69665e", "#8a867d", "#aca79d", "#d0cabf", "#f4eee1"] },
+      "line-strong": { "role": "neutral", "displayName": "Hairline Strong", "canonical": "#d3ccbe", "tonalRamp": ["#13110e", "#2d2b26", "#4a4741", "#69665e", "#8a867d", "#aca79d", "#d0cabf", "#f4eee1"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#1b1916", "tonalRamp": ["#13110f", "#2d2b27", "#4b4742", "#6a655f", "#8a857e", "#aca79e", "#d0cac0", "#f4ede3"] },
+      "ink-dim": { "role": "neutral", "displayName": "Dulled Ink", "canonical": "#5b564d", "tonalRamp": ["#14110d", "#2e2b25", "#4c473f", "#6b655b", "#8c857a", "#aea799", "#d2c9ba", "#f7eddd"] },
+      "ink-faint": { "role": "neutral", "displayName": "Faint Ink", "canonical": "#6f685b", "tonalRamp": ["#14110b", "#2f2b22", "#4d473c", "#6d6557", "#8e8575", "#b1a694", "#d4c9b4", "#faedd6"] },
+      "accent": { "role": "primary", "displayName": "Signal Violet", "canonical": "#6b4ce6", "tonalRamp": ["#130040", "#2b0d71", "#4628a3", "#6244d7", "#8161ff", "#a07fff", "#c29fff", "#e4c0ff"] },
+      "accent-deep": { "role": "primary", "displayName": "Signal Violet Deep", "canonical": "#553bc4", "tonalRamp": ["#120040", "#290f71", "#442aa3", "#6045d7", "#7d63ff", "#9c81ff", "#bda1ff", "#dfc3ff"] },
+      "success": { "role": "tertiary", "displayName": "Proof Green", "canonical": "#1f7a4d", "tonalRamp": ["#001906", "#00361a", "#025632", "#1e784c", "#379c67", "#51c184", "#6ce7a3", "#88ffc3"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The one hero line. Serif, weight 400, tight tracking." },
+      "heading": { "displayName": "Headline", "purpose": "Section headings such as What it repairs." },
+      "title": { "displayName": "Title", "purpose": "Card headings, same serif as display." },
+      "body": { "displayName": "Body", "purpose": "Prose and instructions. Sans only." },
+      "body-small": { "displayName": "Body Small", "purpose": "Card subcopy, proof rows, footer." },
+      "label": { "displayName": "Label", "purpose": "Mono uppercase for table headers and tile tags only." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "hover", "value": "150ms ease", "purpose": "Border, ground and accent shifts on hover only. No transforms." }
+    ],
+    "breakpoints": [
+      { "name": "stack", "value": "720px", "purpose": "Converter and proof cards stack, converter first." },
+      { "name": "phone", "value": "560px", "purpose": "Trust pill disappears, header padding tightens." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action in a card. Fully saturated violet, flat, no shadow.",
+      "html": "<button class=\"ds-btn-primary\">Convert to EPUB</button>",
+      "css": ".ds-btn-primary { display: block; width: 100%; background: #6b4ce6; color: #fffdf8; border: 0; border-radius: 6px; padding: 13px 20px; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 14.5px; font-weight: 700; cursor: pointer; transition: background 150ms ease; } .ds-btn-primary:hover { background: #553bc4; } .ds-btn-primary:focus-visible { outline: 2px solid #553bc4; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: .55; cursor: wait; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Sample or escape hatch that sits under the primary and must not compete.",
+      "html": "<button class=\"ds-btn-secondary\">Try it with a sample PDF</button>",
+      "css": ".ds-btn-secondary { display: block; width: 100%; background: transparent; color: #5b564d; border: 1px solid #d3ccbe; border-radius: 6px; padding: 10px 16px; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; cursor: pointer; transition: border-color 150ms ease, color 150ms ease; } .ds-btn-secondary:hover { color: #1b1916; border-color: #bdb4a4; } .ds-btn-secondary:focus-visible { outline: 2px solid #6b4ce6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Recessed well inside a card. Optionality lives in the placeholder, never in a label.",
+      "html": "<input class=\"ds-input\" placeholder=\"Title (optional)\">",
+      "css": ".ds-input { width: 100%; background: #f4f0e7; border: 1px solid #e4ded2; color: #1b1916; border-radius: 4px; padding: 10px 11px; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; transition: border-color 150ms ease; } .ds-input::placeholder { color: #6f685b; } .ds-input:hover { border-color: #d3ccbe; } .ds-input:focus-visible { outline: none; border-color: #6b4ce6; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Sheet on paper. A heading with no subtitle underneath, then controls.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Convert a PDF</div><div class=\"ds-card-body\">Drop a file. It never leaves the request.</div></div>",
+      "css": ".ds-card { background: #fffdf8; border: 1px solid #e4ded2; border-radius: 6px; padding: 20px; } .ds-card-title { font-family: Newsreader, Georgia, serif; font-size: 14.5px; font-weight: 600; color: #1b1916; margin-bottom: 14px; } .ds-card-body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.55; color: #5b564d; }"
+    },
+    {
+      "name": "Drop Zone",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "The only dashed edge in the system. Shifts on drag only, never violet at rest.",
+      "html": "<div class=\"ds-drop\"><b>Drop a PDF here</b><span>or click to choose one</span></div>",
+      "css": ".ds-drop { border: 1.5px dashed #d3ccbe; border-radius: 6px; background: #f4f0e7; padding: 24px 16px; text-align: center; cursor: pointer; transition: border-color 150ms ease, background 150ms ease; } .ds-drop:hover { border-color: #6b4ce6; } .ds-drop b { display: block; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 15px; color: #1b1916; margin-bottom: 4px; } .ds-drop span { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 12.5px; color: #6f685b; }"
+    },
+    {
+      "name": "Proof Row",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Label left in faint ink, measured value right in mono. Real counts only.",
+      "html": "<ul class=\"ds-proof\"><li><span>Printed lines in the PDF</span><span>96</span></li><li><span>Paragraphs in the EPUB</span><span>24</span></li><li><span>Table of contents</span><span>4 entries</span></li></ul>",
+      "css": ".ds-proof { list-style: none; margin: 0; padding: 0; border-top: 1px solid #e4ded2; } .ds-proof li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px solid #e4ded2; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; } .ds-proof li span:first-child { color: #6f685b; } .ds-proof li span:last-child { color: #1b1916; font-family: JetBrains Mono, ui-monospace, Menlo, monospace; font-size: 12px; }"
+    },
+    {
+      "name": "Fact Chip",
+      "kind": "chip",
+      "refersTo": "fact-chip",
+      "description": "A measured fact. Never a benefit statement.",
+      "html": "<span class=\"ds-fact\"><b>200MB</b> / 500 pages</span>",
+      "css": ".ds-fact { display: inline-block; border: 1px solid #e4ded2; border-radius: 4px; padding: 6px 10px; background: #faf7f0; color: #5b564d; font-family: JetBrains Mono, ui-monospace, Menlo, monospace; font-size: 12px; } .ds-fact b { color: #1b1916; font-weight: 600; }"
+    },
+    {
+      "name": "Trust Pill",
+      "kind": "chip",
+      "refersTo": "trust-pill",
+      "description": "The header stamp. The one capsule in the system, and the one place Proof Green appears.",
+      "html": "<span class=\"ds-pill\">files not stored &middot; <b>no account</b></span>",
+      "css": ".ds-pill { display: inline-block; border: 1px solid #e4ded2; border-radius: 99px; padding: 5px 11px; background: #faf7f0; color: #5b564d; font-family: JetBrains Mono, ui-monospace, Menlo, monospace; font-size: 11.5px; } .ds-pill b { color: #1f7a4d; font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Colophon",
+    "overview": "The page should read like the last leaf of a well-made book: the one that states plainly what the book is, how it was made, and who made it. That is the whole argument for a serif display voice here. A converter is judged on whether the output looks like a book, so the page proving it is set like one. Paper white, black ink, hairline rules, and a single violet that behaves like a printed spot colour rather than a screen glow. The surface is quiet by design. Nothing floats, nothing glows, nothing is the same size as anything it is not related to. Depth comes from two flat tones and a 1px rule, never from a shadow. Numbers stay in monospace because they are measurements of a real file, and the rest of the copy stays in a plain sans, because the reader came to convert something, not to read a brochure.",
+    "keyCharacteristics": [
+      "Paper white ground, ink black text, one violet accent.",
+      "Serif for headings and titles only. Sans for prose and controls. Mono for measured values only.",
+      "Flat at rest. Hairlines and tone do all the separation work.",
+      "The proof is the copy: the page shows real output numbers instead of describing quality.",
+      "Roughly 100 words above the fold. If a line does not earn its place, it goes."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Violet means act here or this is the emphasised word. It never marks a section, a border, a background block, or a heading that is not also a link.", "section": "colors" },
+      { "name": "The Paper Rule", "body": "There is no grey. Every neutral is warmed toward the paper hue, so a screenshot of the page has no blue-grey in it.", "section": "colors" },
+      { "name": "The Two-Voice Rule", "body": "Two families carry words: serif for headings, sans for everything you can click or read as an instruction. Mono is not a third voice, it is a measuring instrument, so it only ever holds numbers, keys, and the mono domain in the header.", "section": "typography" },
+      { "name": "The No-Uppercase-Title Rule", "body": "Uppercase belongs to labels only. Never set a heading or a card title in caps to make it feel technical.", "section": "typography" },
+      { "name": "The Flat Paper Rule", "body": "If an element needs to look raised, change its tone by one step or give it a hairline. Never add a shadow, and never add a glow, including on the mark dot, which is a flat 8px circle.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the first screen near 100 words. The paid competitor in this market runs a heading, one sentence and a file input, and still sells credits.",
+      "Do show the output as numbers and a real first paragraph. It is the one claim a competitor cannot copy without rebuilding their pipeline.",
+      "Do set every heading in the serif and every control in the sans, at the exact sizes above.",
+      "Do warm every neutral toward the paper hue, and keep the accent at #6b4ce6 on paper.",
+      "Do let a card heading stand alone. Delete a subtitle before adding one."
+    ],
+    "donts": [
+      "Don't explain what the proof card already shows in a sentence underneath it.",
+      "Don't add a shadow, a glow, a gradient, or a second saturated colour.",
+      "Don't use violet for a border, a background block, or a section marker.",
+      "Don't put an uppercase mono tag on a heading. Tags belong to tiles and table headers only.",
+      "Don't add a fourth typeface, or a serif fallback other than Georgia.",
+      "Don't reintroduce the dark shell's #8b6cff on paper. It fails contrast and it weakens the single-signal rule."
+    ]
+  }
+}

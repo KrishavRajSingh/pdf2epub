@@ -303,91 +303,96 @@ def build_epub(chapters, title: str, author: str) -> bytes:
     return buf.getvalue()
 
 PAGE_CSS = """
-:root{--bg:#0a0c10;--panel:#12151c;--panel2:#171b24;--line:#242a36;--line2:#2f3644;
---txt:#eef1f7;--dim:#98a1b3;--faint:#6b7488;--acc:#8b6cff;--acc2:#a98fff;--ok:#5fd39a}
+:root{--bg:#faf7f0;--panel:#fffdf8;--well:#f4f0e7;--line:#e4ded2;--line2:#d3ccbe;
+--txt:#1b1916;--dim:#5b564d;--faint:#6f685b;--acc:#6b4ce6;--acc2:#553bc4;--ok:#1f7a4d;
+--serif:"Newsreader",Georgia,"Times New Roman",serif;
+--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);
-font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);
 -webkit-font-smoothing:antialiased}
-code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+::selection{background:#e4dcff;color:var(--txt)}
+code,.mono{font-family:var(--mono)}
 .wrap{max-width:940px;margin:0 auto;padding:0 20px 72px}
 a{color:var(--acc2)}
 header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;
-padding:22px 0 8px;border-bottom:1px solid var(--line)}
-.mark{display:flex;align-items:baseline;gap:9px;font-weight:700;letter-spacing:-.2px;font-size:17px}
-.mark .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 14px var(--acc)}
-.mark .to{color:var(--faint);font-weight:500;font-size:15px}
-.pill{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:5px 11px}
-.pill b{color:var(--ok);font-weight:600}
-h1{font-size:clamp(30px,6.2vw,52px);line-height:1.05;letter-spacing:-1.6px;margin:34px 0 0;font-weight:760}
-h1 .em{color:var(--acc2)}
-.lede{color:var(--dim);font-size:clamp(15px,2.2vw,18px);line-height:1.55;margin:16px 0 0;max-width:56ch}
-.facts{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 0}
-.fact{font-size:12.5px;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
-.fact b{color:var(--txt);font-weight:600}
-.cta{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 0}
-button,.btn{font:inherit}
-.btn{display:inline-flex;align-items:center;gap:9px;border-radius:11px;padding:13px 19px;font-weight:650;
-font-size:15px;text-decoration:none;cursor:pointer;border:1px solid transparent}
-.btn.primary{background:var(--acc);color:#fff}
-.btn.primary:hover{background:#7c5af0}
-.btn.ghost{background:var(--panel);border-color:var(--line2);color:var(--txt)}
-.btn.ghost:hover{border-color:#3a4252}
-.grid2{display:grid;grid-template-columns:1.05fr .95fr;gap:18px;margin-top:34px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
-.card h3{margin:0 0 4px;font-size:15px;letter-spacing:-.1px}
-.card .sub{color:var(--faint);font-size:12.5px;margin:0 0 16px}
-.drop{border:1.5px dashed #313949;border-radius:13px;padding:30px 18px;text-align:center;cursor:pointer;
-transition:.15s;background:#0e1117}
-.drop:hover,.drop.over{border-color:var(--acc);background:#141020}
-.drop b{display:block;font-size:15.5px;margin-bottom:5px}
-.drop span{color:var(--faint);font-size:13px}
+padding:24px 0 14px;border-bottom:1px solid var(--line)}
+.mark{display:flex;align-items:baseline;gap:9px;font-family:var(--serif);font-weight:500;
+letter-spacing:-.2px;font-size:19px}
+.mark .dot{width:8px;height:8px;border-radius:50%;background:var(--acc);align-self:center}
+.mark .to{color:var(--faint);font-weight:400;font-size:13px;letter-spacing:0}
+.pill{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+border-radius:99px;padding:5px 11px}
+.pill b{color:var(--ok);font-weight:500}
+h1{font-family:var(--serif);font-size:clamp(30px,4.6vw,42px);line-height:1.1;
+letter-spacing:-.02em;margin:30px 0 0;font-weight:400}
+h1 .em{color:var(--acc)}
+.lede{color:var(--dim);font-size:clamp(15px,1.8vw,16.5px);line-height:1.6;margin:14px 0 0;max-width:54ch}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}
+.fact{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);
+border-radius:4px;padding:6px 10px}
+.fact b{color:var(--txt);font-weight:500}
+.grid2{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;margin-top:26px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
+.card.convert{display:flex;flex-direction:column}
+.card h2{font-family:var(--serif);font-size:14.5px;font-weight:500;margin:0 0 14px;letter-spacing:0}
+.drop{border:1.5px dashed var(--line2);border-radius:6px;padding:26px 16px;text-align:center;
+cursor:pointer;transition:border-color .15s;background:var(--well)}
+.card.convert .drop{flex:1;display:flex;flex-direction:column;justify-content:center}
+.drop:hover,.drop.over{border-color:var(--acc)}
+.drop b{display:block;font-size:15px;font-weight:600;margin-bottom:4px}
+.drop span{color:var(--faint);font-size:12.5px}
 .row{display:flex;gap:9px;margin-top:12px}
-.row input{flex:1;min-width:0;background:#0b0e14;border:1px solid var(--line);color:var(--txt);
-border-radius:10px;padding:11px 12px;font:inherit;font-size:14px}
-.row input::placeholder{color:#5d6577}
-.go{width:100%;margin-top:13px;background:var(--acc);color:#fff;border:0;border-radius:11px;
-padding:14px 18px;font:inherit;font-size:15px;font-weight:680;cursor:pointer}
-.go:hover{background:#7c5af0}
+.row input{flex:1;min-width:0;background:var(--well);border:1px solid var(--line);color:var(--txt);
+border-radius:4px;padding:10px 11px;font:inherit;font-size:13px;transition:border-color .15s}
+.row input::placeholder{color:var(--faint)}
+.row input:hover{border-color:var(--line2)}
+.row input:focus-visible{outline:none;border-color:var(--acc)}
+.go{width:100%;margin-top:12px;background:var(--acc);color:#fff;border:0;border-radius:6px;
+padding:13px 20px;font:inherit;font-size:14.5px;font-weight:700;cursor:pointer;
+transition:background .15s}
+.go:hover{background:var(--acc2)}
+.go:focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
 .go:disabled{opacity:.55;cursor:wait}
-.ghost-btn{width:100%;margin-top:9px;background:transparent;border:1px solid var(--line2);color:var(--dim);
-border-radius:11px;padding:11px 18px;font:inherit;font-size:13.5px;cursor:pointer}
-.ghost-btn:hover{color:var(--txt);border-color:#3a4252}
+.ghost-btn{width:100%;margin-top:9px;background:transparent;border:1px solid var(--line2);
+color:var(--dim);border-radius:6px;padding:10px 16px;font:inherit;font-size:13px;cursor:pointer;
+transition:border-color .15s,color .15s}
+.ghost-btn:hover{color:var(--txt);border-color:#bdb4a4}
 #msg{margin-top:11px;font-size:13.5px;min-height:20px;color:var(--dim)}
-#msg.err{color:#ff8080}#msg.ok{color:var(--ok)}
+#msg.err{color:#a3301f}#msg.ok{color:var(--ok)}
 .proof .rows{margin:0;padding:0;list-style:none;border-top:1px solid var(--line)}
 .proof .rows li{display:flex;gap:12px;justify-content:space-between;align-items:baseline;
-padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .proof .rows .k{color:var(--faint)}
-.proof .rows .v{color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
-text-align:right}
-.toc{margin:14px 0 0;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#0c0f15}
-.toc .t{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
-padding:9px 12px;border-bottom:1px solid var(--line);background:#0e1117}
-.toc ol{margin:0;padding:8px 12px 11px 30px}
-.toc li{font-size:13.5px;color:var(--txt);padding:3px 0}
-.para{margin:12px 0 0;font-size:13.5px;line-height:1.6;color:var(--dim)}
+.proof .rows .v{color:var(--txt);font-family:var(--mono);font-size:12px;text-align:right}
+.toc{margin:14px 0 0;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--well)}
+.toc .t{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+color:var(--faint);padding:8px 11px;border-bottom:1px solid var(--line)}
+.toc ol{margin:0;padding:7px 12px 10px 30px}
+.toc li{font-size:13px;padding:2px 0}
+.para{margin:12px 0 0;font-size:13px;line-height:1.6;color:var(--dim)}
 .para b{color:var(--txt);font-weight:600}
-h2{font-size:19px;letter-spacing:-.3px;margin:44px 0 14px}
-.fixes{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:860px){.fixes{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:480px){.fixes{grid-template-columns:1fr}}
-.fix{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px 15px}
-.fix b{display:block;font-size:13.8px;line-height:1.35}
-.fix .tag{font-size:11px;color:var(--acc2);font-family:ui-monospace,Menlo,monospace;display:block;margin-bottom:6px}
-.note-line{color:var(--dim);font-size:13.5px;margin:16px 0 0;max-width:70ch}
-.links{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
-.links a{font-size:13.5px;text-decoration:none;border:1px solid var(--line2);border-radius:9px;
-padding:9px 12px;color:var(--dim);background:var(--panel)}
-.links a:hover{color:var(--txt);border-color:#3a4252}
-footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--faint);font-size:12.5px;
-display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
-@media(max-width:780px){.grid2{grid-template-columns:1fr}h1{letter-spacing:-1px}}
-@media(max-width:560px){header.top{padding:16px 0 4px}.pill{display:none}}
+h2{font-family:var(--serif);font-size:19px;font-weight:500;letter-spacing:-.2px;margin:42px 0 14px}
+.fixes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.fix{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:13px 14px}
+.fix b{display:block;font-size:13.5px;line-height:1.35;font-weight:600}
+.fix .tag{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+text-transform:uppercase;color:var(--acc);margin-bottom:6px}
+.links{display:flex;flex-wrap:wrap;gap:9px;margin-top:34px}
+.links a{font-size:13px;text-decoration:none;border:1px solid var(--line2);border-radius:4px;
+padding:9px 12px;color:var(--dim);background:var(--panel);transition:border-color .15s,color .15s}
+.links a:hover{color:var(--txt);border-color:#bdb4a4}
+footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--faint);
+font-size:12.5px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+footer .mono{font-size:11.5px}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}.fixes{grid-template-columns:1fr}
+h1{letter-spacing:-.015em}}
+@media(max-width:560px){header.top{padding:18px 0 12px}.pill{display:none}.card{padding:16px}}
 """
 
 PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>PDF to EPUB - real chapters, real paragraphs, free</title>
 <meta name="description" content="Free PDF to EPUB with real chapters, a clickable table of contents, scanned books read with OCR. No signup, no watermark, nothing stored.">
 <meta property="og:title" content="PDF to EPUB - real chapters, real paragraphs, free">
@@ -399,8 +404,7 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 </header>
 
 <h1>Your PDF, as a <span class="em">real book</span>.</h1>
-<p class="lede">Paragraphs stay paragraphs, headers and page numbers go, headings become chapters.
-Free, no signup, nothing kept.</p>
+<p class="lede">Real chapters, real paragraphs. Free, no signup, nothing kept.</p>
 <div class="facts mono">
   <span class="fact"><b>200MB</b> / 500 pages</span>
   <span class="fact">OCR on scans, <b>free</b></span>
@@ -408,9 +412,8 @@ Free, no signup, nothing kept.</p>
 </div>
 
 <div class="grid2">
-  <div class="card">
-    <h3>Convert a PDF</h3>
-    <p class="sub">Drop a file. The EPUB downloads straight to your device.</p>
+  <div class="card convert">
+    <h2>Convert a PDF</h2>
     <div id="drop" class="drop"><b>Drop a PDF here</b><span>or click to choose one</span></div>
     <input id="file" type="file" accept=".pdf" hidden>
     <div class="row">
@@ -424,12 +427,10 @@ Free, no signup, nothing kept.</p>
   </div>
 
   <div class="card proof">
-    <h3>What you actually get</h3>
-    <p class="sub">This is the real output for a real 2 page PDF, computed on this page.</p>
+    <h2>The actual output</h2>
     <ul class="rows">
       <li><span class="k">Printed lines in the PDF</span><span class="v">__PARAS__</span></li>
       <li><span class="k">Paragraphs in the EPUB</span><span class="v">__EPARAS__</span></li>
-      <li><span class="k">Running header + page number</span><span class="v">removed</span></li>
       <li><span class="k">Table of contents</span><span class="v">__TOCN__ entries</span></li>
     </ul>
     <div class="toc"><div class="t">Table of contents</div><ol>__TOC__</ol></div>
@@ -440,20 +441,14 @@ Free, no signup, nothing kept.</p>
 <h2>What it repairs</h2>
 <div class="fixes">
   <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
-  <div class="fix"><span class="tag">headers</span><b>Headers and page numbers out</b></div>
   <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
-  <div class="fix"><span class="tag">figures</span><b>Maps and figures stay in text PDFs and scans</b></div>
   <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
 </div>
-<p class="note-line">Then read it anywhere: send to Kindle by email with the subject "convert", copy it over
-USB, or open it in Apple Books, Kobo, KOReader or PocketBook.</p>
 
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
   <a href="/shelf">Shelf: $10/mo, 1,000 pages a month</a>
   <a href="/guides">Guides</a>
-  <a href="/guides/send-pdf-to-kindle">Getting a PDF onto a Kindle</a>
-  <a href="/guides/pdf-to-epub-vs-calibre">vs Calibre</a>
   <a href="/privacy">Privacy</a>
 </div>
 
@@ -470,13 +465,13 @@ const PITCH='Too big for the free converter (200MB / 500 pages).<br><br>'
  +'<a href="__ONETIME__">one book - $5</a>.<br>'
  +'<b>A whole shelf?</b> Shelf is $10/month for 1,000 pages, batch conversion, and Kindle '
  +'delivery: <a href="__SHELF__">subscribe</a>.'
- +'<br><br><span style="font-size:13px;color:#9aa4b5">Bigger than 2,000 pages or a rough scan? '
+ +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages or a rough scan? '
  +'Leave your email for a custom quote.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
- +'style="max-width:340px;background:#0b0e14;border:1px solid #242a36;color:#eef1f7;'
- +'border-radius:10px;padding:10px 12px;font:inherit;font-size:14px"> '
- +'<button id="leadbtn" style="margin-top:8px;background:#8b6cff;color:#fff;border:0;'
- +'border-radius:10px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
+ +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
+ +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
+ +'<button id="leadbtn" style="margin-top:8px;background:#6b4ce6;color:#fff;border:0;'
+ +'border-radius:4px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
  +'Ask</button>';
 document.addEventListener('click',async(e)=>{
  if(e.target.id!=='leadbtn')return;
@@ -537,7 +532,9 @@ def _proof() -> dict:
     raw = _sample_pdf()
     doc = pymupdf.open(stream=raw, filetype="pdf")
     blocks = list(_blocks(doc))
-    printed = sum(1 for _ in blocks)
+    # ponytail: count printed lines, not blocks; "8 lines" from 2 pages reads as a toy
+    printed = sum(len(b.get("lines", [])) for pg in doc
+                  for b in pg.get_text("dict")["blocks"] if b.get("type") == 0)
     chapters = _structure(blocks, doc)
     doc.close()
     paras = [t for ch in chapters for k, t in ch if k == "p"]
@@ -582,25 +579,29 @@ def index(request: Request):
 
 SCAN_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>Scan a book to EPUB - free</title>
 <meta name="description" content="Photograph the pages of a book and get an EPUB with chapters and a table of contents. OCR runs on the pages, nothing is stored.">
 <style>
-:root{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}
+:root{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--mut:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 .wrap{max-width:620px;margin:0 auto;padding:32px 18px 64px}
-h1{font-size:28px;margin:0 0 8px}p.lead{color:var(--mut);margin:0 0 20px;font-size:15px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
-button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:14px 20px;font-size:16px;font-weight:700;width:100%;margin-top:14px;cursor:pointer}
+h1{font-family:var(--serif);font-weight:500;font-size:28px;margin:0 0 8px}p.lead{color:var(--mut);margin:0 0 20px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:22px}
+button{background:var(--acc);color:#fff;border:0;border-radius:4px;padding:14px 20px;font-size:16px;font-weight:700;width:100%;margin-top:14px;cursor:pointer}
 button:disabled{opacity:.5;cursor:wait}
-input[type=text]{width:100%;background:#0f1319;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:12px;margin-top:10px}
-#msg{margin-top:12px;font-size:14px;min-height:20px;color:var(--mut)}#msg.err{color:#ff7b7b}#msg.ok{color:#7be3a8}
-.note{color:var(--mut);font-size:13px;margin-top:18px}a{color:#b9a7ff}
+input[type=text]{width:100%;background:#f4f0e7;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:12px;margin-top:10px}
+.pick{display:block;border:1.5px dashed #d3ccbe;border-radius:6px;background:#f4f0e7;padding:26px 16px;text-align:center;cursor:pointer;transition:border-color .15s}
+.pick:hover{border-color:var(--acc)}.pick b{display:block;font-size:15px;margin-bottom:4px}.pick span{color:var(--mut);font-size:12.5px}
+#msg{margin-top:12px;font-size:14px;min-height:20px;color:var(--mut)}#msg.err{color:#a3301f}#msg.ok{color:#1f7a4d}
+.note{color:var(--mut);font-size:13px;margin-top:18px}a{color:#553bc4}
 </style></head><body><div class="wrap">
 <h1>Scan a book to EPUB</h1>
 <p class="lead">Photograph the pages of a physical book. The text gets read with OCR, map and
 figure pages stay as images, and you get an EPUB for a Kindle, Kobo or phone. Nothing is stored.</p>
 <div class="card">
-<input id="file" type="file" accept="image/*" capture="environment" multiple>
+<input id="file" type="file" accept="image/*" capture="environment" multiple hidden>
+<label class="pick" for="file" id="pick"><b>Choose page photos</b><span>or take them with the camera</span></label>
 <input id="title" type="text" placeholder="Title (optional)">
 <button id="go">Convert pages to EPUB</button>
 <div id="msg">Up to 60 pages per batch. Clear photos, one page per shot.</div>
@@ -610,6 +611,8 @@ so expect a few typos in the text, same as any OCR.</p>
 <p class="note">Free, no signup, no watermark. The file is deleted after the download.</p>
 </div><script>
 const fi=document.getElementById('file'),go=document.getElementById('go'),msg=document.getElementById('msg');
+fi.onchange=()=>{const n=[...fi.files].filter(f=>f.type.startsWith('image/')).length;
+ if(n)document.getElementById('pick').innerHTML='<b>'+n+' page'+(n>1?'s':'')+' chosen</b><span>tap to change</span>'};
 go.onclick=async()=>{
  const files=[...fi.files].filter(f=>f.type.startsWith('image/'));
  if(!files.length){msg.className='err';msg.textContent='Pick at least one page photo.';return}
@@ -696,19 +699,22 @@ def guide_page(title: str, desc: str, body: str, canonical: str) -> HTMLResponse
     # ponytail: one template for every guide, no framework
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(desc)}">
 <link rel="canonical" href="https://epub.ftak.net{canonical}">
 <style>
-:root{{--bg:#0f1115;--card:#171b22;--line:#2a3140;--txt:#e8ecf3;--mut:#9aa4b5;--acc:#7c5cff}}
+:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--mut:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
 .wrap{{max-width:720px;margin:0 auto;padding:36px 20px 72px}}
-h1{{font-size:30px;margin:0 0 18px;letter-spacing:-.5px}}h2{{font-size:20px;margin:30px 0 8px}}p,li{{color:#cfd6e3}}
-code{{background:#0f1319;border:1px solid var(--line);border-radius:6px;padding:1px 5px;font-size:14px}}
-a{{color:#b9a7ff}}.cta{{display:inline-block;background:var(--acc);color:#fff;border-radius:10px;padding:13px 20px;font-weight:700;text-decoration:none;margin-top:10px}}
-.box{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:26px}}
+h1{{font-family:var(--serif);font-weight:500;font-size:30px;margin:0 0 18px;letter-spacing:-.02em}}h2{{font-family:var(--serif);font-weight:500;font-size:20px;margin:30px 0 8px}}p,li{{color:#5b564d;max-width:68ch}}
+code{{background:#f4f0e7;border:1px solid var(--line);border-radius:6px;padding:1px 5px;font-size:14px}}
+a{{color:#553bc4}}.cta{{display:inline-block;background:var(--acc);color:#fff;border-radius:4px;padding:13px 20px;font-weight:700;text-decoration:none;margin-top:10px}}
+.box{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:26px}}
 .foot{{color:var(--mut);font-size:13px;margin-top:34px}}
+.mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:19px;text-decoration:none;color:var(--txt);margin-bottom:26px}}.mark .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--acc);margin-right:9px}}
 </style></head><body><div class="wrap">
+<a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>{html.escape(title)}</h1>
 {body}
 <div class="box"><b>Convert a PDF to EPUB</b><br>Free, no signup, real chapters and a table of contents.
@@ -721,17 +727,35 @@ def _sample_pdf() -> bytes:
     # ponytail: generated on the fly, no binary in repo. Shows the three things we claim:
     # wrapped lines joined into one paragraph, running header + page number dropped, chapters detected.
     doc = pymupdf.open()
-    body = ("This is a sample PDF so you can try the converter without hunting for a file. "
-            "If this comes out as one clean paragraph in your reader, the converter joined the "
-            "printed lines back together and dropped the running header.")
-    for i, (head, text) in enumerate([
-        ("Chapter One", body),
-        ("Chapter Two", body + " The second chapter repeats the text on purpose, so you can see two entries in the table of contents."),
-    ]):
+    chapters = [
+        ("Chapter One", [
+            "Every book begins with a page that says nothing about the book. The title sits high on the sheet, the author sits under it, and the rest of the page is white space doing quiet work.",
+            "This sample file is generated for you, not pulled from a shelf. Convert it and open the result in your reader. If the sentences below arrive as whole paragraphs instead of one line per printed line, the converter did its job.",
+            "The running header at the top of this page and the page number at the bottom are the two things a print PDF carries that a reader should never see. Neither one is in the EPUB you get back.",
+        ]),
+        ("Chapter Two", [
+            "A page is a container, not a thought. Words wrap at the margin because paper has an edge, and a converter that treats every wrap as a paragraph break hands you a book that reads like a shopping list.",
+            "What a reader wants is the shape the author wrote: paragraphs, headings, chapters. That shape is recoverable. Text blocks in the PDF carry it, and blocks are what this converter reads.",
+            "So the second chapter exists to prove the table of contents. Two entries in the file, two entries in the menu of your reader, each one a tap away from where it belongs.",
+        ]),
+        ("Chapter Three", [
+            "Scanned books take a different road. There are no text blocks to read, only pixels, so the pages go through OCR first and the same structure pass runs on the result.",
+            "That path is free up to two hundred pages. It is slower, because a machine is reading photographs of paper, but the output is the same EPUB with the same chapters and the same paragraphs.",
+            "Nothing you upload is kept. The file is converted in memory, handed back as a download, and gone. No account, no library, no copy on a disk somewhere waiting to be sold.",
+        ]),
+    ]
+    for i, (head, paras) in enumerate(chapters):
         page = doc.new_page()
         page.insert_text((72, 60), "Sample Book - a running header", fontsize=9, color=(0.45, 0.45, 0.45))
         page.insert_text((72, 120), head, fontsize=22)
-        page.insert_textbox(pymupdf.Rect(72, 150, 520, 420), text, fontsize=11)
+        y = 158
+        for text in paras:
+            rect = pymupdf.Rect(72, y, 520, 760)
+            # ponytail: no lineheight arg, it makes pymupdf emit one block per line
+            left = page.insert_textbox(rect, text, fontsize=11)
+            if left < 0:
+                break
+            y = rect.y1 - left + 14
         page.insert_text((300, 780), str(i + 1), fontsize=9)
     data = doc.tobytes()
     doc.close()
@@ -765,14 +789,16 @@ def thanks(request: Request):
             f'send it again.</p></div>')
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>Thanks - pdf2epub Shelf</title>
-<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}}
+<style>:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
 .wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
-h1{{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
-b{{color:var(--txt)}}a{{color:var(--acc2)}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}</style></head>
+h1{{font-family:var(--serif);font-weight:500;font-size:28px;letter-spacing:-.02em;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}.mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:17px;text-decoration:none;color:var(--txt);margin-bottom:22px}}.mark .dot{{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:8px}}</style></head>
 <body><div class="wrap">
+<a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>You're in.</h1>
 <p>Shelf is $10 a month for 1,000 pages of your own, no per-file ceiling, batch conversion of a
 whole shelf, and the finished EPUB delivered to your Kindle.</p>
@@ -805,14 +831,16 @@ def onebook(request: Request):
                 "<p>If you just paid and there is no checkout ID in the address, reply to the Polar receipt.</p>")
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>One book - pdf2epub</title>
-<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff}}
+<style>:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
 .wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
-h1{{font-size:28px;letter-spacing:-.5px;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
-b{{color:var(--txt)}}a{{color:#a98fff}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}</style></head>
+h1{{font-family:var(--serif);font-weight:500;font-size:28px;letter-spacing:-.02em;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:#553bc4}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}.mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:17px;text-decoration:none;color:var(--txt);margin-bottom:22px}}.mark .dot{{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:8px}}</style></head>
 <body><div class="wrap">
+<a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>One book.</h1>
 <p>Paid once. Send the PDF and I will convert it by hand.</p>
 <div class="card">
@@ -861,20 +889,22 @@ def shelf(request: Request):
     print(line, flush=True)
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
 <title>Shelf - pdf2epub</title>
 <meta name="description" content="Shelf: $10/month for 1,000 scanned pages, batch conversion of a whole shelf, and the finished EPUB delivered to your Kindle.">
 <link rel="canonical" href="https://epub.ftak.net/shelf">
-<style>:root{{--bg:#0a0c10;--card:#12151c;--line:#242a36;--txt:#eef1f7;--dim:#98a1b3;--acc:#8b6cff;--ok:#5fd39a}}
+<style>:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--ok:#1f7a4d;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);
 font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
 .wrap{{max-width:640px;margin:0 auto;padding:56px 20px}}
-h1{{font-size:30px;letter-spacing:-.6px;margin:0 0 10px}}p{{color:var(--dim);margin:0 0 14px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:22px}}
-b{{color:var(--txt)}}a{{color:#a98fff}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px}}
-.btn{{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;border-radius:11px;
+h1{{font-family:var(--serif);font-weight:500;font-size:30px;letter-spacing:-.02em;margin:0 0 10px}}p{{color:var(--dim);margin:0 0 14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:22px}}
+b{{color:var(--txt)}}a{{color:#553bc4}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px}}
+.btn{{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;border-radius:6px;
 padding:13px 20px;font-weight:650;margin-top:8px}}
-ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}</style></head>
+ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}.mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:17px;text-decoration:none;color:var(--txt);margin-bottom:22px}}.mark .dot{{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:8px}}</style></head>
 <body><div class="wrap">
+<a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>Shelf</h1>
 <p>The free converter stays free. Shelf is for the people who have a shelf.</p>
 <p>One reader put 68 books through the free converter in 32 minutes. Seven of the uploads
@@ -921,6 +951,30 @@ def robots():
     # ponytail: fastapi does not serve static files, so the rule lives here
     return Response("User-agent: *\nAllow: /\n\nSitemap: https://epub.ftak.net/sitemap.xml\n",
                     media_type="text/plain")
+
+
+FONT_DIR = Path(__file__).parent / "fonts"
+FONT_CSS = """@font-face{font-family:Newsreader;src:url(/fonts/newsreader-latin.woff2) format("woff2");
+font-weight:400 500;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url(/fonts/jetbrainsmono-latin.woff2) format("woff2");
+font-weight:400 500;font-style:normal;font-display:swap}
+"""
+
+
+@app.get("/fonts.css")
+def fonts_css():
+    # ponytail: no static mount, one cached sheet beats repeating @font-face in six templates
+    return Response(FONT_CSS, media_type="text/css",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@app.get("/fonts/{name}")
+def font_file(name: str):
+    f = FONT_DIR / name
+    if f.suffix != ".woff2" or not f.is_file():
+        raise HTTPException(404)
+    return Response(f.read_bytes(), media_type="font/woff2",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.get("/healthz")
@@ -1255,7 +1309,11 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
 
     blocks = list(_blocks(doc))
     npages = len(doc)
-    safe_title = (title or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
+    meta = doc.metadata or {}
+    # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
+    safe_title = (title or (meta.get("title") or "").strip()
+                  or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
+    author = (author or (meta.get("author") or "").strip())[:120]
     if not blocks:
         # scanned PDF: OCR is the only thing that helps before falling back
         if npages <= OCR_MAX_PAGES:
