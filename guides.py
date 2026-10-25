@@ -65,7 +65,7 @@ table of contents is empty, no matter how good the OCR is.</p>
 reader's.</li>
 </ol>
 <h2>Try it</h2>
-<p>Drop a scanned PDF below. Scans up to 200 pages go through OCR, free and with no account.</p>
+<p>Drop a scanned PDF below. The first 20 pages of a scan go through OCR free, with no account; the whole book is $5.</p>
 """,
     ),
     "send-pdf-to-kindle": (

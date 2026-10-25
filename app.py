@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import csv
+import hashlib
 import html
 import json
 import os
@@ -12,10 +13,11 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 try:
     from guides import GUIDES, INDEX_BODY
 except Exception:  # ponytail: a missing file must not take the site down
@@ -26,15 +28,26 @@ app = FastAPI()
 MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
 MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
 OCR_MAX_PAGES = 200
+# ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
+# stay free to 500 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
+FREE_OCR_PAGES = 20
+PAID_OCR_MAX_PAGES = 600  # ponytail: OCR runs inside the request, past this the proxy times out
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 SHELF_URL = "https://buy.polar.sh/polar_cl_1jZLYsY7lODWs2QOnhNALMww3O7if69LL4nRQ1JiNmJ"  # pdf2epub org, verified 200
 ONETIME_URL = "https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc"  # $5 one book, manual, paid before delivery
 SHELF_MAIL = "krishavrajsingh@gmail.com"
+SHELF_PRODUCT = "8c3386ae-0aea-4dd2-87bc-7735b8af795a"
+ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
+POLAR_TOKEN = os.environ.get("POLAR_TOKEN", "")  # ponytail: read-only OAT, only orders:read is needed
+POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
 # the key is a secret string we mail them, they put it in the url as ?k=KEY
 SHELF_KEYS = Path(os.environ.get("LOG_DIR", ".")) / "shelf-keys.txt"  # one key per line
+PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified ids, so refresh is free
+USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
+FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
 SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 500, which is what a textbook is
 SHELF_MAX_MB = 500
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
@@ -60,6 +73,61 @@ def shelf_key(request: Request) -> str:
     return k if k in keys else ""
 
 
+def paid_checkout(cid: str, product_id: str) -> bool:
+    """True only if Polar says this checkout succeeded for this product.
+
+    ponytail: no db, so a verified id is appended to a file on the volume. Polar never un-pays a
+    checkout, and the file is small (one line per sale). A missing token means no key, not a free one.
+    """
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", cid or ""):
+        return False
+    try:
+        for line in PAID.read_text().splitlines():
+            if line.split()[:2] == [cid, product_id]:
+                return True
+    except OSError:
+        pass
+    if not POLAR_TOKEN:
+        return False
+    req = urllib.request.Request(POLAR_ORDERS + "?limit=1&checkout_id=" + cid,
+                                 headers={"Authorization": "Bearer " + POLAR_TOKEN})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            items = (json.load(r) or {}).get("items") or []
+    except Exception:  # ponytail: a polar outage must not 500 the buyer's success page
+        return False
+    if not items or items[0].get("status") != "paid" or items[0].get("product_id") != product_id:
+        return False
+    try:
+        with PAID.open("a") as fh:
+            fh.write(f"{cid} {product_id}\n")
+    except OSError:
+        pass
+    event("paid", None, checkout_id=cid, product=product_id)  # ponytail: once per checkout, the file dedupes
+    return True
+
+
+def onebook_ok(cid: str, digest: str) -> bool:
+    """A paid one-book checkout converts one file. Re-running that same file stays free."""
+    try:
+        for line in USED.read_text().splitlines():
+            parts = line.split()
+            if parts and parts[0] == cid:
+                return parts[1:2] == [digest]
+    except OSError:
+        pass
+    return paid_checkout(cid, ONEBOOK_PRODUCT)
+
+
+def onebook_use(cid: str, digest: str):
+    # ponytail: the file hash, never the file, so "nothing stored" stays true
+    try:
+        with USED.open("a") as fh:
+            fh.write(f"{cid} {digest}\n")
+    except OSError:
+        pass
+
+
 def issue_key(checkout_id: str) -> str:
     """Mint a key for a paid checkout, once per checkout id.
 
@@ -83,19 +151,40 @@ def issue_key(checkout_id: str) -> str:
                       "ua": ""}), flush=True)
     return key
 
-def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = "",
-        request: Request = None):
-    line = json.dumps({"t": datetime.now(timezone.utc).isoformat(),
-        "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
-        "ref": ref[:60], "email": email, "ua": ua_of(request)[:120] if request else ""})
+def _write(line: str):
     try:
-        if LOG.exists() and LOG.stat().st_size > 1_000_000:
-            LOG.write_text("")  # ponytail: rotate by trunc, log shipper when paid
+        if LOG.exists() and LOG.stat().st_size > 20_000_000:
+            # ponytail: keep one old file, the funnel needs more than a day of history
+            LOG.replace(LOG.with_suffix(".log.1"))
         with LOG.open("a") as fh:
             fh.write(line + "\n")
     except OSError:
         pass  # ponytail: analytics never breaks conversion
     print(line, flush=True)  # ponytail: stdout copy so the counters survive a host move (no volume)
+
+
+def vid_of(request: Request | None) -> str:
+    # ponytail: a random id the page keeps in localStorage, no cookie, no account. it is what joins
+    # a visit to its convert, its paywall and its payment, so the funnel counts people, not hits
+    if request is None:
+        return ""
+    v = request.headers.get("x-v") or request.query_params.get("v") or ""
+    return v if re.fullmatch(r"[0-9A-Za-z]{8,40}", v) else ""
+
+
+def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = "",
+        request: Request = None):
+    _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(),
+        "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
+        "ref": ref[:60], "email": email, "ua": ua_of(request)[:120] if request else "",
+        "v": vid_of(request)}))
+
+
+def event(name: str, request: Request | None = None, **fields):
+    """One funnel step. `ev` lines are not visits or conversions, /stats skips them."""
+    _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ev": name[:40],
+        "v": vid_of(request), "ref": ref_of(request)[:60] if request else "",
+        "ua": ua_of(request)[:120] if request else "", **fields}))
 
 def ref_of(request: Request) -> str:
     # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
@@ -146,10 +235,10 @@ def throttle(request: Request, limit: int = 30, window: int = 60, day_limit: int
 def err_page(msg: str, code: int):
     # ponytail: the cap rejections are where the paid tier gets pitched, so keep the checkout links
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
-        "<p>Too big for the free converter? <b>One book:</b> $5 once, then email it to me and I "
-        f"will convert it by hand: <a href='{ONETIME_URL}'>one book - $5</a>. "
+        "<p>Too big for the free converter? <b>One book:</b> $5 once, then come back and it converts "
+        "on the spot, up to 2,000 pages: <a href='/go/onebook?why=errpage'>one book - $5</a>. "
         "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
-        f"whole shelf and delivery to your Kindle: <a href='{SHELF_URL}'>subscribe</a>.</p>"
+        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
 
 def calibre_convert(raw: bytes) -> bytes | None:
@@ -302,6 +391,18 @@ def build_epub(chapters, title: str, author: str) -> bytes:
     epub.write_epub(buf, book)
     return buf.getvalue()
 
+TRACK_JS = r"""// ponytail: a random id in localStorage joins this visit to its convert, paywall and payment in
+// /funnel. no cookie, no account, never sent anywhere but this site
+let V='',SRC='direct';
+try{V=localStorage.getItem('v')||'';if(!V){V=Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('v',V)}}
+ catch(e){V=Math.random().toString(36).slice(2)+Date.now().toString(36)}
+try{const q=new URLSearchParams(location.search),rf=document.referrer?new URL(document.referrer).hostname:'';
+ const now=q.get('s')||q.get('utm_source')||(rf&&rf!==location.hostname?rf.replace(/^www\./,''):'');
+ SRC=localStorage.getItem('src')||now||'direct';if(!localStorage.getItem('src'))localStorage.setItem('src',SRC)}catch(e){}
+function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
+ev('view',{path:location.pathname});
+"""
+
 PAGE_CSS = """
 :root{--bg:#faf7f0;--panel:#fffdf8;--well:#f4f0e7;--line:#e4ded2;--line2:#d3ccbe;
 --txt:#1b1916;--dim:#5b564d;--faint:#6f685b;--acc:#6b4ce6;--acc2:#553bc4;--ok:#1f7a4d;
@@ -407,7 +508,7 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <p class="lede">Real chapters, real paragraphs. Free, no signup, nothing kept.</p>
 <div class="facts mono">
   <span class="fact"><b>200MB</b> / 500 pages</span>
-  <span class="fact">OCR on scans, <b>free</b></span>
+  <span class="fact">Scans: OCR free for <b>__FREEOCR__ pages</b></span>
   <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
 </div>
 
@@ -457,27 +558,36 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
   <span class="mono" id="st"></span>
 </footer>
 </div><script>
-const drop=document.getElementById('drop'),fi=document.getElementById('file'),
+__TRACK__const drop=document.getElementById('drop'),fi=document.getElementById('file'),
  msg=document.getElementById('msg'),go=document.getElementById('go'),smp=document.getElementById('sample');
+const BTN='display:inline-block;margin:8px 8px 0 0;background:#6b4ce6;color:#fff;border:0;border-radius:4px;'
+ +'padding:10px 16px;font:inherit;font-weight:650;cursor:pointer;text-decoration:none';
+const GHOST='display:inline-block;margin:8px 8px 0 0;background:transparent;color:#5b564d;border:1px solid #d3ccbe;'
+ +'border-radius:4px;padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none';
+function buy(why){return '/go/onebook?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
-const PITCH='Too big for the free converter (200MB / 500 pages).<br><br>'
- +'<b>One big book?</b> $5 once, then email it to me and I will convert it by hand: '
- +'<a href="__ONETIME__">one book - $5</a>.<br>'
- +'<b>A whole shelf?</b> Shelf is $10/month for 1,000 pages, batch conversion, and Kindle '
- +'delivery: <a href="__SHELF__">subscribe</a>.'
- +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages or a rough scan? '
- +'Leave your email for a custom quote.</span><br>'
+function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free converter stops at 500.<br>'
+ +'<a style="'+BTN+'" href="'+buy('pages')+'">Convert the whole book - $5</a>'
+ +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
+ +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
+ +'on the spot, up to 2,000 pages. Nothing stored.</span>'
+ +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Leave your email for a quote.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
- +'<button id="leadbtn" style="margin-top:8px;background:#6b4ce6;color:#fff;border:0;'
- +'border-radius:4px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer">'
- +'Ask</button>';
+ +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
+function pitchOcr(n){return 'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
+ +'Free OCR covers __FREEOCR__ pages.<br>'
+ +'<a style="'+BTN+'" href="'+buy('ocr')+'">OCR the whole book - $5</a>'
+ +'<button id="preview" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>'
+ +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
+ +'on the spot. Nothing stored.</span>'}
 document.addEventListener('click',async(e)=>{
+ if(e.target.id==='preview'){convert(true);return}
  if(e.target.id!=='leadbtn')return;
  const em=document.getElementById('leadmail');
  if(!em||!em.value)return;
- e.target.disabled=true;
+ e.target.disabled=true;ev('lead');
  const fd=new FormData();fd.append('email',em.value);fd.append('reason','cap');
  if(window.capPages)fd.append('pages',window.capPages);
  const r=await fetch('/lead',{method:'POST',body:fd});
@@ -488,35 +598,38 @@ document.addEventListener('click',async(e)=>{
 drop.onclick=()=>fi.click();
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files});
-go.onclick=async()=>{
+drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0])ev('pick')});
+fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name}});
+async function convert(preview){
  const f=fi.files[0];
  if(!f){msg.className='err';msg.textContent='Choose a PDF first.';return}
- msg.className='';msg.textContent='Converting...';go.disabled=true;
+ msg.className='';msg.textContent=preview?'Reading the first __FREEOCR__ pages...':'Converting...';go.disabled=true;
+ ev('submit',preview?{why:'preview'}:{});
  const fd=new FormData();fd.append('f',f);
  fd.append('title',document.getElementById('title').value);
  fd.append('author',document.getElementById('author').value);
  fd.append('email',document.getElementById('email').value);
+ if(preview)fd.append('preview','1');
  try{
-  const r=await fetch('/convert'+location.search,{method:'POST',body:fd});
-  if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V}});
+  if(!r.ok){const t=await r.text();const er=new Error(r.status+': '+t.slice(0,160));er.status=r.status;throw er}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
-  a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
-  msg.className='ok';msg.textContent='Done. EPUB downloaded.'}
- catch(e){msg.className='err';msg.textContent=e.message;
-  if(/^413/.test(e.message)){
-   window.capPages=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
-   window.capName=(f&&f.name)||'book';
-   msg.innerHTML=PITCH;
-  }}
- go.disabled=false};
+  a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
+  msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first __FREEOCR__ pages.':'Done. EPUB downloaded.'}
+ catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
+  const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
+  window.capPages=n;window.capName=(f&&f.name)||'book';
+  if(e.status===413){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
+  if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
+ go.disabled=false}
+go.onclick=()=>convert(false);
 smp.onclick=async()=>{
- msg.className='';msg.textContent='Converting the sample...';smp.disabled=true;go.disabled=true;
+ msg.className='';msg.textContent='Converting the sample...';smp.disabled=true;go.disabled=true;ev('sample');
  try{
   const b=await (await fetch('/sample.pdf')).blob();
   const fd=new FormData();fd.append('f',new File([b],'sample.pdf',{type:'application/pdf'}));
   fd.append('title','Sample Book');fd.append('email',document.getElementById('email').value);
-  const r=await fetch('/convert'+location.search,{method:'POST',body:fd});
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V}});
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sample.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open sample.epub and check the chapter list.'}
@@ -560,8 +673,8 @@ def _page() -> str:
             .replace("__TOCN__", str(len(pr["toc"])))
             .replace("__TOC__", toc)
             .replace("__MAIL__", SHELF_MAIL)
-            .replace("__SHELF__", SHELF_URL)
-            .replace("__ONETIME__", ONETIME_URL)
+            .replace("__TRACK__", TRACK_JS)
+            .replace("__FREEOCR__", str(FREE_OCR_PAGES))
             .replace("__FIRST__", html.escape(pr["first"])))
 
 
@@ -569,12 +682,7 @@ def _page() -> str:
 def index(request: Request):
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": ref_of(request), "ua": ua_of(request)[:120]})
-    try:
-        with LOG.open("a") as fh:  # ponytail: visit line, no PII, ref tag only
-            fh.write(line + "\n")
-    except OSError:
-        pass
-    print(line, flush=True)  # ponytail: stdout copy, see log()
+    _write(line)
     return _page()
 
 SCAN_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -768,16 +876,11 @@ def thanks(request: Request):
     cid = (request.query_params.get("checkout_id") or "")[:80]
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "thanks", "checkout_id": cid, "ua": ua_of(request)[:120]})
-    try:
-        with LOG.open("a") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass
-    print(line, flush=True)
-    # ponytail: hand the subscriber their key here. polar sends ?checkout_id=polar_c_xxx, so a
-    # junk request gets no key. the key is what lifts the per-file ceiling, no account needed.
+    _write(line)
+    # ponytail: hand the subscriber their key here. polar sends the checkout id, so a junk request
+    # gets no key. the key is what lifts the per-file ceiling, no account needed.
     key = ""
-    if re.match(r"^polar_c_[0-9A-Za-z]{20,80}$", cid or ""):
+    if paid_checkout(cid, SHELF_PRODUCT):
         key = issue_key(cid)
     key_html = ""
     if key:
@@ -787,6 +890,10 @@ def thanks(request: Request):
             f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
             f'<p>No account, no password. If you lose it, reply to the email I sent you and I will '
             f'send it again.</p></div>')
+    elif cid:
+        key_html = ('<div class="card"><p><b>Payment not confirmed yet</b></p>'
+            '<p>Polar has not shown me a completed payment for this checkout. If you were just '
+            f'charged, reply to the Polar receipt and I will send your key.</p></div>')
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
@@ -812,7 +919,8 @@ If it is a scan it gets OCR and the text will have the usual OCR typos, and I wi
 <a href="/">free converter</a>.</p>
 </div>
 <p>Questions about the plan, or a file that is over 500MB? Same address, I will work around it.</p>
-</div></body></html>""")
+</div><script>{TRACK_JS}
+ev('return',{{cid:{json.dumps(cid)}}});</script></body></html>""")
 
 
 @app.get("/onebook", response_class=HTMLResponse)
@@ -821,14 +929,30 @@ def onebook(request: Request):
     cid = (request.query_params.get("checkout_id") or "")[:80]
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "onebook", "checkout_id": cid, "ua": ua_of(request)[:120]})
-    try:
-        with LOG.open("a") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass
-    print(line, flush=True)
-    cid_html = (f"<p>Checkout ID: <code>{html.escape(cid)}</code></p>" if cid else
-                "<p>If you just paid and there is no checkout ID in the address, reply to the Polar receipt.</p>")
+    _write(line)
+    paid = paid_checkout(cid, ONEBOOK_PRODUCT)
+    # ponytail: paid means the upload box right here, converted on the spot. email stays the fallback
+    if paid:
+        main = f"""<div class="card">
+<p><b>Payment confirmed.</b> Choose the PDF and it converts now, up to 2,000 pages, scans included.</p>
+<input id="file" type="file" accept=".pdf">
+<button class="btn" id="go">Convert my book</button>
+<p id="msg"></p>
+<p style="font-size:13px">One book per payment. Converting the same file again is free if you need to.
+A long scan takes a few minutes, keep this tab open.</p>
+</div>
+<p>Something wrong with the result? Email <code>{SHELF_MAIL}</code> with the checkout ID
+<code>{html.escape(cid)}</code> and I will fix it by hand.</p>"""
+    else:
+        cid_html = (f"<p>Checkout ID: <code>{html.escape(cid)}</code></p>" if cid else
+                    "<p>If you just paid and there is no checkout ID in the address, reply to the Polar receipt.</p>")
+        main = f"""<div class="card">
+<p><b>Payment not confirmed yet.</b> Polar can take a few seconds, so
+<a href="">reload this page</a> first.</p>
+<p>Still not confirmed? Email the PDF to <code>{SHELF_MAIL}</code> with the subject <b>One book</b>,
+from the email you paid with, and I will convert it by hand and send it back the same day.</p>
+{cid_html}
+</div>"""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
@@ -838,23 +962,30 @@ def onebook(request: Request):
 .wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
 h1{{font-family:var(--serif);font-weight:500;font-size:28px;letter-spacing:-.02em;margin:0 0 12px}}p{{color:var(--dim);margin:0 0 14px}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:22px}}
+.btn{{display:block;width:100%;margin:12px 0;background:var(--acc);color:#fff;border:0;border-radius:6px;padding:13px 20px;font:inherit;font-weight:700;cursor:pointer}}.btn:disabled{{opacity:.55;cursor:wait}}
+input[type=file]{{width:100%;font:inherit}}#msg.err{{color:#a3301f}}#msg.ok{{color:#1f7a4d}}
 b{{color:var(--txt)}}a{{color:#553bc4}}code{{font-family:ui-monospace,Menlo,monospace;font-size:14px;word-break:break-all}}.mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:17px;text-decoration:none;color:var(--txt);margin-bottom:22px}}.mark .dot{{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:8px}}</style></head>
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>One book.</h1>
-<p>Paid once. Send the PDF and I will convert it by hand.</p>
-<div class="card">
-<p><b>Email the PDF to <code>{SHELF_MAIL}</code></b></p>
-<p>Use the subject <b>One book</b>. Send it from the email you paid with, or include the checkout ID
-below so I can match it.</p>
-{cid_html}
-<p>Up to 2,000 pages. Scans get OCR, and hard scans have OCR typos; I will say so before I send it.</p>
-<p>I will email the EPUB back, usually the same day.</p>
-</div>
-<p>Bigger than 2,000 pages, or a rough scan? Email me the page count first and I will tell you if it
-is doable.</p>
+<p>Paid once. Nothing is stored: the file is converted in memory and deleted after the download.</p>
+{main}
 <p><a href="/">Back to the free converter</a></p>
-</div></body></html>""")
+</div><script>{TRACK_JS}
+ev('return',{{cid:{json.dumps(cid)}}});
+const go=document.getElementById('go'),fi=document.getElementById('file'),msg=document.getElementById('msg');
+if(go)go.onclick=async()=>{{
+ const f=fi.files[0];if(!f){{msg.className='err';msg.textContent='Choose a PDF first.';return}}
+ go.disabled=true;msg.className='';msg.textContent='Converting... a long scan takes a few minutes.';
+ const fd=new FormData();fd.append('f',f);
+ try{{const r=await fetch('/convert?paid='+encodeURIComponent({json.dumps(cid)}),{{method:'POST',body:fd,headers:{{'X-V':V}}}});
+  if(!r.ok)throw new Error(r.status+': '+(await r.text()).slice(0,200));
+  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
+  msg.className='ok';msg.textContent='Done. EPUB downloaded.'}}
+ catch(e){{msg.className='err';msg.textContent=e.message}}
+ go.disabled=false}};
+</script></body></html>""")
 
 
 @app.post("/lead")
@@ -866,12 +997,7 @@ async def lead(request: Request, email: str = Form(""), pages: int = Form(0), re
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ok": False, "pages": pages,
                        "in": 0, "out": 0, "err": "lead:" + reason[:60], "ref": ref_of(request),
                        "email": e, "ua": ua_of(request)[:120]})
-    try:
-        with LOG.open("a") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass
-    print(line, flush=True)
+    _write(line)
     return {"ok": True}
 
 
@@ -881,12 +1007,7 @@ def shelf(request: Request):
     ref = ref_of(request)
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "shelf" + ("|" + ref if ref else ""), "ua": ua_of(request)[:120]})
-    try:
-        with LOG.open("a") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass
-    print(line, flush=True)
+    _write(line)
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
@@ -920,7 +1041,7 @@ sits. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
 <li>Send-to-Kindle help: send me the EPUB and your Kindle address, and I will send it on.</li>
 <li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
 </ul>
-<a class="btn" href="{SHELF_URL}">Subscribe - $10/month</a>
+<a class="btn" href="/go/shelf?why=shelfpage" data-go>Subscribe - $10/month</a>
 </div>
 <p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
@@ -930,15 +1051,17 @@ address to <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">{SHELF_MAIL}</a
 send the EPUBs back, usually the same day.</p>
 <div class="card">
 <p><b>One big book, not a shelf?</b></p>
-<p>Pay $5 once. Email the PDF and I will convert it by hand and send the EPUB back, usually the
-same day. Up to 2,000 pages. Scans get OCR.</p>
-<a class="btn" href="{ONETIME_URL}">One book - $5</a>
+<p>Pay $5 once. You come straight back to an upload box and the book converts on the spot. Up to
+2,000 pages. Scans get OCR.</p>
+<a class="btn" href="/go/onebook?why=shelfpage" data-go>One book - $5</a>
 </div>
 <p>Bigger than 2,000 pages or a rough scan?
 <a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
 and I will quote it.</p>
-<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, with no signup.</p>
-</div></body></html>""")
+<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, and scans up to
+{FREE_OCR_PAGES} pages, with no signup.</p>
+</div><script>{TRACK_JS}
+document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);</script></body></html>""")
 
 
 @app.get("/sample.pdf")
@@ -990,7 +1113,156 @@ def favicon():
 def privacy():
     return ("<h1>Privacy</h1><p>Files processed in memory, never stored. Counts (pages, bytes) logged to conversions.log. "
             "If you type an email we keep it in the same log, used only to contact you about the paid tier and to email you a file "
-            "if a conversion needs a queue. No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
+            "if a conversion needs a queue. The page keeps a random id in your browser's localStorage so we can count "
+            "how many people get from upload to download; it is not a cookie and is never linked to your name. "
+            "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
+
+BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead"}
+
+
+@app.post("/e")
+async def beacon(request: Request):
+    # ponytail: the page reports its own funnel steps; bots rarely run js, so a view here is a person
+    body = (await request.body())[:1024]
+    try:
+        d = json.loads(body or b"{}")
+    except ValueError:
+        return Response(status_code=204)
+    n = str(d.get("n") or "")
+    v = str(d.get("v") or "")
+    if n not in BEACONS or not re.fullmatch(r"[0-9A-Za-z]{8,40}", v) or is_bot(ua_of(request)):
+        return Response(status_code=204)
+    extra = {k: str(d[k])[:80] for k in ("src", "why", "status", "cid", "path") if d.get(k)}
+    _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ev": n, "v": v,
+                       "ua": ua_of(request)[:120], **extra}))
+    return Response(status_code=204)
+
+
+@app.get("/go/{offer}")
+def go_checkout(offer: str, request: Request):
+    # ponytail: every checkout link goes through here, so a click is counted before polar takes over
+    url = {"onebook": ONETIME_URL, "shelf": SHELF_URL}.get(offer)
+    if not url:
+        raise HTTPException(404, "no such offer")
+    if not is_bot(ua_of(request)):
+        event("checkout_click", request, offer=offer, why=(request.query_params.get("why") or "")[:20])
+    return RedirectResponse(url, status_code=302)
+
+
+STEPS = [("view", "Visited (js)"), ("pick", "Picked a file"), ("submit", "Pressed convert"),
+         ("converted", "Got an EPUB"), ("wall", "Hit a paywall"), ("pitch", "Saw the offer"),
+         ("click", "Clicked checkout"), ("paid", "Paid"), ("paid_convert", "Paid book converted")]
+WALLS = ("too many pages", "too big", "ocr-wall")
+# a wall is a branch off "pressed convert", not a step after "got an epub"
+PARENT = {"pick": "view", "submit": "pick", "converted": "submit", "wall": "submit", "pitch": "wall",
+          "click": "pitch", "paid": "click", "paid_convert": "paid"}
+
+
+def funnel_data(lines, days: int = 7) -> dict:
+    """People per funnel step, by first-touch source. Joined on the page's random id `v`."""
+    since = datetime.now(timezone.utc).timestamp() - days * 86400
+    src: dict[str, str] = {}
+    steps: dict[str, set] = {}
+    paid_cids, returns = set(), {}
+    errs: Counter = Counter()
+    server = Counter()
+    for line in lines:
+        try:
+            r = json.loads(line)
+            t = datetime.fromisoformat(r["t"]).timestamp()
+        except (ValueError, KeyError, TypeError):
+            continue
+        if t < since:
+            continue
+        v, ev, err = r.get("v") or "", r.get("ev"), r.get("err") or ""
+        human = not is_bot(r.get("ua") or "")
+        if ev == "paid":
+            paid_cids.add(r.get("checkout_id"))
+            server["paid"] += 1
+            continue
+        if ev == "checkout_click" and human:
+            server["click"] += 1
+        if ev == "paid_convert":
+            server["paid_convert"] += 1
+        if r.get("visit") and human and not r.get("checkout_id"):
+            server["visit"] += 1
+        if "ok" in r and not ev and human:
+            if r.get("ok"):
+                server["converted"] += 1
+            else:
+                errs[err.split(":")[0] or "?"] += 1
+                if err in WALLS:
+                    server["wall"] += 1
+        if not v:
+            continue
+        if ev == "view":
+            src.setdefault(v, (r.get("src") or "direct")[:40])
+        step = {"view": "view", "pick": "pick", "submit": "submit", "pitch": "pitch",
+                "checkout_click": "click", "paid_convert": "paid_convert"}.get(ev)
+        if not ev and "ok" in r:
+            step = "converted" if r.get("ok") else ("wall" if err in WALLS else None)
+        if ev == "return" and r.get("cid"):
+            returns[v] = r["cid"]
+        if step:
+            steps.setdefault(step, set()).add(v)
+    steps["paid"] = {v for v, c in returns.items() if c in paid_cids} | steps.get("paid_convert", set())
+    sources = Counter(src.values())
+    rows = []
+    for name in ["all"] + [k for k, _ in sources.most_common(12)]:
+        who = set(src) if name == "all" else {v for v, sv in src.items() if sv == name}
+        rows.append({"source": name, **{k: len(steps.get(k, set()) & who) for k, _ in STEPS}})
+    return {"days": days, "rows": rows, "errors": dict(errs.most_common(12)),
+            "server": {k: server[k] for k in ("visit", "converted", "wall", "click", "paid", "paid_convert")}}
+
+
+@app.get("/funnel")
+def funnel(request: Request):
+    if not FUNNEL_KEY or request.query_params.get("k") != FUNNEL_KEY:
+        raise HTTPException(404, "Not Found")
+    try:
+        days = max(1, min(90, int(request.query_params.get("days") or 7)))
+    except ValueError:
+        days = 7
+    lines = []
+    for f in (LOG.with_suffix(".log.1"), LOG):
+        try:
+            lines += f.read_text().splitlines()
+        except OSError:
+            pass
+    d = funnel_data(lines, days)
+    if request.query_params.get("format") == "json":
+        return d
+    head = "".join(f"<th>{html.escape(lbl)}</th>" for _, lbl in STEPS)
+    body = ""
+    for r in d["rows"]:
+        cells = ""
+        for k, _ in STEPS:
+            n, up = r[k], r.get(PARENT.get(k, ""), 0)
+            # ponytail: the % is against the step it came from, so the worst drop is the smallest number
+            pct = f" <i>{round(100 * n / up)}%</i>" if up else ""
+            cells += f"<td>{n}{pct}</td>"
+        body += f"<tr><th>{html.escape(r['source'])}</th>{cells}</tr>"
+    srv = "".join(f"<li>{k}: <b>{v}</b></li>" for k, v in d["server"].items())
+    errs = "".join(f"<li>{html.escape(k)}: <b>{v}</b></li>" for k, v in d["errors"].items()) or "<li>none</li>"
+    k = html.escape(FUNNEL_KEY)
+    nav = " ".join(f'<a href="/funnel?k={k}&days={n}">{n}d</a>' for n in (1, 7, 30, 90))
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Funnel - pdf2epub</title>
+<style>body{{margin:0;background:#faf7f0;color:#1b1916;font-family:system-ui,sans-serif;line-height:1.5}}
+.wrap{{max-width:1100px;margin:0 auto;padding:32px 16px}}h1{{font-size:22px;margin:0 0 6px}}
+p,li{{color:#5b564d;font-size:14px}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;font-size:13px;margin:16px 0}}
+th,td{{border:1px solid #e4ded2;padding:6px 9px;text-align:right;white-space:nowrap}}
+thead th{{background:#f4f0e7;text-align:center}}tbody th{{text-align:left}}
+td i{{color:#a3301f;font-style:normal;font-size:11px}}a{{color:#553bc4;margin-right:6px}}</style></head>
+<body><div class="wrap"><h1>Funnel, last {d['days']} days</h1><p>{nav}</p>
+<p>People, not hits: each column counts distinct browsers (the page's random id). The red % is the share
+that made it from the step before. The smallest red number is where you lose people.</p>
+<div class="scroll"><table><thead><tr><th>Source</th>{head}</tr></thead><tbody>{body}</tbody></table></div>
+<p><b>Server-side counts</b> (humans by user agent, works without js):</p><ul>{srv}</ul>
+<p><b>Failures by reason</b>:</p><ul>{errs}</ul>
+<p><a href="/funnel?k={k}&days={d['days']}&format=json">json</a></p></div></body></html>""")
+
 
 @app.get("/stats")
 def stats():
@@ -1008,6 +1280,8 @@ def stats():
                 r = json.loads(line)
             except ValueError:
                 continue
+            if r.get("ev"):
+                continue  # ponytail: funnel steps live in /funnel, they are not visits or conversions
             ua = r.get("ua") or ""
             if r.get("visit"):
                 visits += 1
@@ -1277,18 +1551,28 @@ def _structure(blocks, doc):
 
 
 @app.post("/convert")
-async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""), email: str = Form("")):
+async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""),
+                  email: str = Form(""), preview: str = Form("")):
     throttle(request)
     ref = ref_of(request)
     key = shelf_key(request)  # ponytail: a paying subscriber gets a bigger ceiling, no account needed
-    max_pages = SHELF_MAX_PAGES if key else MAX_PAGES
-    max_mb = SHELF_MAX_MB if key else MAX_MB
     raw = await f.read()
     kb_in = len(raw) // 1024
+    # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot instead of by hand
+    cid = (request.query_params.get("paid") or "")[:80]
+    digest = hashlib.sha256(raw).hexdigest()[:32]
+    book = bool(cid) and onebook_ok(cid, digest)
+    if cid and not book:
+        log(False, 0, kb_in, 0, "paid-refused", ref, request=request)
+        raise HTTPException(402, "this checkout is not confirmed as paid, or it already converted a "
+                            f"different book. Reply to the Polar receipt or email {SHELF_MAIL}")
+    paid = bool(key or book)
+    max_pages = SHELF_MAX_PAGES if paid else MAX_PAGES
+    max_mb = SHELF_MAX_MB if paid else MAX_MB
     if len(raw) > max_mb * 1024 * 1024:
         log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages): {ONETIME_URL}"
-            if not key else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
+        raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages)"
+            if not paid else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
     if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
         raise HTTPException(400, "PDF only in v1")
     try:
@@ -1304,8 +1588,16 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         n0 = len(doc)
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages): {ONETIME_URL}"
-            if not key else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
+        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
+            if not paid else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
+
+    def done(data: bytes, pages: int, kind: str):
+        log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
+        if book:
+            onebook_use(cid, digest)
+            event("paid_convert", request, checkout_id=cid, pages=pages)
+        return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
+            headers={"Content-Disposition": "attachment; filename=book.epub"})
 
     blocks = list(_blocks(doc))
     npages = len(doc)
@@ -1316,36 +1608,43 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     author = (author or (meta.get("author") or "").strip())[:120]
     if not blocks:
         # scanned PDF: OCR is the only thing that helps before falling back
-        if npages <= OCR_MAX_PAGES:
+        cut = preview == "1" and not paid and npages > FREE_OCR_PAGES
+        if npages > FREE_OCR_PAGES and not paid and not cut:
+            doc.close()
+            log(False, npages, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
+            raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
+                                f"{FREE_OCR_PAGES} pages, the whole book is $5")
+        if cut:
+            doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
+        if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
             pages = ocr_doc(doc, layout=True) or []
             texts = [t for t, _ in pages]
             if texts and sum(len(t) for t in texts) > 200:
                 figs = _scan_figures(doc, pages)
-                data = build_epub(ocr_chapters(texts, figs), safe_title, author[:120])
-                log(True, npages, kb_in, len(data) // 1024, "ocr+fig" if figs else "ocr",
-                    ref, request=request)
+                chapters = ocr_chapters(texts, figs)
+                if cut:
+                    chapters.append([("h1", "The rest of this book"),
+                        ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {npages} pages. "
+                              "The whole book is $5 at epub.ftak.net, converted on the spot.")])
+                data = build_epub(chapters, safe_title, author[:120])
                 doc.close()
-                return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
-                    headers={"Content-Disposition": "attachment; filename=book.epub"})
+                return done(data, len(texts), "ocr-preview" if cut else ("ocr+fig" if figs else "ocr"))
         # ponytail: calibre still last resort (image-only epub beats error)
         doc.close()
         fb = calibre_convert(raw)
         if fb:
-            log(True, npages, kb_in, len(fb) // 1024, "calibre-fallback", ref, request=request)
-            return StreamingResponse(BytesIO(fb), media_type="application/epub+zip",
-                headers={"Content-Disposition": "attachment; filename=book.epub"})
-        big = npages > OCR_MAX_PAGES
+            return done(fb, npages, "calibre-fallback")
+        big = npages > PAID_OCR_MAX_PAGES
         log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref, request=request)
-        raise HTTPException(422, f"scanned PDF — OCR beta caps at {OCR_MAX_PAGES} pages ({npages} here)"
+        raise HTTPException(422, f"scanned PDF, {npages} pages, too long to OCR in one go. Email it to "
+                            f"{SHELF_MAIL} and I will run it overnight"
             if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
     chapters = _structure(blocks, doc)
 
     data = build_epub(chapters, safe_title, author[:120])
     # ponytail: nothing stored, files die with request — matches their privacy pitch for free
-    log(True, npages, kb_in, len(data) // 1024, "", ref, email.strip()[:120], request=request)
     doc.close()
-    return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
-        headers={"Content-Disposition": "attachment; filename=book.epub"})
+    return done(data, npages, "")
 
 @app.exception_handler(HTTPException)
 async def http_err(request: Request, exc: HTTPException):
