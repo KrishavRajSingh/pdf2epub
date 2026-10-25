@@ -13,7 +13,7 @@ is yours to sign up for (Claude cannot create accounts).
 | **Google Search Console** | Which searches show the site, and where it ranks | Already set up (sitemap read Oct 23) | Free |
 | **Bing Webmaster Tools** (bing.com/webmasters) | Bing index; Bing feeds Copilot and DuckDuckGo, and possibly ChatGPT search (OpenAI does not confirm this). Since Feb 2026 it has an "AI Performance" report for Copilot citations. | Import the site from Search Console (no re-verification), submit `https://epub.ftak.net/sitemap.xml` | Free |
 | **IndexNow** | Tells Bing, Yandex and others the moment a page changes. Google does not take part. | Code change in `app.py` (a key file route + one ping after deploy). Claude can add it. | Free |
-| **Ahrefs Free** (formerly Ahrefs Webmaster Tools) | Who links to us (up to 1,000 backlinks), which pages get search traffic, and a site audit of 170+ SEO issues | Sign up, verify through Search Console | Free for a verified site |
+| **Ahrefs (paid, already have)** | Keyword research, competitor backlinks, Rank Tracker, Site Audit, and Alerts for new backlinks and mentions (replaces Talkwalker/Google Alerts). Findings: `growth/seo-ahrefs.md` | Add epub.ftak.net as a project; set up Rank Tracker and Alerts | Already paid |
 | **Gmail drafts via `gws`** | Our outreach pipeline: Claude writes the drafts, you press send | Already working | Free |
 | **`/funnel`** | People per step, by source tag | Deploy + `FUNNEL_KEY` (see earlier) | Ours |
 
@@ -62,6 +62,6 @@ Keep them specific, or the daily cap is eaten by noise:
 4. Follow up once, a week later, on pitches with no reply. Then stop.
 
 **Every month**
-1. Ahrefs Free: new backlinks, site audit errors.
+1. Ahrefs: Rank Tracker positions, new backlinks, Site Audit errors.
 2. Re-read `/funnel?days=30` by source. Drop channels that send visits with 0 conversions; double
    the ones that convert.
