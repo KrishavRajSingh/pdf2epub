@@ -73,6 +73,16 @@ def main():
     # guide pages + sitemap
     for u in ["/scan", "/guides", "/guides/pdf-to-epub", "/sitemap.xml"]:
         assert client.get(u).status_code == 200, u
+    # /pt/ and /es/: same converter, translated copy, tied to the english page by hreflang
+    for lang, word in (("pt", "Converter para EPUB"), ("es", "Convertir a EPUB")):
+        pg = client.get(f"/{lang}/")
+        assert pg.status_code == 200 and word in pg.text, f"/{lang}/ not translated"
+        assert f'hreflang="{lang}"' in pg.text and 'hreflang="x-default"' in pg.text, f"/{lang}/ lacks hreflang"
+        assert f'rel="canonical" href="https://epub.ftak.net/{lang}/"' in pg.text, f"/{lang}/ canonical wrong"
+        for en in ("Convert to EPUB", "Drop a PDF here", "What it repairs", "Choose a PDF first"):
+            assert en not in pg.text, f"/{lang}/ still has english: {en}"
+        assert f"https://epub.ftak.net/{lang}/" in client.get("/sitemap.xml").text, f"/{lang}/ not in sitemap"
+    assert 'rel="canonical" href="https://epub.ftak.net/"' in client.get("/").text, "english canonical missing"
     # indexnow: the engines fetch the key file to prove we own the host
     assert client.get(f"/{pdf2epub.INDEXNOW_KEY}.txt").text == pdf2epub.INDEXNOW_KEY, "indexnow key not served"
 

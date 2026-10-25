@@ -22,6 +22,10 @@ try:
     from guides import GUIDES, INDEX_BODY
 except Exception:  # ponytail: a missing file must not take the site down
     GUIDES, INDEX_BODY = {}, "<p>Guides are unavailable right now.</p>"
+try:
+    from i18n import LANGS
+except Exception:  # ponytail: same rule, the english page must survive a missing translation file
+    LANGS = {}
 import time
 
 app = FastAPI()
@@ -500,6 +504,7 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="description" content="Free PDF to EPUB with real chapters, a clickable table of contents, scanned books read with OCR. No signup, no watermark, nothing stored.">
 <meta property="og:title" content="PDF to EPUB - real chapters, real paragraphs, free">
 <meta property="og:description" content="No signup, no watermark, nothing stored. Scans read with OCR.">
+__ALT__
 <style>__CSS__</style></head><body><div class="wrap">
 <header class="top">
   <div class="mark"><span class="dot"></span>pdf2epub<span class="to mono">/ epub.ftak.net</span></div>
@@ -553,6 +558,9 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
   <a href="/shelf">Shelf: $10/mo, 1,000 pages a month</a>
   <a href="/guides">Guides</a>
   <a href="/privacy">Privacy</a>
+  <a href="/" hreflang="en" lang="en">English</a>
+  <a href="/pt/" hreflang="pt" lang="pt-BR">Português</a>
+  <a href="/es/" hreflang="es" lang="es">Español</a>
 </div>
 
 <footer>
@@ -665,10 +673,25 @@ def _proof() -> dict:
     }
 
 
-def _page() -> str:
+def _alternates(lang: str) -> str:
+    # ponytail: hreflang tells google the three pages are one page in three languages, not duplicates
+    path = {"en": "/"} | {k: f"/{k}/" for k in LANGS}
+    links = [f'<link rel="canonical" href="https://epub.ftak.net{path[lang]}">']
+    links += [f'<link rel="alternate" hreflang="{LANGS[k]["hreflang"] if k in LANGS else "en"}" '
+              f'href="https://epub.ftak.net{u}">' for k, u in path.items()]
+    links.append('<link rel="alternate" hreflang="x-default" href="https://epub.ftak.net/">')
+    return "\n".join(links)
+
+
+def _page(lang: str = "en") -> str:
     pr = _proof()
     toc = "".join(f"<li>{html.escape(h)}</li>" for h in pr["toc"]) or "<li>no headings detected</li>"
-    return (PAGE_HEAD
+    tpl = PAGE_HEAD
+    for en, tr in (LANGS[lang]["pairs"] if lang in LANGS else []):
+        assert en in tpl, f"{lang}: English text changed, update i18n.py: {en[:60]}"
+        tpl = tpl.replace(en, tr)
+    return (tpl
+            .replace("__ALT__", _alternates(lang))
             .replace("__CSS__", PAGE_CSS)
             .replace("__PARAS__", str(pr["paras"]))
             .replace("__EPARAS__", str(pr["eparas"]))
@@ -686,6 +709,15 @@ def index(request: Request):
                        "ref": ref_of(request), "ua": ua_of(request)[:120]})
     _write(line)
     return _page()
+
+
+@app.get("/pt/", response_class=HTMLResponse)
+@app.get("/es/", response_class=HTMLResponse)
+def index_lang(request: Request):
+    lang = request.url.path.strip("/")
+    _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
+                       "ref": ref_of(request) or lang, "ua": ua_of(request)[:120]}))
+    return _page(lang)
 
 SCAN_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -803,7 +835,7 @@ INDEXNOW_KEY = "ad136bf29681a09265f8e9bd56452473"
 
 
 def site_urls() -> list[str]:
-    return ["/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
+    return ["/", "/pt/", "/es/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
 
 
 @app.get(f"/{INDEXNOW_KEY}.txt")

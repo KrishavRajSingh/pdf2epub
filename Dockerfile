@@ -3,6 +3,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends calibre mupdf-tools tesseract-ocr tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*  # ponytail: heavy but gold-standard fallback + OCR, drop if image too big
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py guides.py .
+COPY app.py guides.py i18n.py .
 COPY fonts ./fonts
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
