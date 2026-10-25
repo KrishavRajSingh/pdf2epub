@@ -170,6 +170,13 @@ def main():
         "cap rejection does not pitch the $5 one-book job"
     assert "quote a one-time conversion" not in cap.text, \
         "cap rejection still quotes instead of selling"
+    # a long book can take its first 500 pages free, with a closing chapter that sells the rest
+    pv = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")}, data={"preview": "1"})
+    assert pv.status_code == 200, pv.text[:200]
+    zv = zipfile.ZipFile(__import__("io").BytesIO(pv.content))
+    hv = "".join(zv.read(n).decode("utf-8", "replace") for n in zv.namelist() if n.endswith(".xhtml"))
+    assert "page 499" in hv and "page 500" not in hv, "page preview is not the first 500 pages"
+    assert "the first 500 of 600 pages" in hv, "page preview does not sell the rest"
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"

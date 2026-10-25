@@ -578,6 +578,7 @@ function buy(why){return '/go/onebook?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free converter stops at 500.<br>'
  +'<a style="'+BTN+'" href="'+buy('pages')+'">Convert the whole book - $5</a>'
+ +'<button id="preview" data-n="500" style="'+GHOST+'">Free: first 500 pages</button>'
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored.</span>'
@@ -589,11 +590,11 @@ function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free 
 function pitchOcr(n){return 'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
  +'<a style="'+BTN+'" href="'+buy('ocr')+'">OCR the whole book - $5</a>'
- +'<button id="preview" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>'
+ +'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot. Nothing stored.</span>'}
 document.addEventListener('click',async(e)=>{
- if(e.target.id==='preview'){convert(true);return}
+ if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id!=='leadbtn')return;
  const em=document.getElementById('leadmail');
  if(!em||!em.value)return;
@@ -610,10 +611,11 @@ drop.onclick=()=>fi.click();
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0])ev('pick')});
 fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name}});
+let PN='__FREEOCR__';
 async function convert(preview){
  const f=fi.files[0];
  if(!f){msg.className='err';msg.textContent='Choose a PDF first.';return}
- msg.className='';msg.textContent=preview?'Reading the first __FREEOCR__ pages...':'Converting...';go.disabled=true;
+ msg.className='';msg.textContent=preview?'Reading the first '+PN+' pages...':'Converting...';go.disabled=true;
  ev('submit',preview?{why:'preview'}:{});
  const fd=new FormData();fd.append('f',f);
  fd.append('title',document.getElementById('title').value);
@@ -625,7 +627,7 @@ async function convert(preview){
   if(!r.ok){const t=await r.text();const er=new Error(r.status+': '+t.slice(0,160));er.status=r.status;throw er}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
-  msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first __FREEOCR__ pages.':'Done. EPUB downloaded.'}
+  msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   window.capPages=n;window.capName=(f&&f.name)||'book';
@@ -1632,6 +1634,11 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         doc.close()
         log(False, 0, kb_in, 0, "encrypted pdf", ref, request=request)
         raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
+    total = len(doc)
+    # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
+    cut_pages = preview == "1" and not paid and total > max_pages
+    if cut_pages:
+        doc.select(range(max_pages))
     if len(doc) > max_pages:
         n0 = len(doc)
         doc.close()
@@ -1672,7 +1679,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 chapters = ocr_chapters(texts, figs)
                 if cut:
                     chapters.append([("h1", "The rest of this book"),
-                        ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {npages} pages. "
+                        ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
                               "The whole book is $5 at epub.ftak.net, converted on the spot.")])
                 data = build_epub(chapters, safe_title, author[:120])
                 doc.close()
@@ -1688,11 +1695,15 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                             f"{SHELF_MAIL} and I will run it overnight"
             if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
     chapters = _structure(blocks, doc)
+    if cut_pages:
+        chapters.append([("h1", "The rest of this book"),
+            ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
+                  "The whole book is $5 at epub.ftak.net, converted on the spot.")])
 
     data = build_epub(chapters, safe_title, author[:120])
     # ponytail: nothing stored, files die with request — matches their privacy pitch for free
     doc.close()
-    return done(data, npages, "")
+    return done(data, npages, "pages-preview" if cut_pages else "")
 
 @app.exception_handler(HTTPException)
 async def http_err(request: Request, exc: HTTPException):
