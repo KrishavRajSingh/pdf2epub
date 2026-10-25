@@ -6,9 +6,9 @@ queue is a separate problem (Railway paused all builds platform-wide, 2026-10-20
 itself.
 
 ## STATUS (2026-10-20, live now)
-- Polar product **"pdf2epub Shelf" $10/mo** created in the `opencorp` org (India works: Polar pays out via
+- Polar product **"pdf2epub Shelf" $10/mo** created in the `pdf2epub` org (India works: Polar pays out via
   Stripe Connect Express, Stripe standalone is invite-only in India).
-- Checkout link: `https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs`
+- Checkout link: `https://buy.polar.sh/polar_cl_1jZLYsY7lODWs2QOnhNALMww3O7if69LL4nRQ1JiNmJ`
 - Success URL -> `https://epub.ftak.net/thanks?checkout_id={CHECKOUT_ID}` (new `/thanks` route logs the
   checkout id, so we know which link converted; queued for deploy).
 - Fulfilment loop: `scripts/fulfil.py --watch` (running) reads Gmail for PDF attachments, converts with

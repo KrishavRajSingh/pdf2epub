@@ -75,17 +75,16 @@ difference is the output quality (real chapters, real paragraphs).
 ## What is still missing to make the first sale
 
 1. **A one-time price for one big book.** Approved and shipped 2026-10-24. Polar product
-   `pdf2epub One Book`, $5 one-time, product ID `8cb16014-52cc-4c29-9aef-080db6cd1274`, checkout
-   `https://buy.polar.sh/polar_cl_jbOBnMGlP6YfIdXUuSk4y5SLqffq73NpiGB1E3nrvCi`. The buyer pays
+   `pdf2epub One Book`, $5 one-time, product ID `c9dd91ab-92b9-4d82-a79d-191bd965cd86`, checkout
+   `https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc`. The buyer pays
    first, lands on `/onebook`, emails the PDF, and gets a manual conversion up to 2,000 pages. No
    key, no account. The cap page and `/shelf` both offer it.
 2. **Traffic.** The deploy is live and the pay link exists, but there is no stream of buyers.
    deepculture issue #243 produced 68 conversions from one reader and no sale; HN and Reddit
    produced almost no conversions. The next free channel is the 5 newsletter pitches already
    sent (follow up Oct 27-28) and the guides, which are indexed but too new to rank.
-3. **A paid customer has to be able to buy without email.** The current key path works, but the
-   checkout still says `Opencorp`, not `pdf2epub`. A separate Polar org is the clean fix and
-   needs new payout setup.
+3. **A paid customer has to be able to buy without email.** Done 2026-10-25: products and
+   checkouts now live in the separate `pdf2epub` Polar org, and payments are enabled.
 4. **The throttle must not cut a shelf owner.** The live build keys the throttle on the real
    client IP. At 10/min and 30/day it would have 429'd the 68-in-32-minutes burst at file 31 —
    more than half the revenue event. Now 30/min and 300/day.

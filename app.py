@@ -29,8 +29,8 @@ OCR_MAX_PAGES = 200
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
-SHELF_URL = "https://buy.polar.sh/polar_cl_81p78hP5rOfSUfsOS5LWupgYW4bGVXJKz98tp2q8PTs"  # ponytail: the W-upgVW4 variant in reddit-posts.md is a 404, this one checks out
-ONETIME_URL = "https://buy.polar.sh/polar_cl_jbOBnMGlP6YfIdXUuSk4y5SLqffq73NpiGB1E3nrvCi"  # $5 one book, manual, paid before delivery
+SHELF_URL = "https://buy.polar.sh/polar_cl_1jZLYsY7lODWs2QOnhNALMww3O7if69LL4nRQ1JiNmJ"  # pdf2epub org, verified 200
+ONETIME_URL = "https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc"  # $5 one book, manual, paid before delivery
 SHELF_MAIL = "krishavrajsingh@gmail.com"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
 # the key is a secret string we mail them, they put it in the url as ?k=KEY
