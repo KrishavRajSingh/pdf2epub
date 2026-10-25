@@ -31,11 +31,13 @@ Full list and pitch text: `growth/newsletter-pitches.md`.
 |---|---|---|---|
 | Liliputing, Brad Linder | contact form | `?s=liliputing` | Sent via form, confirmation "Thanks for contacting us!" |
 | Ebook Friendly | contact form | `?s=ebookfriendly` | Sent via form by you (page showed contact-form-sent) |
-| Software Testing Help | info@softwaretestinghelp.com | `?s=sth` | Gmail draft, not sent |
-| FixThePhoto, Eva Williams | Eva.Williams@fixthephoto.com | `?s=fixthephoto` | Gmail draft, not sent |
-| Auraist | auraist@substack.com | `?s=auraist` | Gmail draft, not sent |
-| Technicalwall, Deepak Choudhary | deepak@technicalwall.com (on his contact page) | `?s=technicalwall` | Gmail draft, not sent |
+| Software Testing Help | info@softwaretestinghelp.com | `?s=sth` | Sent by you 2026-10-26 (from Gmail draft) |
+| FixThePhoto, Eva Williams | Eva.Williams@fixthephoto.com | `?s=fixthephoto` | Sent by you 2026-10-26 (from Gmail draft) |
+| Auraist | auraist@substack.com | `?s=auraist` | Sent by you 2026-10-26 (from Gmail draft) |
+| Technicalwall, Deepak Choudhary | deepak@technicalwall.com (on his contact page) | `?s=technicalwall` | Sent by you 2026-10-26 (from Gmail draft) |
 | gHacks | martin@ghacks.net unverified, site blocks fetches | `?s=ghacks` | Skipped until address confirmed |
 | deepculture | no public email; Substack message or reply to an issue | `?s=deepculture2` | Needs you |
 
 Follow-ups F1-F5 to the 2026-10-23 pitches: due 2026-10-30.
+
+Note: the one `paid` event in `/funnel` on 2026-10-26 is the founder's own test purchase, not a customer.
