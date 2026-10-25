@@ -742,7 +742,8 @@ go.onclick=async()=>{
 
 @app.get("/scan", response_class=HTMLResponse)
 def scan_page():
-    return SCAN_PAGE
+    # ponytail: pitches link here, so it reports a view like the landing page does
+    return SCAN_PAGE.replace("</body>", f"<script>{TRACK_JS}</script></body>", 1)
 
 
 @app.post("/scan")
