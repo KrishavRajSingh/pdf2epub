@@ -574,6 +574,9 @@ const BTN='display:inline-block;margin:8px 8px 0 0;background:#6b4ce6;color:#fff
  +'padding:10px 16px;font:inherit;font-weight:650;cursor:pointer;text-decoration:none';
 const GHOST='display:inline-block;margin:8px 8px 0 0;background:transparent;color:#5b564d;border:1px solid #d3ccbe;'
  +'border-radius:4px;padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none';
+// ponytail: no accounts, so the browser remembers the paid checkout and the landing points back to it
+try{const ob=localStorage.getItem('onebook');if(ob){msg.className='ok';msg.innerHTML='You have a paid book waiting. '
+ +'<a href="/onebook?checkout_id='+encodeURIComponent(ob)+'">Convert it here</a>'}}catch(e){}
 function buy(why){return '/go/onebook?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free converter stops at 500.<br>'
@@ -923,7 +926,7 @@ def _sample_pdf() -> bytes:
 @app.get("/thanks", response_class=HTMLResponse)
 def thanks(request: Request):
     # ponytail: polar success url lands here; log the checkout id so we know which link converted
-    cid = (request.query_params.get("checkout_id") or "")[:80]
+    cid = re.sub(r"[^0-9A-Za-z_-]", "", request.query_params.get("checkout_id") or "")[:80]
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "thanks", "checkout_id": cid, "ua": ua_of(request)[:120]})
     _write(line)
@@ -976,7 +979,7 @@ ev('return',{{cid:{json.dumps(cid)}}});</script></body></html>""")
 @app.get("/onebook", response_class=HTMLResponse)
 def onebook(request: Request):
     # ponytail: separate polar success page for the $5 manual conversion, so it never mints a Shelf key
-    cid = (request.query_params.get("checkout_id") or "")[:80]
+    cid = re.sub(r"[^0-9A-Za-z_-]", "", request.query_params.get("checkout_id") or "")[:80]
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "onebook", "checkout_id": cid, "ua": ua_of(request)[:120]})
     _write(line)
@@ -989,6 +992,7 @@ def onebook(request: Request):
 <button class="btn" id="go">Convert my book</button>
 <p id="msg"></p>
 <p style="font-size:13px">One book per payment. Converting the same file again is free if you need to.
+Bookmark this page: it is the only link to your purchase, there is no account.
 A long scan takes a few minutes, keep this tab open.</p>
 </div>
 <p>Something wrong with the result? Email <code>{SHELF_MAIL}</code> with the checkout ID
@@ -1023,6 +1027,7 @@ b{{color:var(--txt)}}a{{color:#553bc4}}code{{font-family:ui-monospace,Menlo,mono
 <p><a href="/">Back to the free converter</a></p>
 </div><script>{TRACK_JS}
 ev('return',{{cid:{json.dumps(cid)}}});
+if({json.dumps(paid)})try{{localStorage.setItem('onebook',{json.dumps(cid)})}}catch(e){{}}
 const go=document.getElementById('go'),fi=document.getElementById('file'),msg=document.getElementById('msg');
 if(go)go.onclick=async()=>{{
  const f=fi.files[0];if(!f){{msg.className='err';msg.textContent='Choose a PDF first.';return}}
@@ -1032,7 +1037,7 @@ if(go)go.onclick=async()=>{{
   if(!r.ok)throw new Error(r.status+': '+(await r.text()).slice(0,200));
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
-  msg.className='ok';msg.textContent='Done. EPUB downloaded.'}}
+  msg.className='ok';msg.textContent='Done. EPUB downloaded.';try{{localStorage.removeItem('onebook')}}catch(e){{}}}}
  catch(e){{msg.className='err';msg.textContent=e.message}}
  go.disabled=false}};
 </script></body></html>""")
