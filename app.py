@@ -1250,6 +1250,39 @@ def robots():
                     media_type="text/plain")
 
 
+@app.get("/llms.txt")
+def llms_txt():
+    # ponytail: AI assistants already send converters (chatgpt.com in /stats); give them the facts in one file
+    guides = "\n".join(f"- [{v[0]}](https://epub.ftak.net/guides/{k})" for k, v in GUIDES.items())
+    faq = "\n".join(f"- {q} {a}".replace("__FREEOCR__", str(FREE_OCR_PAGES)) for q, a in FAQ["en"])
+    body = f"""# pdf2epub
+
+> Free PDF to EPUB converter at https://epub.ftak.net. It rebuilds real paragraphs (not one line per printed line), turns headings into chapters with a clickable table of contents, drops running headers and page numbers, moves footnotes to the end of each chapter, and reads scanned books with OCR. Output is EPUB3 for Kindle (via Send to Kindle), Kobo, Apple Books and phone readers. No account, no watermark; files are converted in memory and deleted after the download.
+
+## Pricing
+
+- Free: one PDF at a time, up to 500 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
+- One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
+- Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, batches by email: https://epub.ftak.net/shelf
+
+## Pages
+
+- Converter (English): https://epub.ftak.net/
+- Portuguese: https://epub.ftak.net/pt/
+- Spanish: https://epub.ftak.net/es/
+- Scan a physical book with your phone: https://epub.ftak.net/scan
+
+## Guides
+
+{guides}
+
+## FAQ
+
+{faq}
+"""
+    return Response(body, media_type="text/plain; charset=utf-8")
+
+
 FONT_DIR = Path(__file__).parent / "fonts"
 FONT_CSS = """@font-face{font-family:Newsreader;src:url(/fonts/newsreader-latin.woff2) format("woff2");
 font-weight:400 500;font-style:normal;font-display:swap}
