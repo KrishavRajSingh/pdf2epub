@@ -22,8 +22,27 @@ try:
     from guides import GUIDES, INDEX_BODY
 except Exception:  # ponytail: a missing file must not take the site down
     GUIDES, INDEX_BODY = {}, "<p>Guides are unavailable right now.</p>"
+FAQ = {"en": [
+    ("Will it work on my Kindle?",
+     "Yes. Send the EPUB to your Kindle with Amazon's Send to Kindle (by email, the app or the web page) and it "
+     "lands in your library. Kobo, Apple Books and most phone readers open it as it is."),
+    ("Is my file kept anywhere?",
+     "No. The PDF is converted in memory and deleted after the download. There is no account and no library on this side."),
+    ("My PDF is a scanned book. Does that work?",
+     "Yes. Scanned pages are read with OCR, then split into chapters and paragraphs like any other PDF. "
+     "The first __FREEOCR__ pages are free, and the whole book is $5 once."),
+    ("What happens to footnotes and maps?",
+     "Footnotes move to the end of their chapter, under Notes. Maps, figures and pages that are mostly a picture "
+     "come through as images."),
+    ("Can it convert a book I bought from Kindle or Kobo?",
+     "No. Store books are locked with DRM and are not PDFs. It converts PDFs you can open yourself."),
+    ("What if my book has more than 500 pages?",
+     "The free converter gives you the first 500 pages. One book, $5 once, converts up to 2,000 pages. "
+     "Anything bigger, email for a quote."),
+]}
 try:
-    from i18n import LANGS
+    from i18n import LANGS, FAQS
+    FAQ.update(FAQS)
 except Exception:  # ponytail: same rule, the english page must survive a missing translation file
     LANGS = {}
 import time
@@ -439,7 +458,7 @@ h1 .em{color:var(--acc)}
 .fact{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);
 border-radius:4px;padding:6px 10px}
 .fact b{color:var(--txt);font-weight:500}
-.grid2{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;margin-top:26px}
+.grid2{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:16px;margin-top:26px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
 .card.convert{display:flex;flex-direction:column}
 .card h2{font-family:var(--serif);font-size:14.5px;font-weight:500;margin:0 0 14px;letter-spacing:0}
@@ -472,13 +491,6 @@ transition:border-color .15s,color .15s}
 padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .proof .rows .k{color:var(--faint)}
 .proof .rows .v{color:var(--txt);font-family:var(--mono);font-size:12px;text-align:right}
-.toc{margin:14px 0 0;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--well)}
-.toc .t{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
-color:var(--faint);padding:8px 11px;border-bottom:1px solid var(--line)}
-.toc ol{margin:0;padding:7px 12px 10px 30px}
-.toc li{font-size:13px;padding:2px 0}
-.para{margin:12px 0 0;font-size:13px;line-height:1.6;color:var(--dim)}
-.para b{color:var(--txt);font-weight:600}
 h2{font-family:var(--serif);font-size:19px;font-weight:500;letter-spacing:-.2px;margin:42px 0 14px}
 .fixes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .fix{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:13px 14px}
@@ -492,7 +504,50 @@ padding:9px 12px;color:var(--dim);background:var(--panel);transition:border-colo
 footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--faint);
 font-size:12.5px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 footer .mono{font-size:11.5px}
+.pane-t{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--faint);margin:0 0 7px}
+.pane-t .v{font-family:var(--mono);font-size:11.5px}
+.pdfpage{background:var(--well);border:1px solid var(--line);border-radius:4px;padding:10px 14px 9px;font-family:var(--serif)}
+.pdfpage .cut{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--faint)}
+.pdfpage .cut em{font-style:normal;font-family:var(--sans);font-size:11px}
+.pdfpage h3,.book h3{font-family:var(--serif);font-size:14px;font-weight:600;margin:8px 0 3px}
+.ln{display:flex;gap:8px;font-size:12px;line-height:1.6;color:var(--dim)}
+.ln span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ln i{font-style:normal;color:var(--faint);font-family:var(--sans)}
+.ln:last-of-type{margin-bottom:6px}
+.book{background:var(--panel);border:1px solid var(--line2);border-radius:4px;padding:11px 14px 13px}
+.book h3{margin-top:0}
+.book p{font-family:var(--serif);font-size:13.5px;line-height:1.6;margin:0;text-indent:1.3em;color:var(--txt)}
+.book h3+p{text-indent:0}
+.said{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;align-items:start}
+.said figure{margin:0}
+.said blockquote{margin:0;font-family:var(--serif);font-size:clamp(24px,3.2vw,30px);line-height:1.2;letter-spacing:-.015em}
+.said figcaption{margin-top:10px;font-size:13px;color:var(--faint)}
+.said .feat{margin:0;font-size:14px;line-height:1.6;color:var(--dim);border-left:1px solid var(--line2);padding:2px 0 2px 16px}
+.said .feat b{color:var(--txt);font-weight:600}
+.prices{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.price{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column}
+.price h3{font-family:var(--serif);font-size:15px;font-weight:600;margin:0}
+.price .amt{font-family:var(--mono);font-size:12.5px;color:var(--txt);margin:3px 0 10px}
+.price p{margin:0 0 14px;font-size:13px;line-height:1.55;color:var(--dim);flex:1}
+.price a{display:block;text-align:center;text-decoration:none;border:1px solid var(--line2);border-radius:6px;
+padding:10px 14px;font-size:13px;color:var(--txt);transition:border-color .15s}
+.price a:hover{border-color:var(--acc)}
+.price .here{font-size:13px;color:var(--faint);padding:10px 0;border-top:1px solid var(--line)}
+.faq{border-top:1px solid var(--line);max-width:70ch}
+.faq details{border-bottom:1px solid var(--line)}
+.faq summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:16px;
+padding:13px 0;font-size:15px;font-weight:600}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";color:var(--faint);font-weight:400}
+.faq details[open] summary::after{content:"\\2212"}
+.faq summary:focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
+.faq p{margin:0 0 14px;font-size:14px;line-height:1.6;color:var(--dim)}
+.end{margin-top:44px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 24px;
+background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
+.end p{margin:0;font-family:var(--serif);font-size:22px;letter-spacing:-.01em}
+.end .go{width:auto;margin:0;padding:13px 28px}
 @media(max-width:720px){.grid2{grid-template-columns:1fr}.fixes{grid-template-columns:1fr}
+.said,.prices{grid-template-columns:1fr}.said .feat{border-left:0;padding:0}
 h1{letter-spacing:-.015em}}
 @media(max-width:560px){header.top{padding:18px 0 12px}.pill{display:none}.card{padding:16px}}
 """
@@ -505,6 +560,7 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta property="og:title" content="PDF to EPUB - real chapters, real paragraphs, free">
 <meta property="og:description" content="No signup, no watermark, nothing stored. Scans read with OCR.">
 __ALT__
+<script type="application/ld+json">__FAQLD__</script>
 <style>__CSS__</style></head><body><div class="wrap">
 <header class="top">
   <div class="mark"><span class="dot"></span>pdf2epub<span class="to mono">/ epub.ftak.net</span></div>
@@ -517,6 +573,7 @@ __ALT__
   <span class="fact"><b>200MB</b> / 500 pages</span>
   <span class="fact">Scans: OCR free for <b>__FREEOCR__ pages</b></span>
   <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
+  <span class="fact" id="st" hidden></span>
 </div>
 
 <div class="grid2">
@@ -536,13 +593,15 @@ __ALT__
 
   <div class="card proof">
     <h2>The actual output</h2>
-    <ul class="rows">
-      <li><span class="k">Printed lines in the PDF</span><span class="v">__PARAS__</span></li>
-      <li><span class="k">Paragraphs in the EPUB</span><span class="v">__EPARAS__</span></li>
-      <li><span class="k">Table of contents</span><span class="v">__TOCN__ entries</span></li>
-    </ul>
-    <div class="toc"><div class="t">Table of contents</div><ol>__TOC__</ol></div>
-    <p class="para">First paragraph of chapter one, as it comes out: <b>__FIRST__</b></p>
+    <div class="pane-t"><span>The sample PDF, page 1</span><span class="v">__PARAS__ printed lines</span></div>
+    <div class="pdfpage">
+      <div class="cut"><s>__RUNHEAD__</s><em>removed</em></div>
+      <h3>__HEAD1__</h3>
+      __PDFLINES__
+      <div class="cut"><s>__PAGENO__</s><em>removed</em></div>
+    </div>
+    <div class="pane-t" style="margin-top:12px"><span>The same page in the EPUB</span><span class="v">__EPARAS__ paragraphs, __TOCN__ chapters</span></div>
+    <div class="book"><h3>__HEAD1__</h3>__BOOKPARAS__</div>
   </div>
 </div>
 
@@ -551,6 +610,34 @@ __ALT__
   <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
   <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
   <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
+</div>
+
+<h2>From readers</h2>
+<div class="said">
+  <figure><blockquote>&ldquo;The footnotes look great.&rdquo;</blockquote>
+    <figcaption>A reader, after converting a 497-page book</figcaption></figure>
+  <p class="feat">Featured in the <b>deepculture</b> newsletter, issue #243. One of its readers converted 68 books in 32 minutes.</p>
+</div>
+
+<h2>Prices</h2>
+<div class="prices">
+  <div class="price"><h3>Free</h3><div class="amt">$0</div>
+    <p>One PDF at a time, up to 500 pages and 200MB. Scans: the first __FREEOCR__ pages.</p>
+    <span class="here">It is the converter above</span></div>
+  <div class="price"><h3>One book</h3><div class="amt">$5 once</div>
+    <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
+    <a href="/go/onebook?why=landing" data-go>Pay $5 for one book</a></div>
+  <div class="price"><h3>Shelf</h3><div class="amt">$10 a month</div>
+    <p>1,000 pages a month, up to 2,000 pages per file, batches by email.</p>
+    <a href="/shelf">See Shelf</a></div>
+</div>
+
+<h2>Questions</h2>
+<div class="faq">__FAQ__</div>
+
+<div class="end">
+  <p>Drop a PDF, get a book back.</p>
+  <button class="go" id="again">Convert a PDF</button>
 </div>
 
 <div class="links">
@@ -565,7 +652,6 @@ __ALT__
 
 <footer>
   <span>No account &middot; no watermark &middot; files deleted after download</span>
-  <span class="mono" id="st"></span>
 </footer>
 </div><script>
 __TRACK__const drop=document.getElementById('drop'),fi=document.getElementById('file'),
@@ -651,7 +737,11 @@ smp.onclick=async()=>{
  catch(e){msg.className='err';msg.textContent=e.message}
  smp.disabled=false;go.disabled=false};
 fetch('/stats').then(r=>r.json()).then(s=>{const el=document.getElementById('st');
- if(s.conversions_ok>=50)el.textContent=s.conversions_ok+' books converted'}).catch(()=>{});
+ if(s.conversions_ok>=50){el.textContent=s.conversions_ok+' books converted';el.hidden=false}}).catch(()=>{});
+document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);
+// ponytail: which objection people open is the cheapest research we get
+document.querySelectorAll('.faq details').forEach((d,i)=>d.addEventListener('toggle',()=>{if(d.open)ev('faq',{why:'q'+(i+1)})}));
+document.getElementById('again').onclick=()=>{ev('again');drop.scrollIntoView({behavior:'smooth',block:'center'});fi.click()};
 </script></body></html>"""
 
 
@@ -663,18 +753,26 @@ def _proof() -> dict:
     # ponytail: count printed lines, not blocks; "8 lines" from 2 pages reads as a toy
     printed = sum(len(b.get("lines", [])) for pg in doc
                   for b in pg.get_text("dict")["blocks"] if b.get("type") == 0)
+    lines = ["".join(s["text"] for s in ln["spans"]).strip() for b in doc[0].get_text("dict")["blocks"]
+             if b.get("type") == 0 for ln in b.get("lines", [])]
     chapters = _structure(blocks, doc)
     doc.close()
     paras = [t for ch in chapters for k, t in ch if k == "p"]
     heads = [t for ch in chapters for k, t in ch if k in ("h1", "h2")]
-    first = paras[0] if paras else ""
-    if len(first) > 180:
-        first = first[:180].rsplit(" ", 1)[0] + " ..."
+    # ponytail: the before/after shows page 1 twice, so the printed lines are the ones the
+    # first two EPUB paragraphs were rebuilt from, and the header/page number are what got cut
+    book = paras[:2]
+    joined = " ".join(book)
+    body = [ln for ln in lines if ln and ln not in heads and ln in joined]
+    cut = [ln for ln in lines if ln and ln not in heads and ln not in joined and ln not in " ".join(paras)]
     return {
         "paras": printed,
         "eparas": len(paras),
         "toc": heads,
-        "first": first,
+        "pdflines": body,
+        "book": book,
+        "runhead": cut[0] if cut else "",
+        "pageno": cut[-1] if len(cut) > 1 else "",
     }
 
 
@@ -690,7 +788,16 @@ def _alternates(lang: str) -> str:
 
 def _page(lang: str = "en") -> str:
     pr = _proof()
-    toc = "".join(f"<li>{html.escape(h)}</li>" for h in pr["toc"]) or "<li>no headings detected</li>"
+    pdflines = "".join(f'<div class="ln"><span>{html.escape(t)}</span><i aria-label="line break">&crarr;</i></div>'
+                       for t in pr["pdflines"])
+    bookparas = "".join(f"<p>{html.escape(t)}</p>" for t in pr["book"])
+    faq = [(q.replace("__FREEOCR__", str(FREE_OCR_PAGES)), a.replace("__FREEOCR__", str(FREE_OCR_PAGES)))
+           for q, a in FAQ.get(lang, FAQ["en"])]
+    faq_html = "".join(f"<details><summary>{html.escape(q)}</summary><p>{html.escape(a)}</p></details>"
+                       for q, a in faq)
+    faq_ld = json.dumps({"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+        {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in faq]},
+        ensure_ascii=False).replace("</", "<\\/")
     tpl = PAGE_HEAD
     for en, tr in (LANGS[lang]["pairs"] if lang in LANGS else []):
         assert en in tpl, f"{lang}: English text changed, update i18n.py: {en[:60]}"
@@ -701,11 +808,16 @@ def _page(lang: str = "en") -> str:
             .replace("__PARAS__", str(pr["paras"]))
             .replace("__EPARAS__", str(pr["eparas"]))
             .replace("__TOCN__", str(len(pr["toc"])))
-            .replace("__TOC__", toc)
+            .replace("__HEAD1__", html.escape(pr["toc"][0] if pr["toc"] else ""))
+            .replace("__RUNHEAD__", html.escape(pr["runhead"]))
+            .replace("__PAGENO__", html.escape(pr["pageno"]))
+            .replace("__PDFLINES__", pdflines)
+            .replace("__BOOKPARAS__", bookparas)
+            .replace("__FAQLD__", faq_ld)
+            .replace("__FAQ__", faq_html)
             .replace("__MAIL__", SHELF_MAIL)
             .replace("__TRACK__", TRACK_JS)
-            .replace("__FREEOCR__", str(FREE_OCR_PAGES))
-            .replace("__FIRST__", html.escape(pr["first"])))
+            .replace("__FREEOCR__", str(FREE_OCR_PAGES)))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -908,7 +1020,7 @@ def _sample_pdf() -> bytes:
         ]),
         ("Chapter Three", [
             "Scanned books take a different road. There are no text blocks to read, only pixels, so the pages go through OCR first and the same structure pass runs on the result.",
-            "That path is free up to two hundred pages. It is slower, because a machine is reading photographs of paper, but the output is the same EPUB with the same chapters and the same paragraphs.",
+            "The first twenty pages of a scan are free. It is slower, because a machine is reading photographs of paper, but the output is the same EPUB with the same chapters and the same paragraphs.",
             "Nothing you upload is kept. The file is converted in memory, handed back as a download, and gone. No account, no library, no copy on a disk somewhere waiting to be sold.",
         ]),
     ]
@@ -1179,7 +1291,7 @@ def privacy():
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
-BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead"}
+BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again"}
 
 
 @app.post("/e")
