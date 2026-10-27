@@ -848,6 +848,13 @@ def indexnow_key():
     return Response(INDEXNOW_KEY, media_type="text/plain")
 
 
+# Bing Webmaster Tools ownership file for epub.ftak.net
+@app.get("/BingSiteAuth.xml")
+def bing_site_auth():
+    return Response('<?xml version="1.0"?>\n<users>\n\t<user>D3BEB7C7751AD491B57DB5CD64488E7A</user>\n</users>',
+                    media_type="application/xml")
+
+
 @app.get("/sitemap.xml")
 def sitemap():
     urls = site_urls()
