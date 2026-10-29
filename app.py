@@ -1632,6 +1632,54 @@ def _figure_rect(page, blocks, body):
     return u & page.mediabox
 
 
+SENT_END = re.compile(r"[.!?:…][\"”’')\]]*$")
+PAGE_NO = re.compile(r"[\[(]?[\d\s.\-–—]+[\])]?")
+# a line set big by a noisy OCR layer is not a heading if it stops mid-phrase
+OPEN_END = re.compile(r"(?:[,;\-–—]|\b(?:and|or|but|the|a|an|of|to|in|with|that|for))$", re.I)
+
+
+def _ocr_layer(doc) -> bool:
+    """True when the text is an invisible OCR layer over page scans (Internet Archive, ABBYY,
+    ocrmypdf). Its blocks and font sizes are noisy, so paragraphs need looser rules."""
+    n = len(doc)
+    spans = invisible = 0
+    for i in sorted({int(k * n / 10) for k in range(10)}) if n else []:
+        for sp in doc[i].get_texttrace():
+            spans += 1
+            invisible += sp["type"] == 3
+    return spans > 0 and invisible > spans * 0.5
+
+
+def _paragraphs(rows, bbox, ocr=False):
+    """Split one PDF block's lines into paragraphs: [(y0, size, [line, ...]), ...].
+
+    ponytail: OCR text layers (Internet Archive scans) group lines into blocks that ignore
+    paragraphs, so one block can hold the end of one paragraph and the start of the next.
+    An indented line after a finished sentence starts a new paragraph, and a short centered
+    first line ("Author's Note" over the prose) is its own heading block.
+    """
+    # a page number the OCR layer put in the same block as the last paragraph line
+    rows = [r for r in rows if not PAGE_NO.fullmatch(r[0])] or rows
+    if not rows:
+        return []
+    bx0, bx1 = bbox[0], bbox[2]
+    bw = max(bx1 - bx0, 1)
+    left = min(r[2][0] for r in rows)
+    groups = []
+    for k, (txt, size, lb) in enumerate(rows):
+        lead, trail = lb[0] - bx0, bx1 - lb[2]
+        centered = (k == 0 and len(rows) > 1 and len(txt) < 60 and lead > bw * 0.15
+                    and trail > bw * 0.15 and abs(lead - trail) < bw * 0.12
+                    and not SENT_END.search(txt))
+        new_para = ocr and k > 0 and lb[0] - left > max(8, bw * 0.03) and SENT_END.search(rows[k - 1][0])
+        if not groups or new_para or (k == 1 and groups[-1][3]):
+            groups.append([lb[1], size, [txt], centered])
+        else:
+            groups[-1][1] = max(groups[-1][1], size)
+            groups[-1][2].append(txt)
+    return [(y0, size, lines) for y0, size, lines, _ in groups]
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -1641,6 +1689,7 @@ def _blocks(doc):
     with size -1 and a (PNG bytes, caption) tuple as text.
     """
     body = _body_size(doc)
+    ocr = _ocr_layer(doc)
     for i, page in enumerate(doc):
         raw = page.get_text("dict")["blocks"]
         fig = _figure_rect(page, raw, body)
@@ -1677,16 +1726,13 @@ def _blocks(doc):
                     continue  # labels and caption are baked into the figure or its figcaption
             if b.get("type") != 0:
                 continue
-            lines, size = [], 0.0
+            rows = []
             for line in b.get("lines", []):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
-                if not txt:
-                    continue
-                lines.append(txt)
-                size = max(size, max(s["size"] for s in line["spans"]))
-            if not lines:
-                continue
-            yield i, b["bbox"][1], round(size, 1), _join(lines)
+                if txt:
+                    rows.append((txt, max(s["size"] for s in line["spans"]), line["bbox"]))
+            for y0, size, lines in _paragraphs(rows, b["bbox"], ocr):
+                yield i, y0, round(size, 1), _join(lines)
         if fig and not fig_done:
             pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
             yield i, fig.y0, -1.0, (pm.tobytes("png"), cap)
@@ -1709,7 +1755,8 @@ def _structure(blocks, doc):
     body_pages = Counter(p for p, _, sz, _ in blocks if sz >= fn_cut)
     # headings set in the body font ("CHAPTER 1" alone on its page) would otherwise split nothing
     head_word = re.compile(r"^(chapter|part|book|prologue|epilogue|introduction|conclusion|"
-                           r"bibliography|references|appendix|index)\b[\s\dIVXLC.:-]*$", re.I)
+                           r"bibliography|references|appendix|index|foreword|preface|afterword|"
+                           r"acknowledge?ments?|dedication|author[’']s note)\b[\s\dIVXLC.:-]*$", re.I)
     # ponytail: publisher page furniture changes per page (DOI, download date), so the repeated
     # header/footer counter never catches it; "Downloaded from <url>" is the common watermark.
     # Cambridge puts the "terms of use" line first in the same block, so match it anywhere.
@@ -1723,6 +1770,21 @@ def _structure(blocks, doc):
     banned = {t for t, c in list(tops.items()) + list(bots.items()) if c > n * 0.5}
 
     chapters, cur, cur_notes = [], [], []
+    ocr = _ocr_layer(doc)
+    list_item = re.compile(r"^(?:[-–•·*▪◦]|\d{1,3}[.)]|#)\s")
+
+    def continues(t):
+        # OCR layers size each line differently, so a mid-paragraph line can look like a heading
+        # by font size alone; an open sentence before it or a lowercase start says otherwise.
+        if not cur or cur[-1][0] != "p":
+            return False
+        prev = cur[-1][1]
+        if list_item.match(t) or SENT_END.search(prev):
+            return False
+        if re.search(r"[a-z]-$", prev) or t[:1].islower():
+            return True
+        return ocr and len(prev) >= 50  # a born-digital block without a full stop is a list or a cell
+
     def flush():
         if cur:
             cur.extend(("fn", t) for t in cur_notes)
@@ -1733,8 +1795,8 @@ def _structure(blocks, doc):
         if sz < 0:
             cur.append(("img", t))
             continue
-        if t in banned or boiler.search(t) or re.fullmatch(r"[\d\s.\-–—]+", t):
-            continue  # ponytail: page numbers/running heads dropped, no config
+        if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
+            continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
         # ponytail: a running head carries its page number, so the text differs on every page
         # and the repeated-header counter misses it; it sits at the top edge in smaller type.
         if y < 60 and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
@@ -1745,10 +1807,19 @@ def _structure(blocks, doc):
         if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55 \
            and body_pages[pno] >= 3 and re.search(r"[a-z]{3}", t):
             cur_notes.append(t)
-        elif (sz >= h1_cut or head_word.match(t)) and len(t) < 120:
+        elif head_word.match(t) and len(t) < 120:
             flush()
             cur.append(("h1", t))
-        elif sz >= h2_cut and len(t) < 120:
+        elif continues(t):
+            # ponytail: a block that picks up a sentence the last one left open (a new page, or
+            # an OCR text layer that cut the paragraph into blocks) is the same paragraph.
+            prev = cur[-1][1]
+            glue = prev[:-1] if prev.endswith("-") and prev[-2:-1].isalpha() else prev + " "
+            cur[-1] = ("p", glue + t)
+        elif sz >= h1_cut and len(t) < 120 and not OPEN_END.search(t):
+            flush()
+            cur.append(("h1", t))
+        elif sz >= h2_cut and len(t) < 120 and not OPEN_END.search(t):
             flush()
             cur.append(("h2", t))
         else:
