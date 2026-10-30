@@ -39,6 +39,8 @@ FAQ = {"en": [
     ("What if my book has more than 500 pages?",
      "The free converter gives you the first 500 pages. One book, $5 once, converts up to 2,000 pages. "
      "Anything bigger, email for a quote."),
+    ("What if the paid conversion is not good enough?",
+     "Email me within 30 days and I refund the full amount, no questions asked."),
 ]}
 try:
     from i18n import LANGS, FAQS
@@ -263,7 +265,8 @@ def err_page(msg: str, code: int):
         "<p>Too big for the free converter? <b>One book:</b> $5 once, then come back and it converts "
         "on the spot, up to 2,000 pages: <a href='/go/onebook?why=errpage'>one book - $5</a>. "
         "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
-        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>.</p>"
+        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>. "
+        "Not happy with the result? Full refund within 30 days.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
 
 def calibre_convert(raw: bytes) -> bytes | None:
@@ -631,6 +634,7 @@ __ALT__
     <p>1,000 pages a month, up to 2,000 pages per file, batches by email.</p>
     <a href="/shelf">See Shelf</a></div>
 </div>
+<p class="refund" style="font-size:14px;color:#5b564d;margin-top:10px">Not happy with the book? Full refund within 30 days, no questions asked.</p>
 
 <h2>Questions</h2>
 <div class="faq">__FAQ__</div>
@@ -670,7 +674,7 @@ function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free 
  +'<button id="preview" data-n="500" style="'+GHOST+'">Free: first 500 pages</button>'
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot, up to 2,000 pages. Nothing stored.</span>'
+ +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
  +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Leave your email for a quote.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
@@ -681,7 +685,7 @@ function pitchOcr(n){return 'This is a scan ('+(n||'many')+' pages), so every pa
  +'<a style="'+BTN+'" href="'+buy('ocr')+'">OCR the whole book - $5</a>'
  +'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot. Nothing stored.</span>'}
+ +'on the spot. Nothing stored. Not happy? Full refund.</span>'}
 document.addEventListener('click',async(e)=>{
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id!=='leadbtn')return;
@@ -1216,6 +1220,7 @@ sits. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
 <li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
 </ul>
 <a class="btn" href="/go/shelf?why=shelfpage" data-go>Subscribe - $10/month</a>
+<p style="margin:12px 0 0;font-size:14px">Not happy? Email me within 30 days of a payment and I refund it in full. Cancel any time.</p>
 </div>
 <p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
@@ -1228,6 +1233,7 @@ send the EPUBs back, usually the same day.</p>
 <p>Pay $5 once. You come straight back to an upload box and the book converts on the spot. Up to
 2,000 pages. Scans get OCR.</p>
 <a class="btn" href="/go/onebook?why=shelfpage" data-go>One book - $5</a>
+<p style="margin:12px 0 0;font-size:14px">Not happy with the book? Full refund within 30 days, no questions asked.</p>
 </div>
 <p>Bigger than 2,000 pages or a rough scan?
 <a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
