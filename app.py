@@ -1481,6 +1481,7 @@ that made it from the step before. The smallest red number is where you lose peo
 def stats():
     # ponytail: totals from log file, no DB/dashboard lib
     ok = fail = pages = visits = ocr = scan_fail = emails = 0
+    emailset = set()
     leads = cap_rejects = checkouts = 0
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
@@ -1516,7 +1517,8 @@ def stats():
             c = r.get("err", "")
             ocr += bool(r.get("ok")) and c == "ocr"
             scan_fail += (not r.get("ok")) and c.startswith("scan")
-            emails += 1 if r.get("email") else 0
+            if r.get("email"):  # ponytail: one person can leave the same email on several lines
+                emailset.add(r["email"].strip().lower())
             leads += 1 if c.startswith("lead") else 0
             cap_rejects += 1 if c in ("too many pages", "too big") else 0
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
@@ -1532,7 +1534,7 @@ def stats():
     top_ok = dict(sorted(ok_by_ref.items(), key=lambda kv: -kv[1])[:10])
     return {"visits": visits, "refs": top, "conversions_ok": ok, "ocr_ok": ocr,
             "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
-            "emails_captured": emails, "leads": leads, "cap_rejects": cap_rejects,
+            "emails_captured": len(emailset), "leads": leads, "cap_rejects": cap_rejects,
             "checkouts": checkouts,
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
