@@ -1555,6 +1555,101 @@ def _join(lines):
 
 SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 
+LIGS = ("ffi", "ffl", "ff", "fi", "fl")
+LIG_SAFE = set("'’‘-‐‑–—./&@_:")  # legit inside a word ("don't", "and/or", "e.g.")
+
+
+def _lig_keys():
+    # "<2 before>|lig|<2 after>" windows from dictionary words with fi/ff/fl; ^ $ mark word edges.
+    # 2 letters of context, not the whole word, so "offered" matches via "offer".
+    keys = set()
+    try:
+        words = (Path(__file__).parent / "ligwords.txt").read_text().split()
+    except OSError:
+        return keys
+    for w in words:
+        for lig in LIGS:
+            for m in re.finditer(f"(?={lig})", w):
+                i, j = m.start(), m.start() + len(lig)
+                keys.add(("^" if i < 2 else "") + w[max(0, i - 2):i] + "|" + lig + "|"
+                         + w[j:j + 2] + ("$" if j + 2 > len(w) else ""))
+    return keys
+
+
+LIG_KEYS = _lig_keys()
+try:
+    LIG_WORDS = set((Path(__file__).parent / "ligwords.txt").read_text().split())
+except OSError:
+    LIG_WORDS = set()
+
+
+def _lig_map(doc):
+    """{font: {bad_char: ligature}} for fonts whose ToUnicode map sends ligature glyphs to junk.
+
+    ponytail: the first paying buyer's book read "fi" as "Dž" and "ff" as "!" ("stu!.",
+    "Džnger"). The glyph is right, so the PDF looks fine; only its text layer is wrong. Each
+    suspect char in each font votes: a ligature wins when the letters around it spell dictionary
+    words. A real "Wow!" never spells one, so it stays.
+    """
+    votes, seen = {}, Counter()
+    for page in doc:
+        for b in page.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
+            for line in b.get("lines", []):
+                for s in line["spans"]:
+                    t = s["text"]
+                    for k, ch in enumerate(t):
+                        if ch.isspace() or ch in LIG_SAFE or (ch.isascii() and ch.isalnum()):
+                            continue
+                        if ch.isalpha() and not 0x1C4 <= ord(ch) <= 0x1CC and ord(ch) < 0xE000:
+                            continue  # real accented letters stay; Dž-style digraphs and private use are suspects
+                        l = re.search(r"[A-Za-z]{0,2}$", t[:k]).group().lower()
+                        r = re.match(r"[A-Za-z]{0,2}", t[k + 1:]).group().lower()
+                        if not l and not r:
+                            continue
+                        if not (l and r) and not ch.isalpha():
+                            continue  # punctuation votes mid-word only: "(th" spells "fifth", "o!ce" can't be a real "!"
+                        f = s["font"]
+                        seen[f, ch] += 1
+                        for lig in LIGS:
+                            key = (("^" if len(l) < 2 else "") + l + "|" + lig + "|" + r
+                                   + ("$" if len(r) < 2 else ""))
+                            if key in LIG_KEYS:
+                                votes.setdefault((f, ch), Counter())[lig] += 1
+    out = {}
+    for (f, ch), c in votes.items():
+        lig, n = c.most_common(1)[0]
+        if n >= 3 and n >= seen[f, ch] * 0.6:
+            out.setdefault(f, {})[ch] = lig
+    return out
+
+
+def _lig_ok(t, k, lig):
+    # a stray letter (Dž, private use) is always the ligature. Punctuation like "!" can be both
+    # the broken ff and a real "Wow!" in the same font, so swap it only between letters or where
+    # the letters around it spell a word ("stu!." -> "stuff.").
+    ch = t[k]
+    if ch.isalpha():
+        return True
+    l = re.search(r"[A-Za-z]{0,2}$", t[:k]).group().lower()
+    r = re.match(r"[A-Za-z]{0,2}", t[k + 1:]).group().lower()
+    if l and r:
+        return True
+    if not r:  # word end: "stu!" -> "stuff" is a word, "Wow!" -> "wowff" is not
+        return re.search(r"[A-Za-z]*$", t[:k]).group().lower() + lig in LIG_WORDS
+    return (("^" if len(l) < 2 else "") + l + "|" + lig + "|" + r + ("$" if len(r) < 2 else "")) in LIG_KEYS
+
+
+PRESENTATION_LIGS = str.maketrans({"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04": "ffl"})
+
+
+def _fix_ligs(s, ligmap):
+    # real ligature chars (U+FB01 "ﬁ") break search and fonts without the glyph: plain letters
+    s["text"] = s["text"].translate(PRESENTATION_LIGS)
+    m = ligmap.get(s["font"])
+    if m:
+        t = s["text"]
+        s["text"] = "".join(m[ch] if ch in m and _lig_ok(t, k, m[ch]) else ch for k, ch in enumerate(t))
+
 
 def _span_text(s):
     # ponytail: flattening spans loses the superscript flag, so a footnote marker reads as a
@@ -1697,8 +1792,13 @@ def _blocks(doc):
     """
     body = _body_size(doc)
     ocr = _ocr_layer(doc)
+    ligmap = _lig_map(doc)
     for i, page in enumerate(doc):
         raw = page.get_text("dict")["blocks"]
+        for b in raw:
+            for line in b.get("lines", []):
+                for s in line["spans"]:
+                    _fix_ligs(s, ligmap)
         fig = _figure_rect(page, raw, body)
         fig_page = _page_rect(page, fig) if fig else None
         cap, cap_page = "", None
@@ -1790,6 +1890,8 @@ def _structure(blocks, doc):
             return False
         if re.search(r"[a-z]-$", prev) or t[:1].islower():
             return True
+        if t[:1] in "—…" and t[1:2].islower():
+            return True  # "on that team" / "—no,” he paused": dialogue picked up after a dash
         return ocr and len(prev) >= 50  # a born-digital block without a full stop is a list or a cell
 
     def flush():
@@ -1821,7 +1923,8 @@ def _structure(blocks, doc):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
             # an OCR text layer that cut the paragraph into blocks) is the same paragraph.
             prev = cur[-1][1]
-            glue = prev[:-1] if prev.endswith("-") and prev[-2:-1].isalpha() else prev + " "
+            glue = prev[:-1] if prev.endswith("-") and prev[-2:-1].isalpha() else \
+                prev if t[:1] in "—…" else prev + " "
             cur[-1] = ("p", glue + t)
         elif sz >= h1_cut and len(t) < 120 and not OPEN_END.search(t):
             flush()
@@ -1895,6 +1998,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
     safe_title = (title or (meta.get("title") or "").strip()
                   or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
+    if "_" in safe_title and " " not in safe_title:
+        safe_title = safe_title.replace("_", " ")  # "Into_the_Blue" on the Kindle shelf -> "Into the Blue"
     author = (author or (meta.get("author") or "").strip())[:120]
     if not blocks:
         # scanned PDF: OCR is the only thing that helps before falling back
