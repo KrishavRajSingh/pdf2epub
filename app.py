@@ -36,8 +36,8 @@ FAQ = {"en": [
      "come through as images."),
     ("Can it convert a book I bought from Kindle or Kobo?",
      "No. Store books are locked with DRM and are not PDFs. It converts PDFs you can open yourself."),
-    ("What if my book has more than 500 pages?",
-     "The free converter gives you the first 500 pages. One book, $5 once, converts up to 2,000 pages. "
+    ("What if my book has more than 150 pages?",
+     "The free converter gives you the first 150 pages. One book, $5 once, converts up to 2,000 pages. "
      "Anything bigger, email for a quote."),
     ("What if the paid conversion is not good enough?",
      "Email me within 30 days and I refund the full amount, no questions asked."),
@@ -51,10 +51,10 @@ import time
 
 app = FastAPI()
 MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
-MAX_PAGES = 500  # ponytail: cap keeps free tier fast, raise when paid
+MAX_PAGES = 150  # ponytail: 500 let almost every book through, so the $5 offer met ~1 reader a day (11-03)
 OCR_MAX_PAGES = 200
 # ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
-# stay free to 500 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
+# stay free to 150 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
 FREE_OCR_PAGES = 20
 PAID_OCR_MAX_PAGES = 600  # ponytail: OCR runs inside the request, past this the proxy times out
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
@@ -73,7 +73,7 @@ SHELF_KEYS = Path(os.environ.get("LOG_DIR", ".")) / "shelf-keys.txt"  # one key 
 PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified ids, so refresh is free
 USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
 FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
-SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 500, which is what a textbook is
+SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of most books
 SHELF_MAX_MB = 500
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
@@ -573,7 +573,7 @@ __ALT__
 <h1>Your PDF, as a <span class="em">real book</span>.</h1>
 <p class="lede">Real chapters, real paragraphs. Free, no signup, nothing kept.</p>
 <div class="facts mono">
-  <span class="fact"><b>200MB</b> / 500 pages</span>
+  <span class="fact"><b>200MB</b> / 150 pages</span>
   <span class="fact">Scans: OCR free for <b>__FREEOCR__ pages</b></span>
   <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
   <span class="fact" id="st" hidden></span>
@@ -625,7 +625,7 @@ __ALT__
 <h2>Prices</h2>
 <div class="prices">
   <div class="price"><h3>Free</h3><div class="amt">$0</div>
-    <p>One PDF at a time, up to 500 pages and 200MB. Scans: the first __FREEOCR__ pages.</p>
+    <p>One PDF at a time, up to 150 pages and 200MB. Scans: the first __FREEOCR__ pages.</p>
     <span class="here">It is the converter above</span></div>
   <div class="price"><h3>One book</h3><div class="amt">$5 once</div>
     <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
@@ -669,9 +669,9 @@ try{const ob=localStorage.getItem('onebook');if(ob){msg.className='ok';msg.inner
  +'<a href="/onebook?checkout_id='+encodeURIComponent(ob)+'">Convert it here</a>'}}catch(e){}
 function buy(why){return '/go/onebook?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
-function pitchPages(n){return 'This PDF has '+(n||'over 500')+' pages. The free converter stops at 500.<br>'
+function pitchPages(n){return 'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
  +'<a style="'+BTN+'" href="'+buy('pages')+'">Convert the whole book - $5</a>'
- +'<button id="preview" data-n="500" style="'+GHOST+'">Free: first 500 pages</button>'
+ +'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>'
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
@@ -1212,8 +1212,7 @@ hit the 500-page cap. Shelf is for that reader.</p>
 <p><b>$10 a month, included</b></p>
 <ul>
 <li>1,000 pages a month included. If you go over, email me and we will sort it out.</li>
-<li><b>No per-file ceiling.</b> The free converter stops at 500 pages, which is where a textbook
-sits. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
+<li><b>No per-file ceiling.</b> The free converter stops at 150 pages, enough to try a book. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
 <li>Batch by email: send me a shelf of PDFs, get the EPUBs back.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
 <li>Send-to-Kindle help: send me the EPUB and your Kindle address, and I will send it on.</li>
@@ -1238,7 +1237,7 @@ send the EPUBs back, usually the same day.</p>
 <p>Bigger than 2,000 pages or a rough scan?
 <a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
 and I will quote it.</p>
-<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 500 pages, and scans up to
+<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 150 pages, and scans up to
 {FREE_OCR_PAGES} pages, with no signup.</p>
 </div><script>{TRACK_JS}
 document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);</script></body></html>""")
@@ -1267,7 +1266,7 @@ def llms_txt():
 
 ## Pricing
 
-- Free: one PDF at a time, up to 500 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
+- Free: one PDF at a time, up to 150 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
 - One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
 - Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, batches by email: https://epub.ftak.net/shelf
 

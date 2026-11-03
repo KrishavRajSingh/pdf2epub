@@ -155,7 +155,7 @@ def main():
 
     # the paid tier: a key from a real checkout lifts the per-file ceiling, a junk one does not
     big = pymupdf.open()
-    for i in range(600):  # over the 500-page free cap, under the 2000-page paid cap
+    for i in range(600):  # over the 150-page free cap, under the 2000-page paid cap
         big.new_page().insert_text((72, 100), f"page {i}", fontsize=11)
     braw = big.tobytes()
     big.close()
@@ -170,13 +170,13 @@ def main():
         "cap rejection does not pitch the $5 one-book job"
     assert "quote a one-time conversion" not in cap.text, \
         "cap rejection still quotes instead of selling"
-    # a long book can take its first 500 pages free, with a closing chapter that sells the rest
+    # a long book can take its first 150 pages free, with a closing chapter that sells the rest
     pv = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")}, data={"preview": "1"})
     assert pv.status_code == 200, pv.text[:200]
     zv = zipfile.ZipFile(__import__("io").BytesIO(pv.content))
     hv = "".join(zv.read(n).decode("utf-8", "replace") for n in zv.namelist() if n.endswith(".xhtml"))
-    assert "page 499" in hv and "page 500" not in hv, "page preview is not the first 500 pages"
-    assert "the first 500 of 600 pages" in hv, "page preview does not sell the rest"
+    assert "page 149" in hv and "page 150" not in hv, "page preview is not the first 150 pages"
+    assert "the first 150 of 600 pages" in hv, "page preview does not sell the rest"
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"
@@ -190,7 +190,7 @@ def main():
     page = client.get(f"/thanks?checkout_id={cid}").text
     assert "Shelf key" in page, "a verified checkout must mint a key"
     key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
-    assert convert_with(f"?k={key}") == 200, "a paid key must lift the 500 page cap"
+    assert convert_with(f"?k={key}") == 200, "a paid key must lift the 150 page cap"
     # same checkout must not mint a second key on a page refresh
     again = client.get(f"/thanks?checkout_id={cid}").text
     assert re.search(r"\?k=([0-9A-Za-z_-]+)</code>", again).group(1) == key, "key changed on refresh"
@@ -200,7 +200,7 @@ def main():
     # re-running that same file stays free, a second different book does not ride on it
     bcid = "0b5e3a52-7c1d-4e8f-9a6b-2d4c8e1f3a7b"
     pdf2epub.paid_checkout = lambda c, p: (c, p) == (bcid, pdf2epub.ONEBOOK_PRODUCT)
-    assert convert_with(f"?paid={bcid}") == 200, "a paid one-book must lift the 500 page cap"
+    assert convert_with(f"?paid={bcid}") == 200, "a paid one-book must lift the 150 page cap"
     assert convert_with(f"?paid={bcid}") == 200, "re-running the paid book must stay free"
     other = client.post(f"/convert?paid={bcid}", files={"f": ("c.pdf", craw, "application/pdf")})
     assert other.status_code == 402, "one payment converted a second, different book"
