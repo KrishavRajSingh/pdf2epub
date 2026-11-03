@@ -1595,31 +1595,41 @@ def _lig_map(doc):
     for page in doc:
         for b in page.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
             for line in b.get("lines", []):
-                for s in line["spans"]:
-                    t = s["text"]
-                    for k, ch in enumerate(t):
-                        if ch.isspace() or ch in LIG_SAFE or (ch.isascii() and ch.isalnum()):
-                            continue
-                        if ch.isalpha() and not 0x1C4 <= ord(ch) <= 0x1CC and ord(ch) < 0xE000:
-                            continue  # real accented letters stay; Dž-style digraphs and private use are suspects
-                        l = re.search(r"[A-Za-z]{0,2}$", t[:k]).group().lower()
-                        r = re.match(r"[A-Za-z]{0,2}", t[k + 1:]).group().lower()
-                        if not l and not r:
-                            continue
-                        if not (l and r) and not ch.isalpha():
-                            continue  # punctuation votes mid-word only: "(th" spells "fifth", "o!ce" can't be a real "!"
-                        f = s["font"]
-                        seen[f, ch] += 1
-                        for lig in LIGS:
-                            key = (("^" if len(l) < 2 else "") + l + "|" + lig + "|" + r
-                                   + ("$" if len(r) < 2 else ""))
-                            if key in LIG_KEYS:
-                                votes.setdefault((f, ch), Counter())[lig] += 1
+                # context comes from the whole line: Kindle exports put the ligature glyph in a
+                # span of its own ("di" | "ǃerent"), so per span every hit looks like a word start.
+                t = "".join(sp["text"] for sp in line["spans"])
+                fonts = [sp["font"] for sp in line["spans"] for _ in sp["text"]]
+                for k, ch in enumerate(t):
+                    if ch.isspace() or ch in LIG_SAFE or (ch.isascii() and ch.isalnum()):
+                        continue
+                    if ch.isalpha() and not 0x180 <= ord(ch) <= 0x24F and ord(ch) < 0xE000:
+                        continue  # real accented letters stay; Latin Extended-B (Dž, ǃ, Ǐ) and private use are suspects
+                    l = re.search(r"[A-Za-z]{0,2}$", t[:k]).group().lower()
+                    r = re.match(r"[A-Za-z]{0,2}", t[k + 1:]).group().lower()
+                    if not l and not r:
+                        continue
+                    if not (l and r) and not ch.isalpha():
+                        continue  # punctuation votes mid-word only: "(th" spells "fifth", "o!ce" can't be a real "!"
+                    f = fonts[k]
+                    seen[f, ch] += 1
+                    for lig in LIGS:
+                        key = (("^" if len(l) < 2 else "") + l + "|" + lig + "|" + r
+                               + ("$" if len(r) < 2 else ""))
+                        if key in LIG_KEYS:
+                            votes.setdefault((f, ch), Counter())[lig] += 1
     out = {}
     for (f, ch), c in votes.items():
         lig, n = c.most_common(1)[0]
         if n >= 3 and n >= seen[f, ch] * 0.6:
             out.setdefault(f, {})[ch] = lig
+    # a stray letter with too few hits in its own font ("scotthunteroǏcial" in bold) borrows
+    # the ligature that letter means in a sibling font of the same family (Bookerly-Regular)
+    for f, ch in seen:
+        if ch.isalpha() and ch not in out.get(f, {}):
+            fam = f.split("-")[0]
+            sib = Counter(m[ch] for g, m in out.items() if g.split("-")[0] == fam and ch in m)
+            if sib:
+                out.setdefault(f, {})[ch] = sib.most_common(1)[0][0]
     return out
 
 
@@ -1642,13 +1652,20 @@ def _lig_ok(t, k, lig):
 PRESENTATION_LIGS = str.maketrans({"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04": "ffl"})
 
 
-def _fix_ligs(s, ligmap):
+def _fix_line(line, ligmap):
     # real ligature chars (U+FB01 "ﬁ") break search and fonts without the glyph: plain letters
-    s["text"] = s["text"].translate(PRESENTATION_LIGS)
-    m = ligmap.get(s["font"])
-    if m:
-        t = s["text"]
-        s["text"] = "".join(m[ch] if ch in m and _lig_ok(t, k, m[ch]) else ch for k, ch in enumerate(t))
+    for sp in line["spans"]:
+        sp["text"] = sp["text"].translate(PRESENTATION_LIGS)
+    if not ligmap or not any(sp["font"] in ligmap for sp in line["spans"]):
+        return
+    t = "".join(sp["text"] for sp in line["spans"])
+    k = 0
+    for sp in line["spans"]:
+        m, old = ligmap.get(sp["font"]), sp["text"]
+        if m:
+            sp["text"] = "".join(m[ch] if ch in m and _lig_ok(t, k + j, m[ch]) else ch
+                                 for j, ch in enumerate(old))
+        k += len(old)
 
 
 def _span_text(s):
@@ -1782,6 +1799,29 @@ def _paragraphs(rows, bbox, ocr=False):
     return [(y0, size, lines) for y0, size, lines, _ in groups]
 
 
+def _heading_first(raw, body):
+    """Move a heading the PDF wrote last back to the top of its page.
+
+    ponytail: AO3/Kindle exports store a chapter's first paragraphs before the "Chapter 2"
+    block that sits above them, so the opening landed at the end of the previous chapter (the
+    first buyer's "formatting at the beginning of the chapters"). Only a trailing run that lies
+    wholly above everything before it and holds a heading-size block moves; sorting the whole
+    page by y reshuffled footnotes and tables in nonfiction.
+    """
+    def page_no(b):
+        return PAGE_NO.fullmatch("".join(s["text"] for ln in b["lines"] for s in ln["spans"]).strip())
+    text = [i for i, b in enumerate(raw) if b.get("type") == 0 and b.get("lines") and not page_no(b)]
+    for cut in range(1, len(text)):
+        head, tail = text[:cut], text[cut:]
+        if max(raw[i]["bbox"][3] for i in tail) > min(raw[i]["bbox"][1] for i in head) + 2:
+            continue
+        if any(s["size"] >= body * 1.25 for i in tail for ln in raw[i]["lines"] for s in ln["spans"]):
+            move = set(tail)
+            return [raw[i] for i in tail] + [b for i, b in enumerate(raw) if i not in move]
+        return raw
+    return raw
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -1795,10 +1835,11 @@ def _blocks(doc):
     ligmap = _lig_map(doc)
     for i, page in enumerate(doc):
         raw = page.get_text("dict")["blocks"]
+        if not page.rotation:
+            raw = _heading_first(raw, body)
         for b in raw:
             for line in b.get("lines", []):
-                for s in line["spans"]:
-                    _fix_ligs(s, ligmap)
+                _fix_line(line, ligmap)
         fig = _figure_rect(page, raw, body)
         fig_page = _page_rect(page, fig) if fig else None
         cap, cap_page = "", None

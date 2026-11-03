@@ -48,3 +48,14 @@ assert "ǅ" not in text and "stu!" not in text
 assert any("on that team—no," in p or "on that team —no," in p for p in paras), \
     "sentence cut by a page break must stay one paragraph"
 print("ok")
+
+# a chapter heading the PDF writes after the chapter's first paragraphs (AO3/Kindle export)
+doc = pymupdf.open()
+for n in (1, 2):
+    p = doc.new_page(width=420, height=500)
+    p.insert_text((20, 200), f"Body of chapter {n} starts here and runs on for a while, as prose does.\n"
+                  "It keeps going with a second sentence so the block looks like body text.", fontsize=11)
+    p.insert_text((20, 60), f"Chapter {n}: a title", fontsize=20)
+paras = [(k, t) for ch in _structure(list(_blocks(doc)), doc) for k, t in ch]
+assert paras[0] == ("h1", "Chapter 1: a title") and paras[1][1].startswith("Body of chapter 1"), paras[:3]
+print("heading order ok")
