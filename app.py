@@ -117,8 +117,46 @@ def shelf_key(request: Request) -> str:
         parts = ln.split()
         if len(parts) >= 2 and parts[1] == k:
             until = next((p[6:] for p in parts[2:] if p.startswith("until=")), "")
-            return k if not until or today <= until else ""
+            if until:
+                return k if today <= until else ""
+            return k if shelf_active(parts[0]) else ""
     return ""
+
+
+SHELF_GRACE_DAYS = 34  # ponytail: a month plus 3 days, so a renewal that lands a day late never locks anyone out
+_SHELF_CACHE: dict[str, tuple[float, bool]] = {}
+
+
+def shelf_active(cid: str) -> bool:
+    """A Shelf key works while the buyer's latest paid Shelf order is under 34 days old.
+
+    ponytail: every monthly renewal is a new polar order, so the read-only orders token is enough
+    (it cannot read /subscriptions). A cancel stops the renewals, so the key ends a month after the
+    last payment. Fail open: a polar outage or a hand-made key ("manual ...") never locks a buyer out.
+    """
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", cid) or not POLAR_TOKEN:
+        return True
+    hit = _SHELF_CACHE.get(cid)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    def get(q):
+        req = urllib.request.Request(POLAR_ORDERS + q, headers={"Authorization": "Bearer " + POLAR_TOKEN,
+                                                                "User-Agent": "pdf2epub/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return (json.load(r) or {}).get("items") or []
+    try:
+        first = get("?limit=1&checkout_id=" + cid)
+        if not first:
+            return True
+        cust = first[0].get("customer_id") or ""
+        orders = [o for o in get(f"?limit=10&customer_id={cust}&product_id={SHELF_PRODUCT}&sorting=-created_at")
+                  if o.get("status") == "paid"]
+        last = max(datetime.fromisoformat(o["created_at"].replace("Z", "+00:00")) for o in orders) if orders else None
+    except Exception:
+        return True
+    ok = bool(last) and datetime.now(timezone.utc) - last < timedelta(days=SHELF_GRACE_DAYS)
+    _SHELF_CACHE[cid] = (time.time(), ok)
+    return ok
 
 
 def paid_checkout(cid: str, product_id: str) -> bool:
@@ -289,7 +327,8 @@ def err_page(msg: str, code: int):
         "<p>Too big for the free converter? <b>One book:</b> $5 once, then come back and it converts "
         "on the spot, up to 2,000 pages: <a href='/go/onebook?why=errpage'>one book - $5</a>. "
         "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
-        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>. "
+        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>, or "
+        "<a href='/go/batch?why=errpage'>$10 once for 30 days</a>. "
         "Not happy with the result? Full refund within 30 days.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
 
@@ -501,15 +540,24 @@ async function runJob(url,fd,hdr,tick){
  const r=await fetch(url,{method:'POST',body:fd,headers:Object.assign({'X-Job':'1'},hdr||{})});
  const fail=(st,t)=>{const er=new Error(st+': '+t);er.status=st;return er};
  if(r.status!==202){if(!r.ok)throw fail(r.status,(await r.text()).slice(0,160));return URL.createObjectURL(await r.blob())}
- const j=(await r.json()).job,t0=Date.now();
+ const j=(await r.json()).job;
+ try{localStorage.setItem('job',JSON.stringify({j:j,t:Date.now(),name:(fd.get('f')&&fd.get('f').name)||'book.pdf'}))}catch(e){}
+ return pollJob(j,tick)}
+// ponytail: the job id sits in localStorage, so closing the tab and opening the site again within the
+// hour picks the book back up. no email provider needed
+function pendingJob(){try{const p=JSON.parse(localStorage.getItem('job')||'null');
+ if(p&&Date.now()-p.t<3500000)return p;localStorage.removeItem('job')}catch(e){}return null}
+async function pollJob(j,tick){
+ const fail=(st,t)=>{const er=new Error(st+': '+t);er.status=st;return er},t0=Date.now();
+ const end=()=>{try{localStorage.removeItem('job')}catch(e){}};
  for(;;){
   await new Promise(z=>setTimeout(z,2500));
   const secs=Math.round((Date.now()-t0)/1000);if(secs>2700)throw fail(504,'took too long');
-  let s;try{const q=await fetch('/job/'+j,{cache:'no-store'});if(q.status===404)throw fail(502,'job lost');s=await q.json()}
+  let s;try{const q=await fetch('/job/'+j,{cache:'no-store'});if(q.status===404){end();throw fail(502,'job lost')}s=await q.json()}
   catch(e){if(e.status)throw e;continue}
   if(tick)tick(secs);
-  if(s.state==='done')return '/job/'+j+'/epub';
-  if(s.state==='error')throw fail(s.status,JSON.stringify({detail:s.detail}).slice(0,200));
+  if(s.state==='done'){end();return '/job/'+j+'/epub'}
+  if(s.state==='error'){end();throw fail(s.status,JSON.stringify({detail:s.detail}).slice(0,200))}
  }}
 function clock(n){return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
 function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
@@ -717,6 +765,7 @@ __ALT__
     <a href="/go/onebook?why=landing" data-go>Pay $5 for one book</a></div>
   <div class="price"><h3>Shelf</h3><div class="amt">$10 a month</div>
     <p>1,000 pages a month, up to 2,000 pages per file, batches by email.</p>
+    <p>Or $10 once for 30 days, no renewal.</p>
     <a href="/shelf">See Shelf</a></div>
 </div>
 <p class="refund" style="font-size:14px;color:#5b564d;margin-top:10px">Not happy with the book? Full refund within 30 days, no questions asked.</p>
@@ -790,6 +839,13 @@ drop.onclick=()=>fi.click();
 drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0])ev('pick')});
 fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name}});
 let PN='__FREEOCR__';
+(async()=>{const p=pendingJob();if(!p)return;
+ msg.className='';msg.textContent='Picking up '+p.name+' where you left it...';go.disabled=true;
+ try{const u=await pollJob(p.j,n=>{msg.textContent='Still converting '+p.name+' ('+clock(n)+')...'});
+  const a=document.createElement('a');a.href=u;a.download=p.name.replace(/\.pdf$/i,'')+'.epub';a.click();ev('done',{why:'resume'});
+  msg.className='ok';msg.textContent='Done. '+p.name.replace(/\.pdf$/i,'')+'.epub downloaded.'}
+ catch(e){msg.className='err';msg.textContent=e.status===502?'That conversion is gone (over an hour old). Upload it again.':e.message}
+ go.disabled=false})();
 async function convert(preview){
  const f=fi.files[0];
  if(!f){msg.className='err';msg.textContent='Choose a PDF first.';return}
@@ -802,7 +858,7 @@ async function convert(preview){
  if(preview)fd.append('preview','1');
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
-   +'). Big books and scans take a few minutes. Keep this tab open.'});
+   +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up.'});
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
@@ -1361,6 +1417,7 @@ def llms_txt():
 - Free: one PDF at a time, up to 150 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
 - One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
 - Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, batches by email: https://epub.ftak.net/shelf
+- Batch pass: $10 once, the Shelf limits for 30 days, no renewal: https://epub.ftak.net/shelf
 
 ## Pages
 
