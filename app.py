@@ -85,7 +85,7 @@ def shelf_key(request: Request) -> str:
     ponytail: the key rides in the url, so check the query string and the referer, because the
     form posts to /convert + location.search and some clients drop the query on the post.
     """
-    k = (request.query_params.get("k") or "").strip()
+    k = (request.query_params.get("k") or request.headers.get("x-k") or "").strip()
     if not k:
         m = re.search(r"[?&]k=([0-9A-Za-z_-]{6,64})", (request.headers.get("referer") or "")[:120])
         k = m.group(1) if m else ""
@@ -427,6 +427,9 @@ try{V=localStorage.getItem('v')||'';if(!V){V=Math.random().toString(36).slice(2)
 try{const q=new URLSearchParams(location.search),rf=document.referrer?new URL(document.referrer).hostname:'';
  const now=q.get('s')||q.get('utm_source')||(rf&&rf!==location.hostname?rf.replace(/^www\./,''):'');
  SRC=localStorage.getItem('src')||now||'direct';if(!localStorage.getItem('src'))localStorage.setItem('src',SRC)}catch(e){}
+// ponytail: a shelf key seen once (?k= or the thanks page) is kept here and sent as X-K, so
+// losing the link does not drop a subscriber back to the free tier. the server still checks it
+let K='';try{const k=new URLSearchParams(location.search).get('k');if(k)localStorage.setItem('k',k);K=localStorage.getItem('k')||''}catch(e){}
 function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
 ev('view',{path:location.pathname});
 """
@@ -716,7 +719,7 @@ async function convert(preview){
  fd.append('email',document.getElementById('email').value);
  if(preview)fd.append('preview','1');
  try{
-  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V}});
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V,'X-K':K}});
   if(!r.ok){const t=await r.text();const er=new Error(r.status+': '+t.slice(0,160));er.status=r.status;throw er}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
@@ -734,7 +737,7 @@ smp.onclick=async()=>{
   const b=await (await fetch('/sample.pdf')).blob();
   const fd=new FormData();fd.append('f',new File([b],'sample.pdf',{type:'application/pdf'}));
   fd.append('title','Sample Book');fd.append('email',document.getElementById('email').value);
-  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V}});
+  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V,'X-K':K}});
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sample.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open sample.epub and check the chapter list.'}
@@ -1096,7 +1099,8 @@ If it is a scan it gets OCR and the text will have the usual OCR typos, and I wi
 </div>
 <p>Questions about the plan, or a file that is over 500MB? Same address, I will work around it.</p>
 </div><script>{TRACK_JS}
-ev('return',{{cid:{json.dumps(cid)}}});</script></body></html>""")
+ev('return',{{cid:{json.dumps(cid)}}});
+if({json.dumps(key)})try{{localStorage.setItem('k',{json.dumps(key)})}}catch(e){{}}</script></body></html>""")
 
 
 @app.get("/onebook", response_class=HTMLResponse)
