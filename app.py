@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+import urllib.error
 import urllib.request
 import pymupdf
 from ebooklib import epub
@@ -69,7 +70,10 @@ FIG_MAX_PX = 2000  # ponytail: long side cap; 3x renders of a full page are ~185
 JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs"))  # ponytail: /tmp is shared by both uvicorn workers
 JOB_TTL = 3600  # an unfetched epub is deleted after an hour
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
-MAIL_FROM = os.environ.get("MAIL_FROM", "pdf2epub <books@opencorp.live>")  # opencorp.live is verified in resend
+# ponytail: epub.ftak.net was added in resend on 11-05 (dns on vercel); until resend verifies it, a send
+# from it is refused, so fall back to opencorp.live (verified). no code change needed once it verifies
+MAIL_FROMS = [x for x in [os.environ.get("MAIL_FROM", ""), "pdf2epub <books@epub.ftak.net>",
+                          "pdf2epub <books@opencorp.live>"] if x]
 MAIL_AFTER = 90  # ponytail: mail the link only if the epub is still unfetched this long after it is done
 _JOB_POOL = ThreadPoolExecutor(max_workers=2)  # per uvicorn worker, so 4 books at once on the box
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
@@ -2276,16 +2280,25 @@ def _mail_link(jid: str, to: str, name: str):
             "The link works once and for about an hour after the conversion finished, then the file is deleted. "
             "If it has expired, upload the PDF again.\n\nReply to this email if anything looks wrong.\n\n"
             "Krishav, pdf2epub")
-    req = urllib.request.Request("https://api.resend.com/emails", method="POST",
-        data=json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": SHELF_MAIL,
-                         "subject": f"Your EPUB is ready: {name}"[:120], "text": body}).encode(),
-        headers={"Authorization": "Bearer " + RESEND_KEY, "Content-Type": "application/json",
-                 "User-Agent": "pdf2epub/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            event("link_mailed", None, job=jid[:6], status=r.status)
-    except Exception as e:
-        event("link_mail_failed", None, job=jid[:6], err=str(e)[:80])
+    err = ""
+    for sender in MAIL_FROMS:
+        req = urllib.request.Request("https://api.resend.com/emails", method="POST",
+            data=json.dumps({"from": sender, "to": [to], "reply_to": SHELF_MAIL,
+                             "subject": f"Your EPUB is ready: {name}"[:120], "text": body}).encode(),
+            headers={"Authorization": "Bearer " + RESEND_KEY, "Content-Type": "application/json",
+                     "User-Agent": "pdf2epub/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                event("link_mailed", None, job=jid[:6], status=r.status, sender=sender.split("@")[-1][:-1])
+                return
+        except urllib.error.HTTPError as e:
+            err = f"{e.code} {sender}"
+            if e.code not in (403, 422):
+                break  # ponytail: only an unverified sender is worth retrying with the next one
+        except Exception as e:
+            err = str(e)[:80]
+            break
+    event("link_mail_failed", None, job=jid[:6], err=err)
 
 
 def _job_run(jid: str, work, email: str = "", name: str = "book"):
