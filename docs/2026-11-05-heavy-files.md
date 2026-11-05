@@ -79,3 +79,23 @@ Move pdf2epub from Trial to Railway Hobby ($5/month minimum, usage-based, up to 
 ## Order
 
 Stage 1, items 1 and 3, first: they fix both memory kills. Then stage 2, which fixes the timeout and adds progress. Stage 3 whenever the user says yes.
+
+## Shipped (2026-11-05, `f4e2b6b`)
+
+Railway Hobby is live (8 GB / 8 vCPU). Code:
+
+- Background jobs (`X-Job: 1` → 202 `{job}`, the page polls `/job/<id>` and downloads `/job/<id>/epub`, and the file is deleted after sending or after 1 hour). The main page and One Book use jobs. Without the header, conversion still runs, but off the event loop.
+- Figures: JPEG at quality 82 when it is under 70% of the PNG size, long side capped at 2,000 px. Line art stays PNG.
+- OCR: 4 tesseract threads.
+
+Measured after:
+
+| Check | Before | After |
+|---|---|---|
+| 113 MB photo PDF → EPUB | 486 MB | 72 MB |
+| Slowest page response during heavy work (local) | 32 s | 0.8 s (two heavy jobs at once) |
+| OCR, 24 scanned pages (local) | 48 s | 19 s, same text |
+| 80-page scan on production | n/a | 80 s total |
+| 113 MB photo PDF on production | n/a | 57 s total (28 s of it upload) |
+
+Not done: emailing the download link when a job finishes, a per-page progress count, and stage 1's separate process per job (not needed at 8 GB).
