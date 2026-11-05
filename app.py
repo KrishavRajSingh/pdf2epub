@@ -1,6 +1,6 @@
 """PDF -> EPUB MVP. Free text-only. No auth, no DB, no storage."""
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 import csv
@@ -56,7 +56,8 @@ OCR_MAX_PAGES = 200
 # ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
 # stay free to 150 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
 FREE_OCR_PAGES = 20
-PAID_OCR_MAX_PAGES = 600  # ponytail: OCR runs inside the request, past this the proxy times out
+PAID_OCR_MAX_PAGES = 120  # ponytail: OCR runs inside the request at ~2s/page; railway cuts it at ~5 min.
+# a 302-page scan took 10 min on 11-05, the buyer got a 502 and the epub was thrown away
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
@@ -64,6 +65,11 @@ SHELF_URL = "https://buy.polar.sh/polar_cl_1jZLYsY7lODWs2QOnhNALMww3O7if69LL4nRQ
 ONETIME_URL = "https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc"  # $5 one book, manual, paid before delivery
 SHELF_MAIL = "krishavrajsingh@gmail.com"
 SHELF_PRODUCT = "8c3386ae-0aea-4dd2-87bc-7735b8af795a"
+# ponytail: the first shelf buyer did ~20 books in one night and turned renewal off the same day.
+# a shelf is a one-time job, so the same limits are sold once for 30 days too
+BATCH_URL = "https://buy.polar.sh/polar_cl_DIV8bQHOvUqSGLvGPOceLOSWaSGxXDe0iQPm54gL2Cl"
+BATCH_PRODUCT = "4c35ff8c-8fc9-451b-9861-815c5448e733"
+BATCH_DAYS = 30
 ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN", "")  # ponytail: read-only OAT, only orders:read is needed
 POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
@@ -92,10 +98,17 @@ def shelf_key(request: Request) -> str:
     if not k:
         return ""
     try:
-        keys = {ln.split()[-1] for ln in SHELF_KEYS.read_text().splitlines() if ln.split()}
+        lines = SHELF_KEYS.read_text().splitlines()
     except OSError:
         return ""
-    return k if k in keys else ""
+    today = datetime.now(timezone.utc).date().isoformat()
+    for ln in lines:
+        # ponytail: "CHECKOUT KEY" for shelf, "CHECKOUT KEY until=YYYY-MM-DD" for a batch pass
+        parts = ln.split()
+        if len(parts) >= 2 and parts[1] == k:
+            until = next((p[6:] for p in parts[2:] if p.startswith("until=")), "")
+            return k if not until or today <= until else ""
+    return ""
 
 
 def paid_checkout(cid: str, product_id: str) -> bool:
@@ -155,7 +168,7 @@ def onebook_use(cid: str, digest: str):
         pass
 
 
-def issue_key(checkout_id: str) -> str:
+def issue_key(checkout_id: str, days: int = 0) -> str:
     """Mint a key for a paid checkout, once per checkout id.
 
     ponytail: no accounts, no db, no polar api call. the key is a random string in a file on the
@@ -165,13 +178,14 @@ def issue_key(checkout_id: str) -> str:
         done = SHELF_KEYS.read_text()
     except OSError:
         done = ""
-    m = re.search(rf"^{re.escape(checkout_id)}\s+(\S+)$", done, re.M)
+    m = re.search(rf"^{re.escape(checkout_id)}\s+(\S+)", done, re.M)
     if m:
         return m.group(1)
     key = secrets.token_urlsafe(15)
     try:
         with SHELF_KEYS.open("a") as fh:
-            fh.write(f"{checkout_id} {key}\n")
+            until = (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat() if days else ""
+            fh.write(f"{checkout_id} {key}" + (f" until={until}" if until else "") + "\n")
     except OSError:
         pass
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "key_issued": checkout_id,
@@ -728,6 +742,8 @@ async function convert(preview){
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   window.capPages=n;window.capName=(f&&f.name)||'book';
   if(e.status===413){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
+  else if(!e.status||e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
+   +'instant converter. That is on our side, not your file. Email it to __MAIL__ and I will convert it by hand today.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
 go.onclick=()=>convert(false);
@@ -1058,14 +1074,17 @@ def thanks(request: Request):
     _write(line)
     # ponytail: hand the subscriber their key here. polar sends the checkout id, so a junk request
     # gets no key. the key is what lifts the per-file ceiling, no account needed.
-    key = ""
+    key, batch = "", False
     if paid_checkout(cid, SHELF_PRODUCT):
         key = issue_key(cid)
+    elif paid_checkout(cid, BATCH_PRODUCT):
+        key, batch = issue_key(cid, BATCH_DAYS), True
     key_html = ""
     if key:
-        key_html = (f'<div class="card"><p><b>Your Shelf key</b></p>'
+        key_html = (f'<div class="card"><p><b>Your {"Batch pass" if batch else "Shelf"} key</b></p>'
             f'<p>Put this on the end of the converter link and your uploads get the paid limits '
-            f'(2,000 pages per file, 500MB):</p>'
+            f'(2,000 pages per file, 500MB){f" for the next {BATCH_DAYS} days. It does not renew" if batch else ""}. '
+            f'This browser remembers it too:</p>'
             f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
             f'<p>No account, no password. If you lose it, reply to the email I sent you and I will '
             f'send it again.</p></div>')
@@ -1086,8 +1105,8 @@ b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,m
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>You're in.</h1>
-<p>Shelf is $10 a month for 1,000 pages of your own, no per-file ceiling, batch conversion of a
-whole shelf, and the finished EPUB delivered to your Kindle.</p>
+<p>{"The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month"}: no per-file ceiling,
+batch conversion of a whole shelf, and the finished EPUB delivered to your Kindle.</p>
 {key_html}
 <div class="card">
 <p><b>What happens next</b></p>
@@ -1223,7 +1242,8 @@ hit the 500-page cap. Shelf is for that reader.</p>
 <li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
 </ul>
 <a class="btn" href="/go/shelf?why=shelfpage" data-go>Subscribe - $10/month</a>
-<p style="margin:12px 0 0;font-size:14px">Not happy? Email me within 30 days of a payment and I refund it in full. Cancel any time.</p>
+<a class="btn" style="background:transparent;color:var(--txt);border:1px solid var(--line)" href="/go/batch?why=shelfpage" data-go>Or $10 once - 30 days, no renewal</a>
+<p style="margin:12px 0 0;font-size:14px">One shelf to convert, not a habit? The one-time pass gives the same limits for 30 days and then simply ends. Not happy? Email me within 30 days of a payment and I refund it in full. Cancel any time.</p>
 </div>
 <p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
@@ -1357,7 +1377,7 @@ async def beacon(request: Request):
 @app.get("/go/{offer}")
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
-    url = {"onebook": ONETIME_URL, "shelf": SHELF_URL}.get(offer)
+    url = {"onebook": ONETIME_URL, "shelf": SHELF_URL, "batch": BATCH_URL}.get(offer)
     if not url:
         raise HTTPException(404, "no such offer")
     if not is_bot(ua_of(request)):
@@ -1991,6 +2011,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     key = shelf_key(request)  # ponytail: a paying subscriber gets a bigger ceiling, no account needed
     raw = await f.read()
     kb_in = len(raw) // 1024
+    # ponytail: a worker killed for memory leaves no log line, so note the size before the heavy work
+    event("start", request, kb=kb_in, paid=bool(key))
     # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot instead of by hand
     cid = (request.query_params.get("paid") or "")[:80]
     digest = hashlib.sha256(raw).hexdigest()[:32]
