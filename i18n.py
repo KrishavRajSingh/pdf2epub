@@ -220,7 +220,7 @@ FAQS = {
          "Sim. Mande o EPUB para o Kindle pelo Send to Kindle da Amazon (por e-mail, pelo app ou pela página web) e ele "
          "aparece na sua biblioteca. Kobo, Apple Books e a maioria dos leitores de celular abrem direto."),
         ("Meu arquivo fica guardado?",
-         "Não. O PDF é convertido na memória e apagado depois do download. Não há conta nem biblioteca do nosso lado."),
+         "Não. O PDF nunca é salvo, e o EPUB pronto é apagado assim que você baixa (ou depois de uma hora, se não baixar). Não há conta nem biblioteca do nosso lado."),
         ("Meu PDF é um livro escaneado. Funciona?",
          "Sim. As páginas escaneadas passam por OCR e depois são divididas em capítulos e parágrafos como qualquer PDF. "
          "As primeiras __FREEOCR__ páginas são grátis, e o livro inteiro custa US$5, uma vez."),
@@ -240,7 +240,7 @@ FAQS = {
          "Sí. Envía el EPUB a tu Kindle con Send to Kindle de Amazon (por correo, la app o la web) y aparece en tu "
          "biblioteca. Kobo, Apple Books y la mayoría de lectores del móvil lo abren tal cual."),
         ("¿Se guarda mi archivo?",
-         "No. El PDF se convierte en memoria y se borra después de la descarga. No hay cuenta ni biblioteca de nuestro lado."),
+         "No. El PDF nunca se guarda, y el EPUB terminado se borra en cuanto lo descargas (o tras una hora si no lo haces). No hay cuenta ni biblioteca de nuestro lado."),
         ("Mi PDF es un libro escaneado. ¿Funciona?",
          "Sí. Las páginas escaneadas pasan por OCR y luego se dividen en capítulos y párrafos como cualquier PDF. "
          "Las primeras __FREEOCR__ páginas son gratis, y el libro entero cuesta US$5, una vez."),

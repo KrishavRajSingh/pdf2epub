@@ -13,11 +13,16 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
 import urllib.request
 import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 try:
     from guides import GUIDES, INDEX_BODY
 except Exception:  # ponytail: a missing file must not take the site down
@@ -27,7 +32,7 @@ FAQ = {"en": [
      "Yes. Send the EPUB to your Kindle with Amazon's Send to Kindle (by email, the app or the web page) and it "
      "lands in your library. Kobo, Apple Books and most phone readers open it as it is."),
     ("Is my file kept anywhere?",
-     "No. The PDF is converted in memory and deleted after the download. There is no account and no library on this side."),
+     "No. The PDF is never saved, and the finished EPUB is deleted the moment you download it (or after an hour if you never do). There is no account and no library on this side."),
     ("My PDF is a scanned book. Does that work?",
      "Yes. Scanned pages are read with OCR, then split into chapters and paragraphs like any other PDF. "
      "The first __FREEOCR__ pages are free, and the whole book is $5 once."),
@@ -56,8 +61,13 @@ OCR_MAX_PAGES = 200
 # ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
 # stay free to 150 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
 FREE_OCR_PAGES = 20
-PAID_OCR_MAX_PAGES = 120  # ponytail: OCR runs inside the request at ~2s/page; railway cuts it at ~5 min.
-# a 302-page scan took 10 min on 11-05, the buyer got a 502 and the epub was thrown away
+PAID_OCR_MAX_PAGES = 600  # ponytail: OCR runs as a background job now (the page polls), so railway's
+# 5-minute idle cut no longer applies. 11-05: a 302-page scan in the request got a 502 and was thrown away
+OCR_THREADS = 4  # ponytail: tesseract is a subprocess, so threads run it in parallel; hobby plan has 8 vCPU
+FIG_MAX_PX = 2000  # ponytail: long side cap; 3x renders of a full page are ~1850x2400
+JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs"))  # ponytail: /tmp is shared by both uvicorn workers
+JOB_TTL = 3600  # an unfetched epub is deleted after an hour
+_JOB_POOL = ThreadPoolExecutor(max_workers=2)  # per uvicorn worker, so 4 books at once on the box
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
@@ -302,8 +312,16 @@ def _ocr_page(page):
     """Render one page and return (text, ink coverage) from Tesseract's TSV output."""
     try:
         pix = page.get_pixmap(dpi=OCR_DPI)
+    except Exception:
+        return "", 0.0
+    return _tess(pix.tobytes("png"), pix.width, pix.height)
+
+
+def _tess(png: bytes, page_w: int, page_h: int):
+    """Tesseract on one rendered page. Thread-safe: no pymupdf objects in here."""
+    try:
         r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng", "tsv"],
-            input=pix.tobytes("png"), capture_output=True, timeout=60)
+            input=png, capture_output=True, timeout=60)
     except Exception:
         return "", 0.0
     if r.returncode != 0:
@@ -321,18 +339,50 @@ def _ocr_page(page):
         ink += width * height
     paras = [" ".join(t for _, t in sorted(v)) for _, v in
              sorted(lines.items(), key=lambda kv: tuple(int(x) for x in kv[0]))]
-    cov = ink / (pix.width * pix.height) if pix.width and pix.height else 0.0
+    cov = ink / (page_w * page_h) if page_w and page_h else 0.0
     return "\n\n".join(paras), cov
 
 def ocr_doc(doc, layout: bool = False) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
         return None
-    out = []
-    for page in doc:
-        text, cov = _ocr_page(page)
-        out.append((text, cov) if layout else text)
-    return out
+    # ponytail: pymupdf is not thread-safe, so pages render one by one here and only tesseract runs
+    # in parallel. a small window keeps at most a few rendered pages in memory at once
+    out, window = [], []
+    with ThreadPoolExecutor(OCR_THREADS) as ex:
+        for page in doc:
+            try:
+                pix = page.get_pixmap(dpi=OCR_DPI)
+                window.append(ex.submit(_tess, pix.tobytes("png"), pix.width, pix.height))
+            except Exception:
+                window.append(None)
+            if len(window) >= OCR_THREADS * 2:
+                out.extend(w.result() if w else ("", 0.0) for w in window)
+                window = []
+        out.extend(w.result() if w else ("", 0.0) for w in window)
+    return out if layout else [t for t, _ in out]
+
+def _fig_bytes(pm) -> bytes:
+    """A figure as JPEG or PNG, whichever is clearly smaller.
+
+    ponytail: photos come out ~7x smaller as JPEG (a 113MB photo book made a 486MB epub as PNG);
+    maps and line art stay PNG, where it is smaller and the labels stay sharp. No classifier.
+    """
+    try:
+        if pm.alpha:
+            pm = pymupdf.Pixmap(pm, 0)
+        side = max(pm.width, pm.height)
+        if side > FIG_MAX_PX:
+            k = FIG_MAX_PX / side
+            pm = pymupdf.Pixmap(pm, int(pm.width * k), int(pm.height * k), None)
+        png = pm.tobytes("png")
+        if pm.n not in (1, 3):
+            return png
+        jpg = pm.tobytes("jpg", jpg_quality=82)
+        return jpg if len(jpg) < len(png) * 0.7 else png
+    except Exception:
+        return pm.tobytes("png")
+
 
 def _scan_figures(doc, pages):
     """PNG for low-ink scan pages (maps, plates, tables), so OCR does not turn them into prose."""
@@ -346,7 +396,7 @@ def _scan_figures(doc, pages):
         # A map can OCR into one huge garbage line; very low ink still means picture.
         if len(clean) >= 1800 and cov >= 0.03:
             continue
-        figs[i] = doc[i].get_pixmap(dpi=SCAN_FIG_DPI).tobytes("png")
+        figs[i] = _fig_bytes(doc[i].get_pixmap(dpi=SCAN_FIG_DPI))
     return figs
 
 def ocr_chapters(pages: list[str], figures: dict | None = None):
@@ -401,9 +451,10 @@ def build_epub(chapters, title: str, author: str) -> bytes:
             if k == "img":
                 png, cap = t if isinstance(t, tuple) else (t, "")
                 fig_no += 1
-                fn = f"fig{fig_no}.png"
+                jpeg = png[:2] == b"\xff\xd8"
+                fn = f"fig{fig_no}.{'jpg' if jpeg else 'png'}"
                 book.add_item(epub.EpubItem(uid=f"fig{fig_no}", file_name=fn,
-                                            media_type="image/png", content=png))
+                                            media_type="image/jpeg" if jpeg else "image/png", content=png))
                 cap_html = (f'<figcaption style="font-size:.9em;margin-top:.4em">'
                             f'{html.escape(_clean(cap))}</figcaption>') if cap else ""
                 parts.append(f'<figure style="text-align:center;margin:1.2em 0">'
@@ -444,6 +495,23 @@ try{const q=new URLSearchParams(location.search),rf=document.referrer?new URL(do
 // ponytail: a shelf key seen once (?k= or the thanks page) is kept here and sent as X-K, so
 // losing the link does not drop a subscriber back to the free tier. the server still checks it
 let K='';try{const k=new URLSearchParams(location.search).get('k');if(k)localStorage.setItem('k',k);K=localStorage.getItem('k')||''}catch(e){}
+// ponytail: big books run as a job and the page polls, so no request hits railway's 5-minute cut.
+// resolves to a url to download from; errors carry .status like a plain fetch would
+async function runJob(url,fd,hdr,tick){
+ const r=await fetch(url,{method:'POST',body:fd,headers:Object.assign({'X-Job':'1'},hdr||{})});
+ const fail=(st,t)=>{const er=new Error(st+': '+t);er.status=st;return er};
+ if(r.status!==202){if(!r.ok)throw fail(r.status,(await r.text()).slice(0,160));return URL.createObjectURL(await r.blob())}
+ const j=(await r.json()).job,t0=Date.now();
+ for(;;){
+  await new Promise(z=>setTimeout(z,2500));
+  const secs=Math.round((Date.now()-t0)/1000);if(secs>2700)throw fail(504,'took too long');
+  let s;try{const q=await fetch('/job/'+j,{cache:'no-store'});if(q.status===404)throw fail(502,'job lost');s=await q.json()}
+  catch(e){if(e.status)throw e;continue}
+  if(tick)tick(secs);
+  if(s.state==='done')return '/job/'+j+'/epub';
+  if(s.state==='error')throw fail(s.status,JSON.stringify({detail:s.detail}).slice(0,200));
+ }}
+function clock(n){return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
 function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
 ev('view',{path:location.pathname});
 """
@@ -733,9 +801,9 @@ async function convert(preview){
  fd.append('email',document.getElementById('email').value);
  if(preview)fd.append('preview','1');
  try{
-  const r=await fetch('/convert'+location.search,{method:'POST',body:fd,headers:{'X-V':V,'X-K':K}});
-  if(!r.ok){const t=await r.text();const er=new Error(r.status+': '+t.slice(0,160));er.status=r.status;throw er}
-  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
+  const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
+   +'). Big books and scans take a few minutes. Keep this tab open.'});
+  const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
@@ -1044,7 +1112,7 @@ def _sample_pdf() -> bytes:
         ("Chapter Three", [
             "Scanned books take a different road. There are no text blocks to read, only pixels, so the pages go through OCR first and the same structure pass runs on the result.",
             "The first twenty pages of a scan are free. It is slower, because a machine is reading photographs of paper, but the output is the same EPUB with the same chapters and the same paragraphs.",
-            "Nothing you upload is kept. The file is converted in memory, handed back as a download, and gone. No account, no library, no copy on a disk somewhere waiting to be sold.",
+            "Nothing you upload is kept. The PDF is never saved, the EPUB is handed back as a download, and then it is gone. No account, no library, no copy on a disk somewhere waiting to be sold.",
         ]),
     ]
     for i, (head, paras) in enumerate(chapters):
@@ -1113,7 +1181,7 @@ batch conversion of a whole shelf, and the finished EPUB delivered to your Kindl
 <p>Send me the PDF (or the scans) and I will convert it and email the EPUB back, usually the same day.
 If it is a scan it gets OCR and the text will have the usual OCR typos, and I will say so.</p>
 <p>Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line.</p>
-<p>Nothing is stored. The file is processed in memory and deleted after the download, same as the
+<p>Nothing is stored. The PDF is never saved and the EPUB is deleted after the download, same as the
 <a href="/">free converter</a>.</p>
 </div>
 <p>Questions about the plan, or a file that is over 500MB? Same address, I will work around it.</p>
@@ -1168,7 +1236,7 @@ b{{color:var(--txt)}}a{{color:#553bc4}}code{{font-family:ui-monospace,Menlo,mono
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>One book.</h1>
-<p>Paid once. Nothing is stored: the file is converted in memory and deleted after the download.</p>
+<p>Paid once. Nothing is stored: the PDF is never saved and the EPUB is deleted after the download.</p>
 {main}
 <p><a href="/">Back to the free converter</a></p>
 </div><script>{TRACK_JS}
@@ -1179,9 +1247,9 @@ if(go)go.onclick=async()=>{{
  const f=fi.files[0];if(!f){{msg.className='err';msg.textContent='Choose a PDF first.';return}}
  go.disabled=true;msg.className='';msg.textContent='Converting... a long scan takes a few minutes.';
  const fd=new FormData();fd.append('f',f);
- try{{const r=await fetch('/convert?paid='+encodeURIComponent({json.dumps(cid)}),{{method:'POST',body:fd,headers:{{'X-V':V}}}});
-  if(!r.ok)throw new Error(r.status+': '+(await r.text()).slice(0,200));
-  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);
+ try{{const u=await runJob('/convert?paid='+encodeURIComponent({json.dumps(cid)}),fd,{{'X-V':V}},
+   n=>{{msg.textContent='Still converting ('+clock(n)+'). Keep this tab open.'}});
+  const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
   msg.className='ok';msg.textContent='Done. EPUB downloaded.';try{{localStorage.removeItem('onebook')}}catch(e){{}}}}
  catch(e){{msg.className='err';msg.textContent=e.message}}
@@ -1239,7 +1307,7 @@ hit the 500-page cap. Shelf is for that reader.</p>
 <li>Batch by email: send me a shelf of PDFs, get the EPUBs back.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
 <li>Send-to-Kindle help: send me the EPUB and your Kindle address, and I will send it on.</li>
-<li>Nothing stored. Files are processed in memory and deleted, same as the free tier.</li>
+<li>Nothing stored. The PDF is never saved and the EPUB is deleted after the download, same as the free tier.</li>
 </ul>
 <a class="btn" href="/go/shelf?why=shelfpage" data-go>Subscribe - $10/month</a>
 <a class="btn" style="background:transparent;color:var(--txt);border:1px solid var(--line)" href="/go/batch?why=shelfpage" data-go>Or $10 once - 30 days, no renewal</a>
@@ -1286,7 +1354,7 @@ def llms_txt():
     faq = "\n".join(f"- {q} {a}".replace("__FREEOCR__", str(FREE_OCR_PAGES)) for q, a in FAQ["en"])
     body = f"""# pdf2epub
 
-> Free PDF to EPUB converter at https://epub.ftak.net. It rebuilds real paragraphs (not one line per printed line), turns headings into chapters with a clickable table of contents, drops running headers and page numbers, moves footnotes to the end of each chapter, and reads scanned books with OCR. Output is EPUB3 for Kindle (via Send to Kindle), Kobo, Apple Books and phone readers. No account, no watermark; files are converted in memory and deleted after the download.
+> Free PDF to EPUB converter at https://epub.ftak.net. It rebuilds real paragraphs (not one line per printed line), turns headings into chapters with a clickable table of contents, drops running headers and page numbers, moves footnotes to the end of each chapter, and reads scanned books with OCR. Output is EPUB3 for Kindle (via Send to Kindle), Kobo, Apple Books and phone readers. No account, no watermark; PDFs are never saved and the EPUB is deleted after the download.
 
 ## Pricing
 
@@ -1347,7 +1415,7 @@ def favicon():
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
-    return ("<h1>Privacy</h1><p>Files processed in memory, never stored. Counts (pages, bytes) logged to conversions.log. "
+    return ("<h1>Privacy</h1><p>PDFs are never saved. The finished EPUB waits on the server until you download it (an hour at most), then it is deleted. Counts (pages, bytes) logged to conversions.log. "
             "If you type an email we keep it in the same log, used only to contact you about the paid tier and to email you a file "
             "if a conversion needs a queue. The page keeps a random id in your browser's localStorage so we can count "
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
@@ -1888,7 +1956,7 @@ def _blocks(doc):
         for b in raw:
             if fig and not fig_done and b["bbox"][1] > fig.y1:
                 pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
-                yield i, fig.y0, -1.0, (pm.tobytes("png"), cap)
+                yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
                 fig_done = True
             if fig:
                 r = pymupdf.Rect(b["bbox"])
@@ -1907,7 +1975,7 @@ def _blocks(doc):
                 yield i, y0, round(size, 1), _join(lines)
         if fig and not fig_done:
             pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
-            yield i, fig.y0, -1.0, (pm.tobytes("png"), cap)
+            yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
 
 def _structure(blocks, doc):
     """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
@@ -2013,104 +2081,180 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     kb_in = len(raw) // 1024
     # ponytail: a worker killed for memory leaves no log line, so note the size before the heavy work
     event("start", request, kb=kb_in, paid=bool(key))
-    # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot instead of by hand
-    cid = (request.query_params.get("paid") or "")[:80]
-    digest = hashlib.sha256(raw).hexdigest()[:32]
-    book = bool(cid) and onebook_ok(cid, digest)
-    if cid and not book:
-        log(False, 0, kb_in, 0, "paid-refused", ref, request=request)
-        raise HTTPException(402, "this checkout is not confirmed as paid, or it already converted a "
-                            f"different book. Reply to the Polar receipt or email {SHELF_MAIL}")
-    paid = bool(key or book)
-    max_pages = SHELF_MAX_PAGES if paid else MAX_PAGES
-    max_mb = SHELF_MAX_MB if paid else MAX_MB
-    if len(raw) > max_mb * 1024 * 1024:
-        log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages)"
-            if not paid else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
-    if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
-        raise HTTPException(400, "PDF only in v1")
-    try:
-        doc = pymupdf.open(stream=raw, filetype="pdf")
-    except Exception:
-        log(False, 0, kb_in, 0, "unreadable pdf", ref, request=request)
-        raise HTTPException(400, "unreadable PDF")
-    if doc.needs_pass:
-        doc.close()
-        log(False, 0, kb_in, 0, "encrypted pdf", ref, request=request)
-        raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
-    total = len(doc)
-    # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
-    cut_pages = preview == "1" and not paid and total > max_pages
-    if cut_pages:
-        doc.select(range(max_pages))
-    if len(doc) > max_pages:
-        n0 = len(doc)
-        doc.close()
-        log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
-        raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
-            if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and I will convert it by hand, included in your plan")
-
-    def done(data: bytes, pages: int, kind: str):
-        log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
-        if book:
-            onebook_use(cid, digest)
-            event("paid_convert", request, checkout_id=cid, pages=pages)
-        return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
-            headers={"Content-Disposition": "attachment; filename=book.epub"})
-
-    blocks = list(_blocks(doc))
-    npages = len(doc)
-    meta = doc.metadata or {}
-    # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
-    safe_title = (title or (meta.get("title") or "").strip()
-                  or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
-    if "_" in safe_title and " " not in safe_title:
-        safe_title = safe_title.replace("_", " ")  # "Into_the_Blue" on the Kindle shelf -> "Into the Blue"
-    author = (author or (meta.get("author") or "").strip())[:120]
-    if not blocks:
-        # scanned PDF: OCR is the only thing that helps before falling back
-        cut = preview == "1" and not paid and npages > FREE_OCR_PAGES
-        if npages > FREE_OCR_PAGES and not paid and not cut:
+    def work():
+        nonlocal author  # ponytail: reassigned from the PDF metadata below
+        # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot instead of by hand
+        cid = (request.query_params.get("paid") or "")[:80]
+        digest = hashlib.sha256(raw).hexdigest()[:32]
+        book = bool(cid) and onebook_ok(cid, digest)
+        if cid and not book:
+            log(False, 0, kb_in, 0, "paid-refused", ref, request=request)
+            raise HTTPException(402, "this checkout is not confirmed as paid, or it already converted a "
+                                f"different book. Reply to the Polar receipt or email {SHELF_MAIL}")
+        paid = bool(key or book)
+        max_pages = SHELF_MAX_PAGES if paid else MAX_PAGES
+        max_mb = SHELF_MAX_MB if paid else MAX_MB
+        if len(raw) > max_mb * 1024 * 1024:
+            log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
+            raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages)"
+                if not paid else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
+        if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
+            raise HTTPException(400, "PDF only in v1")
+        try:
+            doc = pymupdf.open(stream=raw, filetype="pdf")
+        except Exception:
+            log(False, 0, kb_in, 0, "unreadable pdf", ref, request=request)
+            raise HTTPException(400, "unreadable PDF")
+        if doc.needs_pass:
             doc.close()
-            log(False, npages, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
-            raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
-                                f"{FREE_OCR_PAGES} pages, the whole book is $5")
-        if cut:
-            doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
-        if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
-            pages = ocr_doc(doc, layout=True) or []
-            texts = [t for t, _ in pages]
-            if texts and sum(len(t) for t in texts) > 200:
-                figs = _scan_figures(doc, pages)
-                chapters = ocr_chapters(texts, figs)
-                if cut:
-                    chapters.append([("h1", "The rest of this book"),
-                        ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
-                              "The whole book is $5 at epub.ftak.net, converted on the spot.")])
-                data = build_epub(chapters, safe_title, author[:120])
-                doc.close()
-                return done(data, len(texts), "ocr-preview" if cut else ("ocr+fig" if figs else "ocr"))
-        # ponytail: calibre still last resort (image-only epub beats error)
-        doc.close()
-        fb = calibre_convert(raw)
-        if fb:
-            return done(fb, npages, "calibre-fallback")
-        big = npages > PAID_OCR_MAX_PAGES
-        log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref, request=request)
-        raise HTTPException(422, f"scanned PDF, {npages} pages, too long to OCR in one go. Email it to "
-                            f"{SHELF_MAIL} and I will run it overnight"
-            if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
-    chapters = _structure(blocks, doc)
-    if cut_pages:
-        chapters.append([("h1", "The rest of this book"),
-            ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
-                  "The whole book is $5 at epub.ftak.net, converted on the spot.")])
+            log(False, 0, kb_in, 0, "encrypted pdf", ref, request=request)
+            raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
+        total = len(doc)
+        # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
+        cut_pages = preview == "1" and not paid and total > max_pages
+        if cut_pages:
+            doc.select(range(max_pages))
+        if len(doc) > max_pages:
+            n0 = len(doc)
+            doc.close()
+            log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
+            raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
+                if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and I will convert it by hand, included in your plan")
 
-    data = build_epub(chapters, safe_title, author[:120])
-    # ponytail: nothing stored, files die with request — matches their privacy pitch for free
-    doc.close()
-    return done(data, npages, "pages-preview" if cut_pages else "")
+        def done(data: bytes, pages: int, kind: str):
+            log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
+            if book:
+                onebook_use(cid, digest)
+                event("paid_convert", request, checkout_id=cid, pages=pages)
+            return Response(data, media_type="application/epub+zip",
+                headers={"Content-Disposition": "attachment; filename=book.epub"})
+
+        blocks = list(_blocks(doc))
+        npages = len(doc)
+        meta = doc.metadata or {}
+        # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
+        safe_title = (title or (meta.get("title") or "").strip()
+                      or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
+        if "_" in safe_title and " " not in safe_title:
+            safe_title = safe_title.replace("_", " ")  # "Into_the_Blue" on the Kindle shelf -> "Into the Blue"
+        author = (author or (meta.get("author") or "").strip())[:120]
+        if not blocks:
+            # scanned PDF: OCR is the only thing that helps before falling back
+            cut = preview == "1" and not paid and npages > FREE_OCR_PAGES
+            if npages > FREE_OCR_PAGES and not paid and not cut:
+                doc.close()
+                log(False, npages, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
+                raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
+                                    f"{FREE_OCR_PAGES} pages, the whole book is $5")
+            if cut:
+                doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
+            if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
+                pages = ocr_doc(doc, layout=True) or []
+                texts = [t for t, _ in pages]
+                if texts and sum(len(t) for t in texts) > 200:
+                    figs = _scan_figures(doc, pages)
+                    chapters = ocr_chapters(texts, figs)
+                    if cut:
+                        chapters.append([("h1", "The rest of this book"),
+                            ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
+                                  "The whole book is $5 at epub.ftak.net, converted on the spot.")])
+                    data = build_epub(chapters, safe_title, author[:120])
+                    doc.close()
+                    return done(data, len(texts), "ocr-preview" if cut else ("ocr+fig" if figs else "ocr"))
+            # ponytail: calibre still last resort (image-only epub beats error)
+            doc.close()
+            fb = calibre_convert(raw)
+            if fb:
+                return done(fb, npages, "calibre-fallback")
+            big = npages > PAID_OCR_MAX_PAGES
+            log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref, request=request)
+            raise HTTPException(422, f"scanned PDF, {npages} pages, too long to OCR in one go. Email it to "
+                                f"{SHELF_MAIL} and I will run it overnight"
+                if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
+        chapters = _structure(blocks, doc)
+        if cut_pages:
+            chapters.append([("h1", "The rest of this book"),
+                ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
+                      "The whole book is $5 at epub.ftak.net, converted on the spot.")])
+
+        data = build_epub(chapters, safe_title, author[:120])
+        # ponytail: nothing stored, files die with request — matches their privacy pitch for free
+        doc.close()
+        return done(data, npages, "pages-preview" if cut_pages else "")
+
+    if request.headers.get("x-job") == "1":
+        # ponytail: the page polls /job/<id>, so no request runs past railway's 5-minute idle cut
+        jid = _job_start(work)
+        return JSONResponse({"job": jid}, status_code=202)
+    # ponytail: off the event loop, so one heavy book no longer freezes the site for everyone else
+    return await run_in_threadpool(work)
+
+def _job_write(jid: str, **state):
+    tmp = JOB_DIR / f"{jid}.json.tmp"
+    tmp.write_text(json.dumps({"t": time.time(), **state}))
+    tmp.replace(JOB_DIR / f"{jid}.json")
+
+
+def _job_sweep():
+    now = time.time()
+    try:
+        for f in JOB_DIR.iterdir():
+            if now - f.stat().st_mtime > JOB_TTL:
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _job_run(jid: str, work):
+    _job_write(jid, state="running")
+    try:
+        resp = work()
+        (JOB_DIR / f"{jid}.epub").write_bytes(resp.body)
+        _job_write(jid, state="done")
+    except HTTPException as e:
+        _job_write(jid, state="error", status=e.status_code, detail=str(e.detail))
+    except Exception:
+        traceback.print_exc()
+        _job_write(jid, state="error", status=500, detail="the converter failed on this file. Email it to "
+                   f"{SHELF_MAIL} and I will convert it by hand today")
+
+
+def _job_start(work) -> str:
+    JOB_DIR.mkdir(parents=True, exist_ok=True)
+    _job_sweep()
+    jid = secrets.token_urlsafe(18)
+    _job_write(jid, state="queued")
+    _JOB_POOL.submit(_job_run, jid, work)
+    return jid
+
+
+def _job_path(jid: str, ext: str) -> Path:
+    if not re.fullmatch(r"[0-9A-Za-z_-]{20,40}", jid):
+        raise HTTPException(404, "no such job")
+    return JOB_DIR / f"{jid}.{ext}"
+
+
+@app.get("/job/{jid}")
+def job_status(jid: str):
+    p = _job_path(jid, "json")
+    try:
+        return JSONResponse(json.loads(p.read_text()), headers={"Cache-Control": "no-store"})
+    except (OSError, ValueError):
+        raise HTTPException(404, "no such job")
+
+
+@app.get("/job/{jid}/epub")
+def job_file(jid: str):
+    p = _job_path(jid, "epub")
+    if not p.exists():
+        raise HTTPException(404, "no such job")
+
+    def gone():
+        # ponytail: the epub lives only until it is downloaded, so "deleted after the download" stays true
+        p.unlink(missing_ok=True)
+        _job_path(jid, "json").unlink(missing_ok=True)
+    return FileResponse(p, media_type="application/epub+zip", filename="book.epub", background=BackgroundTask(gone))
+
 
 @app.exception_handler(HTTPException)
 async def http_err(request: Request, exc: HTTPException):
