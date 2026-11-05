@@ -16,7 +16,7 @@ import app as pdf2epub  # same pipeline the site uses
 def convert(path: str, out: str | None = None, title: str = "", author: str = "") -> str:
     raw = Path(path).read_bytes()
     doc = pymupdf.open(stream=raw, filetype="pdf")
-    blocks = list(pdf2epub._blocks(doc))
+    blocks = [] if pdf2epub._mostly_scanned(doc) else list(pdf2epub._blocks(doc))
     if not blocks:  # scanned: OCR it
         pages = pdf2epub.ocr_doc(doc) or []
         chapters = pdf2epub.ocr_chapters(pages)

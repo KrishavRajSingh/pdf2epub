@@ -1927,6 +1927,28 @@ def _ocr_layer(doc) -> bool:
     return spans > 0 and invisible > spans * 0.5
 
 
+def _mostly_scanned(doc) -> bool:
+    """True when most pages are a page-sized image with next to no real text over it.
+
+    ponytail: OCR used to run only when the PDF had no text at all, so one "Downloaded from"
+    footer, a library stamp or a filled form field skipped OCR and the EPUB came out empty
+    (reddit 11-05: a scanned form gave only the field's value). Invisible OCR layers have
+    plenty of text, so they stay on the text path. Samples up to 20 pages.
+    """
+    n = len(doc)
+    if not n:
+        return False
+    idx = sorted({int(k * n / 20) for k in range(20)})
+    scans = 0
+    for i in idx:
+        page = doc[i]
+        area = abs(page.rect) or 1
+        img = sum(abs(pymupdf.Rect(im["bbox"]) & page.rect) for im in page.get_image_info())
+        if img / area >= 0.8 and len(page.get_text().strip()) < 120:
+            scans += 1
+    return scans * 2 > len(idx)
+
+
 def _paragraphs(rows, bbox, ocr=False):
     """Split one PDF block's lines into paragraphs: [(y0, size, [line, ...]), ...].
 
@@ -2195,7 +2217,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             return Response(data, media_type="application/epub+zip",
                 headers={"Content-Disposition": "attachment; filename=book.epub"})
 
-        blocks = list(_blocks(doc))
+        blocks = [] if _mostly_scanned(doc) else list(_blocks(doc))
         npages = len(doc)
         meta = doc.metadata or {}
         # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
