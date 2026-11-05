@@ -38,27 +38,27 @@
   "path": "ocr",
   "chapters": 1,
   "headings": [],
-  "paragraphs": 3,
+  "paragraphs": 4,
   "imgs": 1,
-  "words": 1050
+  "words": 1078
  },
  "form_scan": {
-  "path": "calibre",
-  "chapters": 0,
+  "path": "ocr",
+  "chapters": 1,
   "headings": [],
-  "paragraphs": 0,
-  "imgs": 0,
-  "words": 0
+  "paragraphs": 2,
+  "imgs": 1,
+  "words": 21
  },
  "form_text": {
   "path": "text",
-  "chapters": 2,
+  "chapters": 1,
   "headings": [
-   "Jane Doe"
+   "Membership Application Form"
   ],
-  "paragraphs": 4,
+  "paragraphs": 5,
   "imgs": 0,
-  "words": 25
+  "words": 28
  },
  "comic": {
   "path": "calibre",

@@ -449,6 +449,14 @@ def _scan_figures(doc, pages):
         figs[i] = _fig_bytes(doc[i].get_pixmap(dpi=SCAN_FIG_DPI))
     return figs
 
+def _wordy(text: str) -> bool:
+    """OCR text that reads as words, not map-label junk. A low-ink page (a one-page form, a short
+    last page) is kept as a picture and its text too; reddit 11-06 got a picture and no words."""
+    toks = text.split()
+    words = [t for t in toks if len(w := t.strip("()[].,:;!?\"'/-")) >= 2 and w.isalpha()]  # any script, CAPS too
+    return len(words) >= 5 and len(words) >= 0.6 * len(toks)
+
+
 def ocr_chapters(pages: list[str], figures: dict | None = None):
     """Tesseract text -> same (kind, text) rows the text path emits."""
     # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
@@ -462,7 +470,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None):
     for i, txt in enumerate(pages):
         if figures and i in figures:
             cur.append(("img", (figures[i], "")))
-            continue
+            if not _wordy(txt):
+                continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         for para in re.split(r"\n\s*\n", txt):
             lines = [l.strip() for l in para.splitlines() if l.strip()]
             if not lines:
@@ -548,8 +557,15 @@ let K='';try{const k=new URLSearchParams(location.search).get('k');if(k)localSto
 // ponytail: big books run as a job and the page polls, so no request hits railway's 5-minute cut.
 // resolves to a url to download from; errors carry .status like a plain fetch would
 async function runJob(url,fd,hdr,tick){
- const r=await fetch(url,{method:'POST',body:fd,headers:Object.assign({'X-Job':'1'},hdr||{})});
  const fail=(st,t)=>{const er=new Error(st+': '+t);er.status=st;return er};
+ // ponytail: in-app browsers (Reddit, Instagram on Android) hand over a file they later can't read, and the
+ // upload dies in under a second before reaching us. copy it into memory first, so a bad pick fails here, clearly
+ const f0=fd.get('f');
+ if(f0&&f0.arrayBuffer){let b;try{b=await f0.arrayBuffer()}catch(e){b=null}
+  if(!b||!b.byteLength){const er=new Error('This browser could not read the file. Open epub.ftak.net in Chrome or Safari (not inside the Reddit or Instagram app), or save the PDF to your device first, then pick it again.');er.status='read';throw er}
+  fd.set('f',new File([b],f0.name||'book.pdf',{type:'application/pdf'}))}
+ let r;try{r=await fetch(url,{method:'POST',body:fd,headers:Object.assign({'X-Job':'1'},hdr||{})})}
+ catch(e){const er=new Error('The upload did not reach the server. Check your connection and try again. If you opened this inside the Reddit or Instagram app, open epub.ftak.net in Chrome or Safari instead.');er.status='net';throw er}
  if(r.status!==202){if(!r.ok)throw fail(r.status,(await r.text()).slice(0,160));return URL.createObjectURL(await r.blob())}
  const j=(await r.json()).job;
  try{localStorage.setItem('job',JSON.stringify({j:j,t:Date.now(),name:(fd.get('f')&&fd.get('f').name)||'book.pdf'}))}catch(e){}
@@ -878,7 +894,7 @@ async function convert(preview){
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   window.capPages=n;window.capName=(f&&f.name)||'book';
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
-  else if(!e.status||e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
+  else if(e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
    +'instant converter. That is on our side, not your file. Email it to __MAIL__ and I will convert it by hand today.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
@@ -1952,6 +1968,14 @@ def _mostly_scanned(doc) -> bool:
     return scans * 2 > len(idx)
 
 
+def ocr_ok(texts) -> bool:
+    """Enough OCR text to build a text EPUB instead of the image-only calibre fallback.
+
+    ponytail: the bar scales with pages. A flat 200 chars sent every one-page scanned form
+    (~130 chars) to calibre, reddit 11-06. 60 a page still drops photo books with stray OCR."""
+    return bool(texts) and sum(len(t) for t in texts) > min(200, 60 * len(texts))
+
+
 def _text_blocks(doc) -> list:
     """The text-path blocks, or [] when the PDF should go to OCR. One place, so /convert,
     manual_convert.py and test_regression.py all pick the same path."""
@@ -2011,6 +2035,28 @@ def _heading_first(raw, body):
     return raw
 
 
+def _place_fields(page, raw, body):
+    """Filled form fields come last in PDF order and in an auto-sized font, so "Jane Doe" ended
+    the page as a heading (reddit 11-05). Move each field block under the line it sits beside
+    and set it in body type."""
+    rects = [w.rect for w in page.widgets()] if page.first_widget else []
+    if not rects:
+        return raw
+
+    def in_field(b):
+        r = pymupdf.Rect(b["bbox"])
+        return b.get("type") == 0 and any(abs(r & w) >= 0.5 * abs(r) for w in rects if abs(r))
+    fields = [b for b in raw if in_field(b)]
+    out = [b for b in raw if not in_field(b)]
+    for f in sorted(fields, key=lambda b: b["bbox"][1]):
+        for line in f.get("lines", []):
+            for sp in line["spans"]:
+                sp["size"] = body
+        k = max((j + 1 for j, b in enumerate(out) if b["bbox"][1] <= (f["bbox"][1] + f["bbox"][3]) / 2), default=0)
+        out.insert(k, f)
+    return out
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -2024,6 +2070,7 @@ def _blocks(doc):
     ligmap = _lig_map(doc)
     for i, page in enumerate(doc):
         raw = page.get_text("dict")["blocks"]
+        raw = _place_fields(page, raw, body)
         if not page.rotation:
             raw = _heading_first(raw, body)
         for b in raw:
@@ -2104,7 +2151,8 @@ def _structure(blocks, doc):
     tops = Counter(t for p, y, sz, t in blocks if y < 60)
     bots = Counter(t for p, y, sz, t in blocks if y > ph - 60)
     n = len(doc)
-    banned = {t for t, c in list(tops.items()) + list(bots.items()) if c > n * 0.5}
+    # ponytail: c >= 2, or a one-page PDF loses its title as a 'repeated' header (reddit 11-06)
+    banned = {t for t, c in list(tops.items()) + list(bots.items()) if c >= 2 and c > n * 0.5}
 
     chapters, cur, cur_notes = [], [], []
     ocr = _ocr_layer(doc)
@@ -2248,7 +2296,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
                 pages = ocr_doc(doc, layout=True) or []
                 texts = [t for t, _ in pages]
-                if texts and sum(len(t) for t in texts) > 200:
+                if ocr_ok(texts):
                     figs = _scan_figures(doc, pages)
                     chapters = ocr_chapters(texts, figs)
                     if cut:

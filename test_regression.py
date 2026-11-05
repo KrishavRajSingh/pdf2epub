@@ -14,7 +14,7 @@ import json, sys
 from pathlib import Path
 
 import pymupdf
-from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures
+from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok
 
 GOLDEN = Path(__file__).parent / "tests" / "golden.json"
 PROSE = ("It was a bright cold day in April, and the clocks were striking thirteen. "
@@ -157,10 +157,13 @@ CASES = {
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
     "scan_stamped": (make_scan_stamped, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
-    "scan_short_page": (make_scan_short_page, {"path": "ocr", "has": ["end of the short last page"],
-        "known": ["missing 'end of the short last page'"]}),  # _scan_figures: low-ink page -> picture
-    "form_scan": (make_form_scan, {"path_in": ["ocr", "calibre"]}),
-    "form_text": (make_form_text, {"path": "text", "has": ["Jane Doe", "Full name"]}),
+    # low-ink page: kept as a picture and, since 11-06, its OCR text too
+    "scan_short_page": (make_scan_short_page, {"path": "ocr", "has": ["end of the short last page"]}),
+    # one short page: OCR text is under 200 chars, used to fall to calibre (reddit 11-06)
+    "form_scan": (make_form_scan, {"path": "ocr", "has": ["Membership Application", "Jane Doe"]}),
+    # 11-06: title was cut as a "repeated header" on a 1-page PDF; field value ended the page as a heading
+    "form_text": (make_form_text, {"path": "text", "has": ["Membership Application Form", "Full name: Jane Doe"],
+                                   "h_max": 0}),
     "comic": (make_comic, {"path_in": ["ocr", "calibre"]}),
     "photo_book": (make_photo_book, {"path_in": ["ocr", "calibre"]}),
     "text_with_plates": (make_text_with_plates, {"path": "text", "has": ["clocks were striking"], "imgs": 2,
@@ -175,7 +178,7 @@ def convert(doc):
         return "text", _structure(blocks, doc)
     pages = ocr_doc(doc, layout=True) or []
     texts = [t for t, _ in pages]
-    if not texts or sum(len(t) for t in texts) <= 200:
+    if not ocr_ok(texts):
         return "calibre", []  # the site falls back to calibre here: an image-only EPUB
     return "ocr", ocr_chapters(texts, _scan_figures(doc, pages))
 
