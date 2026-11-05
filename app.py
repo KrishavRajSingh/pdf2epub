@@ -13,6 +13,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -67,6 +68,9 @@ OCR_THREADS = 4  # ponytail: tesseract is a subprocess, so threads run it in par
 FIG_MAX_PX = 2000  # ponytail: long side cap; 3x renders of a full page are ~1850x2400
 JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs"))  # ponytail: /tmp is shared by both uvicorn workers
 JOB_TTL = 3600  # an unfetched epub is deleted after an hour
+RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
+MAIL_FROM = os.environ.get("MAIL_FROM", "pdf2epub <books@opencorp.live>")  # opencorp.live is verified in resend
+MAIL_AFTER = 90  # ponytail: mail the link only if the epub is still unfetched this long after it is done
 _JOB_POOL = ThreadPoolExecutor(max_workers=2)  # per uvicorn worker, so 4 books at once on the box
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
@@ -858,7 +862,8 @@ async function convert(preview){
  if(preview)fd.append('preview','1');
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
-   +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up.'});
+   +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up'
+   +(document.getElementById('email').value?', or use the link I email you.':'.')});
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
@@ -2241,7 +2246,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
 
     if request.headers.get("x-job") == "1":
         # ponytail: the page polls /job/<id>, so no request runs past railway's 5-minute idle cut
-        jid = _job_start(work)
+        jid = _job_start(work, email, re.sub(r"[\r\n]", " ", f.filename or "book.pdf")[:80])
         return JSONResponse({"job": jid}, status_code=202)
     # ponytail: off the event loop, so one heavy book no longer freezes the site for everyone else
     return await run_in_threadpool(work)
@@ -2262,12 +2267,36 @@ def _job_sweep():
         pass
 
 
-def _job_run(jid: str, work):
+def _mail_link(jid: str, to: str, name: str):
+    """Mail the download link if the tab was closed: the epub is still here MAIL_AFTER seconds later."""
+    time.sleep(MAIL_AFTER)
+    if not (JOB_DIR / f"{jid}.epub").exists():
+        return  # ponytail: downloaded in the tab already, no mail
+    body = (f"Your EPUB of {name} is ready:\n\nhttps://epub.ftak.net/job/{jid}/epub\n\n"
+            "The link works once and for about an hour after the conversion finished, then the file is deleted. "
+            "If it has expired, upload the PDF again.\n\nReply to this email if anything looks wrong.\n\n"
+            "Krishav, pdf2epub")
+    req = urllib.request.Request("https://api.resend.com/emails", method="POST",
+        data=json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": SHELF_MAIL,
+                         "subject": f"Your EPUB is ready: {name}"[:120], "text": body}).encode(),
+        headers={"Authorization": "Bearer " + RESEND_KEY, "Content-Type": "application/json",
+                 "User-Agent": "pdf2epub/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            event("link_mailed", None, job=jid[:6], status=r.status)
+    except Exception as e:
+        event("link_mail_failed", None, job=jid[:6], err=str(e)[:80])
+
+
+def _job_run(jid: str, work, email: str = "", name: str = "book"):
     _job_write(jid, state="running")
     try:
         resp = work()
         (JOB_DIR / f"{jid}.epub").write_bytes(resp.body)
         _job_write(jid, state="done")
+        to = (email or "").strip()
+        if RESEND_KEY and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}", to):
+            threading.Thread(target=_mail_link, args=(jid, to, name), daemon=True).start()
     except HTTPException as e:
         _job_write(jid, state="error", status=e.status_code, detail=str(e.detail))
     except Exception:
@@ -2276,12 +2305,12 @@ def _job_run(jid: str, work):
                    f"{SHELF_MAIL} and I will convert it by hand today")
 
 
-def _job_start(work) -> str:
+def _job_start(work, email: str = "", name: str = "book") -> str:
     JOB_DIR.mkdir(parents=True, exist_ok=True)
     _job_sweep()
     jid = secrets.token_urlsafe(18)
     _job_write(jid, state="queued")
-    _JOB_POOL.submit(_job_run, jid, work)
+    _JOB_POOL.submit(_job_run, jid, work, email, name)
     return jid
 
 
