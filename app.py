@@ -741,7 +741,7 @@ async function convert(preview){
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   window.capPages=n;window.capName=(f&&f.name)||'book';
-  if(e.status===413){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
+  if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(!e.status||e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
    +'instant converter. That is on our side, not your file. Email it to __MAIL__ and I will convert it by hand today.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
@@ -2049,7 +2049,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         doc.close()
         log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
         raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
-            if not paid else f"over {max_pages} pages, that is the top of the paid tier, email {SHELF_MAIL}")
+            if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and I will convert it by hand, included in your plan")
 
     def done(data: bytes, pages: int, kind: str):
         log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
