@@ -1,0 +1,3 @@
+#!/bin/zsh
+# Blocks a push when any self-check fails. Skip once with: git push --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"

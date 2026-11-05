@@ -384,10 +384,13 @@ def _tess(png: bytes, page_w: int, page_h: int):
             continue
         lines.setdefault((row[2], row[3], row[4]), []).append((left, row[11].strip()))
         ink += width * height
-    paras = [" ".join(t for _, t in sorted(v)) for _, v in
-             sorted(lines.items(), key=lambda kv: tuple(int(x) for x in kv[0]))]
+    # ponytail: group printed lines into tesseract's paragraphs (block, par). Keyed by line, every
+    # printed line became its own <p> from 10-23 to 11-05: the "one line per printed line" we sell against.
+    paras = {}
+    for k, v in sorted(lines.items(), key=lambda kv: tuple(int(x) for x in kv[0])):
+        paras.setdefault(k[:2], []).append(" ".join(t for _, t in sorted(v)))
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
-    return "\n\n".join(paras), cov
+    return "\n\n".join("\n".join(p) for p in paras.values()), cov
 
 def ocr_doc(doc, layout: bool = False) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
@@ -464,7 +467,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None):
             lines = [l.strip() for l in para.splitlines() if l.strip()]
             if not lines:
                 continue
-            text = " ".join(lines)
+            text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", " ".join(lines))  # "horse- shoe" -> "horseshoe"
             head = re.match(r"^(chapter|part|prologue|epilogue|book)\b", text, re.I) or (
                 text.isupper() and len(text) <= 60 and any(c.isalpha() for c in text))
             if head and len(text) < 120:
@@ -1949,6 +1952,12 @@ def _mostly_scanned(doc) -> bool:
     return scans * 2 > len(idx)
 
 
+def _text_blocks(doc) -> list:
+    """The text-path blocks, or [] when the PDF should go to OCR. One place, so /convert,
+    manual_convert.py and test_regression.py all pick the same path."""
+    return [] if _mostly_scanned(doc) else list(_blocks(doc))
+
+
 def _paragraphs(rows, bbox, ocr=False):
     """Split one PDF block's lines into paragraphs: [(y0, size, [line, ...]), ...].
 
@@ -2217,7 +2226,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             return Response(data, media_type="application/epub+zip",
                 headers={"Content-Disposition": "attachment; filename=book.epub"})
 
-        blocks = [] if _mostly_scanned(doc) else list(_blocks(doc))
+        blocks = _text_blocks(doc)
         npages = len(doc)
         meta = doc.metadata or {}
         # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op

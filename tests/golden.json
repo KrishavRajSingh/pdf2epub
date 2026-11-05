@@ -1,0 +1,87 @@
+{
+ "novel": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "Chapter 1",
+   "Chapter 2"
+  ],
+  "paragraphs": 6,
+  "imgs": 0,
+  "words": 904
+ },
+ "ia_layer": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 450
+ },
+ "scan": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 1050
+ },
+ "scan_stamped": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 6,
+  "imgs": 0,
+  "words": 1059
+ },
+ "scan_short_page": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 1,
+  "words": 1050
+ },
+ "form_scan": {
+  "path": "calibre",
+  "chapters": 0,
+  "headings": [],
+  "paragraphs": 0,
+  "imgs": 0,
+  "words": 0
+ },
+ "form_text": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "Jane Doe"
+  ],
+  "paragraphs": 4,
+  "imgs": 0,
+  "words": 25
+ },
+ "comic": {
+  "path": "calibre",
+  "chapters": 0,
+  "headings": [],
+  "paragraphs": 0,
+  "imgs": 0,
+  "words": 0
+ },
+ "photo_book": {
+  "path": "calibre",
+  "chapters": 0,
+  "headings": [],
+  "paragraphs": 0,
+  "imgs": 0,
+  "words": 0
+ },
+ "text_with_plates": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 4,
+  "imgs": 0,
+  "words": 600
+ }
+}
