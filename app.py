@@ -800,7 +800,7 @@ __ALT__
     <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
     <a href="/go/onebook?why=landing" data-go>Pay $5 for one book</a></div>
   <div class="price"><h3>Shelf</h3><div class="amt">$10 a month</div>
-    <p>1,000 pages a month, up to 2,000 pages per file, batches by email.</p>
+    <p>1,000 pages a month, up to 2,000 pages per file, as many files as you like.</p>
     <p>Or $10 once for 30 days, no renewal.</p>
     <a href="/shelf">See Shelf</a></div>
 </div>
@@ -1392,15 +1392,14 @@ ul{{color:var(--dim);padding-left:20px}}li{{margin:0 0 6px}}.mark{{display:inlin
 <h1>Shelf</h1>
 <p>The free converter stays free. Shelf is for the people who have a shelf.</p>
 <p>One reader put 68 books through the free converter in 32 minutes. Seven of the uploads
-hit the 500-page cap. Shelf is for that reader.</p>
+hit the free page cap. Shelf is for that reader.</p>
 <div class="card">
 <p><b>$10 a month, included</b></p>
 <ul>
 <li>1,000 pages a month included. If you go over, email me and we will sort it out.</li>
 <li><b>No per-file ceiling.</b> The free converter stops at 150 pages, enough to try a book. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
-<li>Batch by email: send me a shelf of PDFs, get the EPUBs back.</li>
+<li>As many files as you like: upload a whole shelf, one PDF after another.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
-<li>Send-to-Kindle help: send me the EPUB and your Kindle address, and I will send it on.</li>
 <li>Nothing stored. The PDF is never saved and the EPUB is deleted after the download, same as the free tier.</li>
 </ul>
 <a class="btn" href="/go/shelf?why=shelfpage" data-go>Subscribe - $10/month</a>
@@ -1410,9 +1409,6 @@ hit the 500-page cap. Shelf is for that reader.</p>
 <p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
 limits. No account, no password, nothing to set up.</p>
-<p><b>Batch and Kindle delivery are email-assisted for now.</b> Send the files and your Kindle
-address to <a href="mailto:{SHELF_MAIL}?subject=PDF%20to%20EPUB">{SHELF_MAIL}</a>, and I will
-send the EPUBs back, usually the same day.</p>
 <div class="card">
 <p><b>One big book, not a shelf?</b></p>
 <p>Pay $5 once. You come straight back to an upload box and the book converts on the spot. Up to
@@ -1454,7 +1450,7 @@ def llms_txt():
 
 - Free: one PDF at a time, up to 150 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
 - One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
-- Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, batches by email: https://epub.ftak.net/shelf
+- Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, as many files as you like: https://epub.ftak.net/shelf
 - Batch pass: $10 once, the Shelf limits for 30 days, no renewal: https://epub.ftak.net/shelf
 
 ## Pages
@@ -2263,7 +2259,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         if len(raw) > max_mb * 1024 * 1024:
             log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
             raise HTTPException(413, f"over {max_mb}MB - one book is $5 (up to 2,000 pages)"
-                if not paid else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and I will do it")
+                if not paid else f"over {max_mb}MB, that is the top of the paid tier, email {SHELF_MAIL} and we will raise your limit")
         if not (f.filename or "").lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
             raise HTTPException(400, "PDF only in v1")
         try:
