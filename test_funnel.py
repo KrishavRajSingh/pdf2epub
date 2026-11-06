@@ -287,6 +287,24 @@ def main():
     epub2, was_ocr2 = fulfil.convert(imgpdf.tobytes(), "Scanned Book")
     assert was_ocr2 is True, "a scanned pdf must be reported as OCR"
 
+    # a converter crash must land in conversions.log with its reason and show in /stats (11-07)
+    real = pdf2epub._structure
+    def boom(*a, **k):
+        raise KeyError("no-such-font")
+    pdf2epub._structure = boom
+    try:
+        crash = TestClient(pdf2epub.app, raise_server_exceptions=False).post(
+            "/convert?s=crashtest", files={"f": ("x.pdf", make_pdf(), "application/pdf")})
+    finally:
+        pdf2epub._structure = real
+    assert crash.status_code == 500, crash.status_code
+    st = client.get("/stats").json()
+    assert any(k == "crash KeyError in work" for k in st["fail_by_err"]), st["fail_by_err"]
+    last = st["recent_fails"][-1]
+    assert last["err"].startswith("crash KeyError") and "no-such-font" in last["err"] and last["src"] == "crashtest", last
+    assert "email" not in last, "recent_fails is public: never show emails"
+    assert st["starts"] >= 1
+
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 
 

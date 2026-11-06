@@ -277,6 +277,15 @@ def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str =
         "v": vid_of(request)}))
 
 
+def crash_reason(e: BaseException) -> str:
+    """'crash KeyError in _structure:1234: 'x'' - type, the deepest app.py frame, the message."""
+    where = ""
+    for fr in traceback.extract_tb(e.__traceback__):
+        if fr.filename.endswith("app.py"):
+            where = f" in {fr.name}:{fr.lineno}"
+    return f"crash {type(e).__name__}{where}: {str(e)[:40]}"[:80]
+
+
 def event(name: str, request: Request | None = None, **fields):
     """One funnel step. `ev` lines are not visits or conversions, /stats skips them."""
     _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ev": name[:40],
@@ -1665,6 +1674,9 @@ def stats():
     uas: dict[str, int] = {}
     visits_bot = visits_human = visits_unknown = 0
     conv_bot = conv_human = 0
+    fail_by_err: dict[str, int] = {}
+    recent_fails: list[dict] = []
+    starts = 0
     try:
         for line in LOG.read_text().splitlines():
             try:
@@ -1672,6 +1684,7 @@ def stats():
             except ValueError:
                 continue
             if r.get("ev"):
+                starts += r["ev"] == "start"  # ponytail: starts minus outcomes = workers killed mid-book
                 continue  # ponytail: funnel steps live in /funnel, they are not visits or conversions
             ua = r.get("ua") or ""
             if r.get("visit"):
@@ -1696,6 +1709,11 @@ def stats():
             scan_fail += (not r.get("ok")) and c.startswith("scan")
             if r.get("email"):  # ponytail: one person can leave the same email on several lines
                 emailset.add(r["email"].strip().lower())
+            if not r.get("ok") and ua and not is_bot(ua):
+                kind = c.split(":")[0] if c.startswith("crash") else (c or "?")
+                fail_by_err[kind] = fail_by_err.get(kind, 0) + 1
+                recent_fails.append({"t": r.get("t", "")[:16], "err": c, "pages": r.get("pages", 0),
+                                     "kb": r.get("in", 0), "src": (r.get("ref") or "direct").split("|")[0] or "direct"})
             leads += 1 if c.startswith("lead") else 0
             cap_rejects += 1 if c in ("too many pages", "too big") else 0
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
@@ -1716,6 +1734,8 @@ def stats():
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
+            "starts": starts, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
+            "recent_fails": recent_fails[-15:],
             "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8])}
 
 def _join(lines):
@@ -2328,12 +2348,23 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         doc.close()
         return done(data, npages, "pages-preview" if cut_pages else "")
 
+    def traced():
+        # ponytail: a crash used to leave only a traceback on stdout, so /stats never saw it.
+        # log the exception type and where it broke; the file itself is never kept
+        try:
+            return work()
+        except HTTPException:
+            raise
+        except Exception as e:
+            log(False, 0, kb_in, 0, crash_reason(e), ref, email.strip()[:120], request=request)
+            raise
+
     if request.headers.get("x-job") == "1":
         # ponytail: the page polls /job/<id>, so no request runs past railway's 5-minute idle cut
-        jid = _job_start(work, email, re.sub(r"[\r\n]", " ", f.filename or "book.pdf")[:80])
+        jid = _job_start(traced, email, re.sub(r"[\r\n]", " ", f.filename or "book.pdf")[:80])
         return JSONResponse({"job": jid}, status_code=202)
     # ponytail: off the event loop, so one heavy book no longer freezes the site for everyone else
-    return await run_in_threadpool(work)
+    return await run_in_threadpool(traced)
 
 def _job_write(jid: str, **state):
     tmp = JOB_DIR / f"{jid}.json.tmp"
