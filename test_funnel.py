@@ -305,6 +305,19 @@ def main():
     assert "email" not in last, "recent_fails is public: never show emails"
     assert st["starts"] >= 1
 
+    # fake doors (11-07): translate + Mac app buttons, counted in /stats, emails are leads not failures
+    for path, word in (("/", "Notify me"), ("/pt/", "Me avise"), ("/es/", "Avísame")):
+        page = client.get(path).text
+        assert 'id="next" hidden' in page and 'data-want="translate"' in page and 'data-want="desktop"' in page, path
+        assert word in page, (path, word)
+    mac = {"user-agent": "Mozilla/5.0 (Macintosh) Safari/605", "content-type": "application/json"}
+    for n in ("want_view", "want_view", "translate_click", "desktop_click", "want_email"):
+        client.post("/e", content=json.dumps({"n": n, "v": "wantvisitor1", "why": "desktop"}), headers=mac)
+    client.post("/lead", data={"email": "door@e.com", "reason": "want:desktop"}, headers={"user-agent": mac["user-agent"]})
+    st = client.get("/stats").json()
+    assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "want_email": 1}, st["wants"]
+    assert not any(k.startswith("lead") for k in st["fail_by_err"]), st["fail_by_err"]
+
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 
 

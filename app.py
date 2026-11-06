@@ -658,6 +658,10 @@ transition:border-color .15s,color .15s}
 .ghost-btn:hover{color:var(--txt);border-color:#bdb4a4}
 #msg{margin-top:11px;font-size:13.5px;min-height:20px;color:var(--dim)}
 #msg.err{color:#a3301f}#msg.ok{color:var(--ok)}
+#next{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line2)}
+#next .next-q{font-size:13.5px;color:var(--dim);margin:0 0 4px}
+#next .ghost-btn.on{color:var(--txt);border-color:var(--txt)}
+#wantf{margin-top:10px}
 .proof .rows{margin:0;padding:0;list-style:none;border-top:1px solid var(--line)}
 .proof .rows li{display:flex;gap:12px;justify-content:space-between;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
@@ -761,6 +765,17 @@ __ALT__
     <button class="go" id="go">Convert to EPUB</button>
     <button class="ghost-btn" id="sample">Try it with a sample PDF</button>
     <div id="msg"></div>
+    <div id="next" hidden>
+      <p class="next-q">Two things I might build next. Want one?</p>
+      <button class="ghost-btn" data-want="translate">Translate this book into another language</button>
+      <button class="ghost-btn" data-want="desktop">Mac app: converts offline, no page limit</button>
+      <form id="wantf" hidden>
+        <p class="next-q">Not built yet. Leave your email and you will hear first if it ships.</p>
+        <div class="row"><input id="wante" type="email" required placeholder="Your email" maxlength="120"></div>
+        <button class="go" type="submit">Notify me</button>
+      </form>
+      <p class="next-q" id="wantok" hidden>Thanks. You are on the list.</p>
+    </div>
   </div>
 
   <div class="card proof">
@@ -897,7 +912,7 @@ async function convert(preview){
    +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up'
    +(document.getElementById('email').value?', or use the link I email you.':'.')});
   const a=document.createElement('a');a.href=u;
-  a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');
+  a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');showNext();
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
@@ -925,6 +940,16 @@ fetch('/stats').then(r=>r.json()).then(s=>{const el=document.getElementById('st'
 document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);
 // ponytail: which objection people open is the cheapest research we get
 document.querySelectorAll('.faq details').forEach((d,i)=>d.addEventListener('toggle',()=>{if(d.open)ev('faq',{why:'q'+(i+1)})}));
+// fake doors (11-07): translation and a Mac app are not built; clicks + emails decide if they get built
+let WANT='';const nx=document.getElementById('next'),wf=document.getElementById('wantf');
+function showNext(){if(nx&&nx.hidden){nx.hidden=false;ev('want_view')}}
+nx&&nx.querySelectorAll('[data-want]').forEach(b=>b.onclick=()=>{
+ WANT=b.dataset.want;nx.querySelectorAll('[data-want]').forEach(x=>x.classList.toggle('on',x===b));
+ ev(WANT+'_click');wf.hidden=false;document.getElementById('wante').focus()});
+wf&&(wf.onsubmit=async e=>{e.preventDefault();const fd=new FormData();
+ fd.append('email',document.getElementById('wante').value);fd.append('reason','want:'+WANT);
+ try{await fetch('/lead'+location.search,{method:'POST',body:fd})}catch(x){}
+ ev('want_email',{why:WANT});wf.hidden=true;document.getElementById('wantok').hidden=false});
 document.getElementById('again').onclick=()=>{ev('again');drop.scrollIntoView({behavior:'smooth',block:'center'});fi.click()};
 </script></body></html>"""
 
@@ -1511,7 +1536,8 @@ def privacy():
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
-BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again"}
+BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
+           "want_view", "translate_click", "desktop_click", "want_email"}  # ponytail: want_* = fake doors
 
 
 @app.post("/e")
@@ -1672,6 +1698,7 @@ def stats():
     fail_by_err: dict[str, int] = {}
     recent_fails: list[dict] = []
     starts = 0
+    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "want_email": 0}
     try:
         for line in LOG.read_text().splitlines():
             try:
@@ -1679,7 +1706,9 @@ def stats():
             except ValueError:
                 continue
             if r.get("ev"):
-                starts += r["ev"] == "start"  # ponytail: starts minus outcomes = workers killed mid-book
+                starts += r["ev"] == "start"
+                if r["ev"] in wants and not is_bot(r.get("ua") or ""):
+                    wants[r["ev"]] += 1  # ponytail: starts minus outcomes = workers killed mid-book
                 continue  # ponytail: funnel steps live in /funnel, they are not visits or conversions
             ua = r.get("ua") or ""
             if r.get("visit"):
@@ -1704,7 +1733,7 @@ def stats():
             scan_fail += (not r.get("ok")) and c.startswith("scan")
             if r.get("email"):  # ponytail: one person can leave the same email on several lines
                 emailset.add(r["email"].strip().lower())
-            if not r.get("ok") and ua and not is_bot(ua):
+            if not r.get("ok") and ua and not is_bot(ua) and not c.startswith("lead"):
                 kind = c.split(":")[0] if c.startswith("crash") else (c or "?")
                 fail_by_err[kind] = fail_by_err.get(kind, 0) + 1
                 recent_fails.append({"t": r.get("t", "")[:16], "err": c, "pages": r.get("pages", 0),
@@ -1729,7 +1758,7 @@ def stats():
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
-            "starts": starts, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
+            "starts": starts, "wants": wants, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
             "recent_fails": recent_fails[-15:],
             "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8])}
 
