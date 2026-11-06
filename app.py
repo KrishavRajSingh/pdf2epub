@@ -80,7 +80,7 @@ OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; tri
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
 SHELF_URL = "https://buy.polar.sh/polar_cl_1jZLYsY7lODWs2QOnhNALMww3O7if69LL4nRQ1JiNmJ"  # pdf2epub org, verified 200
-ONETIME_URL = "https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc"  # $5 one book, manual, paid before delivery
+ONETIME_URL = "https://buy.polar.sh/polar_cl_ORKV379p0AcaC2enSVTF9bL0IhujaIgYdrajV0D3mtc"  # $5 one book: unlocks the converter for one book up to 2,000 pages
 SHELF_MAIL = "krishavrajsingh@gmail.com"
 SHELF_PRODUCT = "8c3386ae-0aea-4dd2-87bc-7735b8af795a"
 # ponytail: the first shelf buyer did ~20 books in one night and turned renewal off the same day.
@@ -857,7 +857,7 @@ document.addEventListener('click',async(e)=>{
  if(window.capPages)fd.append('pages',window.capPages);
  const r=await fetch('/lead',{method:'POST',body:fd});
  msg.className='ok';msg.innerHTML=r.ok
-  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> with the page count and I will reply with a price.'
+  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> with the page count and we will set up a key with a higher limit.'
   :'Put an email in the box first.';
  e.target.disabled=false;});
 drop.onclick=()=>fi.click();
@@ -895,7 +895,7 @@ async function convert(preview){
   window.capPages=n;window.capName=(f&&f.name)||'book';
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
-   +'instant converter. That is on our side, not your file. Email it to __MAIL__ and I will convert it by hand today.'}
+   +'instant converter. That is on our side, not your file. Email it to __MAIL__ and we will rerun it on the big-file converter today.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
 go.onclick=()=>convert(false);
@@ -1262,13 +1262,14 @@ batch conversion of a whole shelf, and the finished EPUB delivered to your Kindl
 {key_html}
 <div class="card">
 <p><b>What happens next</b></p>
-<p>Send me the PDF (or the scans) and I will convert it and email the EPUB back, usually the same day.
-If it is a scan it gets OCR and the text will have the usual OCR typos, and I will say so.</p>
-<p>Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line.</p>
+<p>Your key is saved in this browser. Go to the <a href="/">converter</a> and upload: no per-file ceiling,
+up to 2,000 pages per file, scans get OCR (expect the usual OCR typos).</p>
+<p>A file the converter chokes on? Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line
+and we will rerun it on the big-file converter.</p>
 <p>Nothing is stored. The PDF is never saved and the EPUB is deleted after the download, same as the
 <a href="/">free converter</a>.</p>
 </div>
-<p>Questions about the plan, or a file that is over 500MB? Same address, I will work around it.</p>
+<p>Questions about the plan, or a file that is over 500MB? Same address.</p>
 </div><script>{TRACK_JS}
 ev('return',{{cid:{json.dumps(cid)}}});
 if({json.dumps(key)})try{{localStorage.setItem('k',{json.dumps(key)})}}catch(e){{}}</script></body></html>""")
@@ -1276,7 +1277,7 @@ if({json.dumps(key)})try{{localStorage.setItem('k',{json.dumps(key)})}}catch(e){
 
 @app.get("/onebook", response_class=HTMLResponse)
 def onebook(request: Request):
-    # ponytail: separate polar success page for the $5 manual conversion, so it never mints a Shelf key
+    # ponytail: separate polar success page for the $5 one-book unlock, so it never mints a Shelf key
     cid = re.sub(r"[^0-9A-Za-z_-]", "", request.query_params.get("checkout_id") or "")[:80]
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "onebook", "checkout_id": cid, "ua": ua_of(request)[:120]})
@@ -1294,15 +1295,15 @@ Bookmark this page: it is the only link to your purchase, there is no account.
 A long scan takes a few minutes, keep this tab open.</p>
 </div>
 <p>Something wrong with the result? Email <code>{SHELF_MAIL}</code> with the checkout ID
-<code>{html.escape(cid)}</code> and I will fix it by hand.</p>"""
+<code>{html.escape(cid)}</code> and we will rerun it or refund you.</p>"""
     else:
         cid_html = (f"<p>Checkout ID: <code>{html.escape(cid)}</code></p>" if cid else
                     "<p>If you just paid and there is no checkout ID in the address, reply to the Polar receipt.</p>")
         main = f"""<div class="card">
 <p><b>Payment not confirmed yet.</b> Polar can take a few seconds, so
 <a href="">reload this page</a> first.</p>
-<p>Still not confirmed? Email the PDF to <code>{SHELF_MAIL}</code> with the subject <b>One book</b>,
-from the email you paid with, and I will convert it by hand and send it back the same day.</p>
+<p>Still not confirmed? Reply to the Polar receipt or email <code>{SHELF_MAIL}</code> from the email you paid with,
+and we will confirm the payment so this page unlocks the converter.</p>
 {cid_html}
 </div>"""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -2228,7 +2229,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
     event("start", request, kb=kb_in, paid=bool(key))
     def work():
         nonlocal author  # ponytail: reassigned from the PDF metadata below
-        # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot instead of by hand
+        # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot by the converter
         cid = (request.query_params.get("paid") or "")[:80]
         digest = hashlib.sha256(raw).hexdigest()[:32]
         book = bool(cid) and onebook_ok(cid, digest)
@@ -2264,7 +2265,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             doc.close()
             log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
             raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
-                if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and I will convert it by hand, included in your plan")
+                if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and we will raise your per-file limit, included in your plan")
 
         def done(data: bytes, pages: int, kind: str):
             log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
@@ -2314,7 +2315,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             big = npages > PAID_OCR_MAX_PAGES
             log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref, request=request)
             raise HTTPException(422, f"scanned PDF, {npages} pages, too long to OCR in one go. Email it to "
-                                f"{SHELF_MAIL} and I will run it overnight"
+                                f"{SHELF_MAIL} and we will run it as a long OCR job"
                 if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
         chapters = _structure(blocks, doc)
         if cut_pages:
@@ -2394,7 +2395,7 @@ def _job_run(jid: str, work, email: str = "", name: str = "book"):
     except Exception:
         traceback.print_exc()
         _job_write(jid, state="error", status=500, detail="the converter failed on this file. Email it to "
-                   f"{SHELF_MAIL} and I will convert it by hand today")
+                   f"{SHELF_MAIL} and we will rerun it on the big-file converter today")
 
 
 def _job_start(work, email: str = "", name: str = "book") -> str:

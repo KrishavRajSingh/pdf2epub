@@ -115,7 +115,7 @@ def main():
     client.get("/thanks?checkout_id=polar_c_TEST")
     assert client.get("/stats").json()["checkouts"] == 1, "checkout not counted"
     one = client.get("/onebook?checkout_id=polar_c_ONETIME1234567890abcdef")
-    assert one.status_code == 200 and "One book" in one.text and "Email the PDF" in one.text, \
+    assert one.status_code == 200 and "One book" in one.text and "Reply to the Polar receipt" in one.text, \
         "one-book success page missing"
     assert "Shelf key" not in one.text, "one-book success page must not mint a shelf key"
     assert "Payment not confirmed" in one.text, "unverified one-book checkout looked paid"
