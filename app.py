@@ -246,7 +246,68 @@ def issue_key(checkout_id: str, days: int = 0) -> str:
         pass
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "key_issued": checkout_id,
                       "ua": ""}), flush=True)
+    # ponytail: only a fresh key is mailed, so a refresh of /thanks never sends a second mail.
+    # a thread, so a slow polar or resend never holds up the buyer's success page
+    threading.Thread(target=_mail_key, args=(checkout_id, key, days), daemon=True).start()
     return key
+
+
+def _order_email(checkout_id: str) -> str:
+    """The email the buyer paid with, from the polar order (the checkout email is the identity)."""
+    if not POLAR_TOKEN:
+        return ""
+    req = urllib.request.Request(POLAR_ORDERS + "?limit=1&checkout_id=" + checkout_id,
+                                 headers={"Authorization": "Bearer " + POLAR_TOKEN,
+                                          "User-Agent": "pdf2epub/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            items = (json.load(r) or {}).get("items") or []
+    except Exception:
+        return ""
+    return ((items[0].get("customer") or {}).get("email") or "") if items else ""
+
+
+def _mail_key(checkout_id: str, key: str, days: int = 0):
+    """Mail a fresh Shelf or Batch key to the buyer, so losing the tab or the browser never loses it."""
+    to = _order_email(checkout_id)
+    if not (RESEND_KEY and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}", to)):
+        event("key_mail_failed", None, checkout=checkout_id[:8], err="no resend key or no email")
+        return
+    plan = f"Batch pass ({days} days, it does not renew)" if days else "Shelf"
+    body = (f"Thanks for buying pdf2epub {plan}. Your key:\n\n{key}\n\n"
+            f"Open this link to convert with the paid limits (books up to 2,000 pages, 500MB, scans included):\n\n"
+            f"https://epub.ftak.net/?k={key}\n\n"
+            "No account, no password. The browser you open it in remembers the key. "
+            "Keep this email: on a new device, open the link again.\n\n"
+            "A book that comes out wrong? Reply to this email with the title and I will look at it.\n\n"
+            "Krishav, pdf2epub")
+    ok, err = _send_mail(to, f"Your pdf2epub {'Batch pass' if days else 'Shelf'} key", body)
+    if ok:
+        event("key_mailed", None, checkout=checkout_id[:8], sender=ok)
+    else:
+        event("key_mail_failed", None, checkout=checkout_id[:8], err=err)
+
+
+def _send_mail(to: str, subject: str, body: str) -> tuple[str, str]:
+    """Send one plain-text mail through resend. Returns (sender domain, "") or ("", error)."""
+    err = ""
+    for sender in MAIL_FROMS:
+        req = urllib.request.Request("https://api.resend.com/emails", method="POST",
+            data=json.dumps({"from": sender, "to": [to], "reply_to": SHELF_MAIL,
+                             "subject": subject[:120], "text": body}).encode(),
+            headers={"Authorization": "Bearer " + RESEND_KEY, "Content-Type": "application/json",
+                     "User-Agent": "pdf2epub/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                return sender.split("@")[-1][:-1], ""
+        except urllib.error.HTTPError as e:
+            err = f"{e.code} {sender}"
+            if e.code not in (403, 422):
+                break  # ponytail: only an unverified sender is worth retrying with the next one
+        except Exception as e:
+            err = str(e)[:80]
+            break
+    return "", err
 
 def _write(line: str):
     try:
@@ -1272,8 +1333,9 @@ def thanks(request: Request):
             f'(2,000 pages per file, 500MB){f" for the next {BATCH_DAYS} days. It does not renew" if batch else ""}. '
             f'This browser remembers it too:</p>'
             f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
-            f'<p>No account, no password. If you lose it, reply to the email I sent you and I will '
-            f'send it again.</p></div>')
+            f'<p>No account, no password. I also emailed it to the address you paid with, so it is '
+            f'in your inbox for a new device. Not there in a few minutes? Check spam, or email '
+            f'<code>{SHELF_MAIL}</code> and I will send it again.</p></div>')
     elif cid:
         key_html = ('<div class="card"><p><b>Payment not confirmed yet</b></p>'
             '<p>Polar has not shown me a completed payment for this checkout. If you were just '
@@ -2415,25 +2477,11 @@ def _mail_link(jid: str, to: str, name: str):
             "The link works once and for about an hour after the conversion finished, then the file is deleted. "
             "If it has expired, upload the PDF again.\n\nReply to this email if anything looks wrong.\n\n"
             "Krishav, pdf2epub")
-    err = ""
-    for sender in MAIL_FROMS:
-        req = urllib.request.Request("https://api.resend.com/emails", method="POST",
-            data=json.dumps({"from": sender, "to": [to], "reply_to": SHELF_MAIL,
-                             "subject": f"Your EPUB is ready: {name}"[:120], "text": body}).encode(),
-            headers={"Authorization": "Bearer " + RESEND_KEY, "Content-Type": "application/json",
-                     "User-Agent": "pdf2epub/1.0"})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                event("link_mailed", None, job=jid[:6], status=r.status, sender=sender.split("@")[-1][:-1])
-                return
-        except urllib.error.HTTPError as e:
-            err = f"{e.code} {sender}"
-            if e.code not in (403, 422):
-                break  # ponytail: only an unverified sender is worth retrying with the next one
-        except Exception as e:
-            err = str(e)[:80]
-            break
-    event("link_mail_failed", None, job=jid[:6], err=err)
+    ok, err = _send_mail(to, f"Your EPUB is ready: {name}", body)
+    if ok:
+        event("link_mailed", None, job=jid[:6], sender=ok)
+    else:
+        event("link_mail_failed", None, job=jid[:6], err=err)
 
 
 def _job_run(jid: str, work, email: str = "", name: str = "book"):

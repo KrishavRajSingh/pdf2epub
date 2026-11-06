@@ -187,6 +187,8 @@ def main():
     assert "Shelf key" not in client.get(f"/thanks?checkout_id={cid}").text, \
         "unverified checkout minted a key"
     pdf2epub.paid_checkout = lambda c, p: (c, p) == (cid, pdf2epub.SHELF_PRODUCT)
+    real_mail_key, key_mails = pdf2epub._mail_key, []
+    pdf2epub._mail_key = lambda c, k, d=0: key_mails.append((c, k, d))
     page = client.get(f"/thanks?checkout_id={cid}").text
     assert "Shelf key" in page, "a verified checkout must mint a key"
     key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
@@ -194,7 +196,33 @@ def main():
     # same checkout must not mint a second key on a page refresh
     again = client.get(f"/thanks?checkout_id={cid}").text
     assert re.search(r"\?k=([0-9A-Za-z_-]+)</code>", again).group(1) == key, "key changed on refresh"
+    # 11-07: the key is mailed to the buyer once, on the first mint, never on a refresh
+    import time as _t
+    for _ in range(50):
+        if key_mails:
+            break
+        _t.sleep(0.02)
+    _t.sleep(0.1)
+    assert key_mails == [(cid, key, 0)], f"key mail must go out exactly once: {key_mails}"
+    assert "emailed it to the address you paid with" in page, "/thanks does not say the key was mailed"
+    pdf2epub._mail_key = real_mail_key
     pdf2epub.paid_checkout = real_paid
+    # the mail itself: polar order email in, key and link in the body; no email or no resend key, no send
+    sent, real_send, real_oe, real_rk = [], pdf2epub._send_mail, pdf2epub._order_email, pdf2epub.RESEND_KEY
+    pdf2epub._send_mail = lambda to, subj, body: (sent.append((to, subj, body)), ("opencorp.live", ""))[1]
+    pdf2epub.RESEND_KEY = "re_test"
+    pdf2epub._order_email = lambda c: "buyer@example.com"
+    pdf2epub._mail_key(cid, "KEY123", 30)
+    assert len(sent) == 1 and sent[0][0] == "buyer@example.com", sent
+    assert "Batch pass" in sent[0][1] and "https://epub.ftak.net/?k=KEY123" in sent[0][2] \
+        and "30 days" in sent[0][2], sent[0]
+    pdf2epub._order_email = lambda c: ""
+    pdf2epub._mail_key(cid, "KEY123")
+    pdf2epub.RESEND_KEY = ""
+    pdf2epub._order_email = lambda c: "buyer@example.com"
+    pdf2epub._mail_key(cid, "KEY123")
+    assert len(sent) == 1, "mailed without an email or without a resend key"
+    pdf2epub._send_mail, pdf2epub._order_email, pdf2epub.RESEND_KEY = real_send, real_oe, real_rk
 
     # the $5 one-book converts on the spot: a verified checkout lifts the cap for one file,
     # re-running that same file stays free, a second different book does not ride on it
