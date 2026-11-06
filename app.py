@@ -343,8 +343,8 @@ def err_page(msg: str, code: int):
     return HTMLResponse(f"<h1>{code}</h1><p>{html.escape(msg)}</p>"
         "<p>Too big for the free converter? <b>One book:</b> $5 once, then come back and it converts "
         "on the spot, up to 2,000 pages: <a href='/go/onebook?why=errpage'>one book - $5</a>. "
-        "<b>A whole shelf:</b> <b>Shelf</b> is $10/month for 1,000 pages, batch conversion of a "
-        "whole shelf and delivery to your Kindle: <a href='/go/shelf?why=errpage'>subscribe</a>, or "
+        "<b>A whole shelf:</b> <b>Shelf</b> is $10/month, no monthly limit, any number of books "
+        "up to 2,000 pages each: <a href='/go/shelf?why=errpage'>subscribe</a>, or "
         "<a href='/go/batch?why=errpage'>$10 once for 30 days</a>. "
         "Not happy with the result? Full refund within 30 days.</p>"
         "<p><a href='/'>back</a></p>", status_code=code)
@@ -800,7 +800,7 @@ __ALT__
     <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
     <a href="/go/onebook?why=landing" data-go>Pay $5 for one book</a></div>
   <div class="price"><h3>Shelf</h3><div class="amt">$10 a month</div>
-    <p>1,000 pages a month, up to 2,000 pages per file, as many files as you like.</p>
+    <p>No monthly limit. Any number of books, each up to 2,000 pages, scans included.</p>
     <p>Or $10 once for 30 days, no renewal.</p>
     <a href="/shelf">See Shelf</a></div>
 </div>
@@ -816,7 +816,7 @@ __ALT__
 
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
-  <a href="/shelf">Shelf: $10/mo, 1,000 pages a month</a>
+  <a href="/shelf">Shelf: $10/mo, no monthly limit</a>
   <a href="/guides">Guides</a>
   <a href="/privacy">Privacy</a>
   <a href="/" hreflang="en" lang="en">English</a>
@@ -1266,13 +1266,13 @@ b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,m
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>You're in.</h1>
-<p>{"The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month"}: no per-file ceiling,
-batch conversion of a whole shelf, and the finished EPUB delivered to your Kindle.</p>
+<p>{"The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month"}: no monthly limit,
+any number of books, each up to 2,000 pages, scans included.</p>
 {key_html}
 <div class="card">
 <p><b>What happens next</b></p>
-<p>Your key is saved in this browser. Go to the <a href="/">converter</a> and upload: no per-file ceiling,
-up to 2,000 pages per file, scans get OCR (expect the usual OCR typos).</p>
+<p>Your key is saved in this browser. Go to the <a href="/">converter</a> and upload: no monthly limit,
+any number of books up to 2,000 pages each, scans get OCR (expect the usual OCR typos).</p>
 <p>A file the converter chokes on? Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line
 and we will rerun it on the big-file converter.</p>
 <p>Nothing is stored. The PDF is never saved and the EPUB is deleted after the download, same as the
@@ -1375,7 +1375,7 @@ def shelf(request: Request):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
 <title>Shelf - pdf2epub</title>
-<meta name="description" content="Shelf: $10/month for 1,000 scanned pages, batch conversion of a whole shelf, and the finished EPUB delivered to your Kindle.">
+<meta name="description" content="Shelf: $10/month, no monthly limit. Any number of books, each up to 2,000 pages, scans included.">
 <link rel="canonical" href="https://epub.ftak.net/shelf">
 <style>:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--ok:#1f7a4d;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);
@@ -1396,9 +1396,8 @@ hit the free page cap. Shelf is for that reader.</p>
 <div class="card">
 <p><b>$10 a month, included</b></p>
 <ul>
-<li>1,000 pages a month included. If you go over, email me and we will sort it out.</li>
-<li><b>No per-file ceiling.</b> The free converter stops at 150 pages, enough to try a book. Shelf goes to 2,000 pages per file, so the big ones go through.</li>
-<li>As many files as you like: upload a whole shelf, one PDF after another.</li>
+<li><b>No monthly limit.</b> Convert as many books as you like.</li>
+<li><b>Big books go through.</b> The free converter stops at 150 pages, enough to try a book. Shelf takes up to 2,000 pages per file, scans included.</li>
 <li>Repair: re-run and fix a conversion as many times as you want.</li>
 <li>Nothing stored. The PDF is never saved and the EPUB is deleted after the download, same as the free tier.</li>
 </ul>
@@ -1450,7 +1449,7 @@ def llms_txt():
 
 - Free: one PDF at a time, up to 150 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
 - One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
-- Shelf: $10 a month, 1,000 pages a month, up to 2,000 pages per file, as many files as you like: https://epub.ftak.net/shelf
+- Shelf: $10 a month, no monthly limit, any number of books up to 2,000 pages each, scans included: https://epub.ftak.net/shelf
 - Batch pass: $10 once, the Shelf limits for 30 days, no renewal: https://epub.ftak.net/shelf
 
 ## Pages
