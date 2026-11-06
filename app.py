@@ -45,7 +45,7 @@ FAQ = {"en": [
      "No. Store books are locked with DRM and are not PDFs. It converts PDFs you can open yourself."),
     ("What if my book has more than 150 pages?",
      "The free converter gives you the first 150 pages. One book, $5 once, converts up to 2,000 pages. "
-     "Anything bigger, email for a quote."),
+     "Anything bigger is still $5: email us and we raise the limit for your book."),
     ("What if the paid conversion is not good enough?",
      "Email me within 30 days and I refund the full amount, no questions asked."),
 ]}
@@ -845,7 +845,7 @@ function pitchPages(n){return 'This PDF has '+(n||'over 150')+' pages. The free 
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
- +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Leave your email for a quote.</span><br>'
+ +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Still $5. Leave your email and we raise the limit for your book.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
@@ -866,7 +866,7 @@ document.addEventListener('click',async(e)=>{
  if(window.capPages)fd.append('pages',window.capPages);
  const r=await fetch('/lead',{method:'POST',body:fd});
  msg.className='ok';msg.innerHTML=r.ok
-  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> with the page count and we will set up a key with a higher limit.'
+  ?'Got it. Email the PDF to <a href="mailto:__MAIL__?subject='+encodeURIComponent('PDF to EPUB - '+(window.capName||'book'))+'">__MAIL__</a> with the page count and we will raise the limit for your book, same $5.'
   :'Put an email in the box first.';
  e.target.disabled=false;});
 drop.onclick=()=>fi.click();
@@ -1420,9 +1420,9 @@ send the EPUBs back, usually the same day.</p>
 <a class="btn" href="/go/onebook?why=shelfpage" data-go>One book - $5</a>
 <p style="margin:12px 0 0;font-size:14px">Not happy with the book? Full refund within 30 days, no questions asked.</p>
 </div>
-<p>Bigger than 2,000 pages or a rough scan?
-<a href="mailto:{SHELF_MAIL}?subject=One-time%20conversion">Email me the page count</a>
-and I will quote it.</p>
+<p>Bigger than 2,000 pages? Still $5.
+<a href="mailto:{SHELF_MAIL}?subject=Over%202000%20pages">Email us the page count</a>
+and we raise the limit for your book.</p>
 <p>The <a href="/">free converter</a> handles one PDF up to 200MB and 150 pages, and scans up to
 {FREE_OCR_PAGES} pages, with no signup.</p>
 </div><script>{TRACK_JS}
