@@ -45,3 +45,27 @@ SERP; the site just has no links yet.
    free, pdf to kindle, pdf para epub, converter pdf em epub, pdf a epub.
 4. **Ahrefs Alerts** (new backlinks, new keywords, mentions of "epub.ftak.net") replaces
    Talkwalker/Google Alerts.
+
+# Ahrefs check, 2026-11-07 (Keywords Explorer + Site Explorer in Chrome)
+
+epub.ftak.net: still **0 organic keywords** (all locations, 6 Nov), so the /pt/ and /es/ pages haven't ranked yet either. Links are the blocker, not pages.
+
+| Keyword | Market | Vol/mo | KD | Note |
+|---|---|---|---|---|
+| pdf to epub | US 10K / global 84K | | **7** (was 4) | ~8 ref domains for top 10. Split: US 10K, BR 6.3K, IN 5.9K (skip India), TR 4.2K, ID 3.8K, HU 2.6K |
+| pdf to kindle | US 1.6K / global 4K | | 5 | top result is Amazon Send to Kindle; ~6 ref domains |
+| convertir pdf en epub | FR 600 / global 1.6K (ES 700) | | 0 | convertio #1 |
+| pdf in epub umwandeln | DE 450 | | 0 | DE parent "pdf to epub" 1.6K |
+| convertire pdf in epub | IT 400 | | 0 | IT parent "pdf to epub" 2.0K |
+| pdf na epub | PL 350 | | 0 | |
+| pdf naar epub | NL 150 | | 0 | |
+| pdf epub 変換 | JP 150 | | 0 | |
+| pdf в epub | RU 90 | | 0 | |
+| pdf epub átalakítás | HU 0-10 | | | Hungary searches the English term |
+| translate epub | US 200 / global 600 | | ? | small; fake door decides, not search |
+| translate pdf book | US 10 | | | |
+| pdf to epub mac | 0-10 | | | no search demand for a Mac app |
+| pdf to kepub | US 10 / global 60 | | | |
+| manga pdf to epub | 0-10 | | | drop manga as a search play |
+
+Read: (1) the money keyword is still English "pdf to epub" at KD 7; 8 real referring domains is the SEO job (roundups, AlternativeTo, directories with dofollow). (2) Next language pages by native volume: French (also catches Spain's 700), German, Italian, Polish; all KD 0, same i18n.py pattern as pt/es, but only worth it once any page ranks. (3) Translation and Mac app have almost no search demand; the fake doors measure intent from people already converting.
