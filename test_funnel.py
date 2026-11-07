@@ -346,6 +346,12 @@ def main():
     assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "want_email": 1}, st["wants"]
     assert not any(k.startswith("lead") for k in st["fail_by_err"]), st["fail_by_err"]
 
+    # preview before paying (11-07): over the limit converts the free part first, then pitches $5
+    for path, word in (("/", "pages are downloaded"), ("/pt/", "foram baixadas"), ("/es/", "se descargaron")):
+        page = client.get(path).text
+        assert "preview_auto" in page and "return convert(true)" in page and "pages-seen" in page, path
+        assert word in page, (path, word)
+
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 
 

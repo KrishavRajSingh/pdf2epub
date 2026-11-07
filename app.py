@@ -915,9 +915,11 @@ try{const ob=localStorage.getItem('onebook');if(ob){msg.className='ok';msg.inner
  +'<a href="/onebook?checkout_id='+encodeURIComponent(ob)+'">Convert it here</a>'}}catch(e){}
 function buy(why){return '/go/onebook?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
-function pitchPages(n){return 'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
- +'<a style="'+BTN+'" href="'+buy('pages')+'">Convert the whole book - $5</a>'
- +'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>'
+// ponytail (11-07): over the limit we convert the free part first, so the $5 ask comes after they've seen their own book
+function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
+function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
+ +'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>'
+ +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
@@ -926,10 +928,10 @@ function pitchPages(n){return 'This PDF has '+(n||'over 150')+' pages. The free 
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
-function pitchOcr(n){return 'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
+function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
- +'<a style="'+BTN+'" href="'+buy('ocr')+'">OCR the whole book - $5</a>'
- +'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>'
+ +'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>'
+ +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot. Nothing stored. Not happy? Full refund.</span>'}
 document.addEventListener('click',async(e)=>{
@@ -974,10 +976,16 @@ async function convert(preview){
    +(document.getElementById('email').value?', or use the link I email you.':'.')});
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');showNext();
-  msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'}
+  msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'
+  if(preview&&window.capKind){window.previewDone=true;msg.className='';
+   msg.innerHTML=window.capKind==='ocr'?pitchOcr(window.capPages):pitchPages(window.capPages);ev('pitch',{why:window.capKind+'-seen'})}}
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
-  window.capPages=n;window.capName=(f&&f.name)||'book';
+  const cap=e.status===413&&!K?'pages':(e.status===402&&/scanned/.test(e.message)?'ocr':'');
+  // over the limit on a full run: convert the free part straight away instead of asking first
+  if(cap&&!preview){window.capPages=n;window.capName=(f&&f.name)||'book';window.capKind=cap;window.previewDone=false;
+   PN=cap==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:cap});go.disabled=false;return convert(true)}
+  if(!preview){window.capPages=n;window.capName=(f&&f.name)||'book'}
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
    +'instant converter. That is on our side, not your file. Email it to __MAIL__ and we will rerun it on the big-file converter today.'}
