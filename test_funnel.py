@@ -193,6 +193,23 @@ def main():
     assert "Shelf key" in page, "a verified checkout must mint a key"
     key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
     assert convert_with(f"?k={key}") == 200, "a paid key must lift the 150 page cap"
+    # 11-05 Jack: a paid 181-page scan was refused as "scan-over-ocr-cap" (paid OCR cap was 120 for an hour).
+    # A paid key must OCR a long scan, not refuse it. OCR is stubbed so the test stays fast.
+    scan = pymupdf.open()
+    for i in range(181):
+        scan.new_page().insert_image(pymupdf.Rect(0, 0, 50, 50), stream=pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), 0).tobytes("png"))
+    sraw = scan.tobytes()
+    scan.close()
+    real_ocr = pdf2epub.ocr_doc
+    pdf2epub.ocr_doc = lambda doc, layout=False: [("This scanned page reads as ordinary prose with plenty of words. " * 4, 0.5)
+                                                  for _ in range(len(doc))]
+    sc = client.post(f"/convert?k={key}", files={"f": ("scan.pdf", sraw, "application/pdf")})
+    pdf2epub.ocr_doc = real_ocr
+    assert sc.status_code == 200, f"paid 181-page scan refused: {sc.status_code} {sc.text[:160]}"
+    zs = zipfile.ZipFile(__import__("io").BytesIO(sc.content))
+    assert any("ordinary prose" in zs.read(n).decode("utf-8", "replace") for n in zs.namelist() if n.endswith(".xhtml")), \
+        "paid long scan skipped OCR (image-only fallback)"
+    assert pdf2epub.PAID_OCR_MAX_PAGES >= 600, "paid OCR cap dropped below 600 pages"
     # same checkout must not mint a second key on a page refresh
     again = client.get(f"/thanks?checkout_id={cid}").text
     assert re.search(r"\?k=([0-9A-Za-z_-]+)</code>", again).group(1) == key, "key changed on refresh"
