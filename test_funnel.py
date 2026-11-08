@@ -418,6 +418,9 @@ def main():
     for path in ("/", "/pt/", "/es/", "/scan", "/shelf"):
         page = client.get(path).text
         assert "function failHtml" in page and pdf2epub.SHELF_MAIL in page, path
+    src = Path(pdf2epub.__file__).read_text()
+    for bad in ("by hand", "get it converted", "within a day", "we will convert", "long OCR job"):
+        assert bad not in src, f"Polar AUP 11-06: copy must not read as a manual service ({bad!r})"
     assert "msg.textContent=e.message" not in Path(pdf2epub.__file__).read_text(), "a raw error with no mail-us line"
 
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")

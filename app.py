@@ -662,7 +662,7 @@ async function pollJob(j,tick){
 // ponytail: any failure ends with "email it to us", so a broken book becomes a fixed one (and a test case)
 function failHtml(e){const t=String(e&&e.message||e||'Something went wrong.'),x=t.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
  if(e&&e.status===429||/__SUPPORT__/.test(t))return x;
- return x+'<br><br>Email the PDF to <a href="mailto:__SUPPORT__?subject='+encodeURIComponent('PDF that failed on epub.ftak.net')+'">__SUPPORT__</a> and we will get it converted and send you the EPUB, usually within a day. Files that fail show us what to fix next.'}
+ return x+'<br><br>Email the PDF to <a href="mailto:__SUPPORT__?subject='+encodeURIComponent('PDF that failed on epub.ftak.net')+'">__SUPPORT__</a> so we can fix the converter for files like it. We rerun it once the fix is in and send you the download link.'}
 function clock(n){return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
 function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
 ev('view',{path:location.pathname});
@@ -1000,7 +1000,7 @@ async function convert(preview){
   if(!preview){window.capPages=n;window.capName=(f&&f.name)||'book'}
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(e.status===502||e.status===503||e.status===504){msg.innerHTML='This file was too heavy for the instant converter. That is on our side, not your file.'
-   +'<br><br>Email the PDF to <a href="mailto:__MAIL__">__MAIL__</a> and we will get it converted and send you the EPUB, usually within a day.'}
+   +'<br><br>Email the PDF to <a href="mailto:__MAIL__">__MAIL__</a> so we can rerun it on the big-file converter and send you the download link.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
 go.onclick=()=>convert(false);
@@ -2449,7 +2449,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             big = npages > PAID_OCR_MAX_PAGES
             log(False, npages, kb_in, 0, "scan-over-ocr-cap" if big else "scan-no-text", ref, request=request)
             raise HTTPException(422, f"scanned PDF, {npages} pages, too long to OCR in one go. Email it to "
-                                f"{SHELF_MAIL} and we will run it as a long OCR job"
+                                f"{SHELF_MAIL} and we will raise the limit for your file"
                 if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
         chapters = _structure(blocks, doc)
         if cut_pages:
@@ -2537,7 +2537,7 @@ def _job_run(jid: str, work, email: str = "", name: str = "book"):
     except Exception:
         traceback.print_exc()
         _job_write(jid, state="error", status=500, detail="the converter failed on this file. Email it to "
-                   f"{SHELF_MAIL} and we will rerun it on the big-file converter today")
+                   f"{SHELF_MAIL} so we can fix the converter for it and rerun it")
 
 
 def _job_start(work, email: str = "", name: str = "book") -> str:
