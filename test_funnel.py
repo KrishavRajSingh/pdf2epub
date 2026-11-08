@@ -2,7 +2,7 @@
 
 Run: python3 test_funnel.py
 """
-import json, os, re, tempfile, zipfile
+import json, os, re, tempfile, time, zipfile
 from pathlib import Path
 
 os.environ["LOG_DIR"] = tempfile.mkdtemp()  # keep the real conversions.log clean
@@ -368,6 +368,23 @@ def main():
         page = client.get(path).text
         assert "preview_auto" in page and "return convert(true)" in page and "pages-seen" in page, path
         assert word in page, (path, word)
+
+    # re-download (11-08): a Reddit user got 200 then 404 x2 on the same job; the epub now lives 10 min after the first fetch
+    pdf2epub.JOB_DIR.mkdir(parents=True, exist_ok=True)
+    jid = "regrab" + "x" * 20
+    (pdf2epub.JOB_DIR / f"{jid}.epub").write_bytes(b"PK fake epub")
+    pdf2epub._job_write(jid, state="done")
+    for _ in range(3):
+        r = client.get(f"/job/{jid}/epub")
+        assert r.status_code == 200 and r.content == b"PK fake epub", r.status_code
+    assert client.get(f"/job/{jid}").json()["state"] == "done", "status poll must not 404 right after the download"
+    got = pdf2epub.JOB_DIR / f"{jid}.got"
+    assert got.exists()
+    old = time.time() - pdf2epub.GOT_GRACE - 5
+    os.utime(got, (old, old))
+    pdf2epub._job_sweep()
+    assert client.get(f"/job/{jid}/epub").status_code == 404, "epub must be gone 10 min after the download"
+    assert not got.exists()
 
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 

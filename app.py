@@ -23,7 +23,6 @@ import pymupdf
 from ebooklib import epub
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 try:
     from guides import GUIDES, INDEX_BODY
@@ -34,7 +33,7 @@ FAQ = {"en": [
      "Yes. Send the EPUB to your Kindle with Amazon's Send to Kindle (by email, the app or the web page) and it "
      "lands in your library. Kobo, Apple Books and most phone readers open it as it is."),
     ("Is my file kept anywhere?",
-     "No. The PDF is never saved, and the finished EPUB is deleted the moment you download it (or after an hour if you never do). There is no account and no library on this side."),
+     "No. The PDF is never saved, and the finished EPUB is deleted ten minutes after you download it, so a second tap still works (or after an hour if you never do). There is no account and no library on this side."),
     ("My PDF is a scanned book. Does that work?",
      "Yes. Scanned pages are read with OCR, then split into chapters and paragraphs like any other PDF. "
      "The first __FREEOCR__ pages are free, and the whole book is $5 once."),
@@ -69,6 +68,7 @@ OCR_THREADS = 4  # ponytail: tesseract is a subprocess, so threads run it in par
 FIG_MAX_PX = 2000  # ponytail: long side cap; 3x renders of a full page are ~1850x2400
 JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs"))  # ponytail: /tmp is shared by both uvicorn workers
 JOB_TTL = 3600  # an unfetched epub is deleted after an hour
+GOT_GRACE = 600  # ponytail: a re-click or a phone download manager re-fetch within 10 min still gets the file (11-08: 200 then 404 x2)
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
 # ponytail: epub.ftak.net was added in resend on 11-05 (dns on vercel); until resend verifies it, a send
 # from it is refused, so fall back to opencorp.live (verified). no code change needed once it verifies
@@ -2470,7 +2470,9 @@ def _job_sweep():
     now = time.time()
     try:
         for f in JOB_DIR.iterdir():
-            if now - f.stat().st_mtime > JOB_TTL:
+            if f.suffix == ".got" and now - f.stat().st_mtime > GOT_GRACE:
+                _job_drop(f.stem)
+            elif now - f.stat().st_mtime > JOB_TTL:
                 f.unlink(missing_ok=True)
     except OSError:
         pass
@@ -2479,7 +2481,7 @@ def _job_sweep():
 def _mail_link(jid: str, to: str, name: str):
     """Mail the download link if the tab was closed: the epub is still here MAIL_AFTER seconds later."""
     time.sleep(MAIL_AFTER)
-    if not (JOB_DIR / f"{jid}.epub").exists():
+    if not (JOB_DIR / f"{jid}.epub").exists() or (JOB_DIR / f"{jid}.got").exists():
         return  # ponytail: downloaded in the tab already, no mail
     body = (f"Your EPUB of {name} is ready:\n\nhttps://epub.ftak.net/job/{jid}/epub\n\n"
             "The link works once and for about an hour after the conversion finished, then the file is deleted. "
@@ -2539,11 +2541,19 @@ def job_file(jid: str):
     if not p.exists():
         raise HTTPException(404, "no such job")
 
-    def gone():
-        # ponytail: the epub lives only until it is downloaded, so "deleted after the download" stays true
-        p.unlink(missing_ok=True)
-        _job_path(jid, "json").unlink(missing_ok=True)
-    return FileResponse(p, media_type="application/epub+zip", filename="book.epub", background=BackgroundTask(gone))
+    got = _job_path(jid, "got")
+    if not got.exists():
+        # ponytail: first download starts a 10 min clock, then the epub is gone ("deleted after the download")
+        got.touch()
+        t = threading.Timer(GOT_GRACE, _job_drop, args=(jid,))
+        t.daemon = True
+        t.start()
+    return FileResponse(p, media_type="application/epub+zip", filename="book.epub")
+
+
+def _job_drop(jid: str):
+    for ext in ("epub", "json", "got"):
+        (JOB_DIR / f"{jid}.{ext}").unlink(missing_ok=True)
 
 
 @app.exception_handler(HTTPException)
