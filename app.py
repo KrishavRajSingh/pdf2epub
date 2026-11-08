@@ -829,9 +829,10 @@ __ALT__
     <button class="ghost-btn" id="sample">Try it with a sample PDF</button>
     <div id="msg"></div>
     <div id="next" hidden>
-      <p class="next-q">Two things I might build next. Want one?</p>
+      <p class="next-q">Three things I might build next. Want one?</p>
       <button class="ghost-btn" data-want="translate">Translate this book into another language</button>
       <button class="ghost-btn" data-want="desktop">Mac app: converts offline, no page limit</button>
+      <button class="ghost-btn" data-want="audio">Listen to this book: audiobook with a voice per character</button>
       <form id="wantf" hidden>
         <p class="next-q">Not built yet. Leave your email and you will hear first if it ships.</p>
         <div class="row"><input id="wante" type="email" required placeholder="Your email" maxlength="120"></div>
@@ -1015,7 +1016,7 @@ fetch('/stats').then(r=>r.json()).then(s=>{const el=document.getElementById('st'
 document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);
 // ponytail: which objection people open is the cheapest research we get
 document.querySelectorAll('.faq details').forEach((d,i)=>d.addEventListener('toggle',()=>{if(d.open)ev('faq',{why:'q'+(i+1)})}));
-// fake doors (11-07): translation and a Mac app are not built; clicks + emails decide if they get built
+// fake doors (11-07, audio 11-08): translation, a Mac app and audiobooks are not built; clicks + emails decide if they get built
 let WANT='';const nx=document.getElementById('next'),wf=document.getElementById('wantf');
 function showNext(){if(nx&&nx.hidden){nx.hidden=false;ev('want_view')}}
 nx&&nx.querySelectorAll('[data-want]').forEach(b=>b.onclick=()=>{
@@ -1613,7 +1614,7 @@ def privacy():
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "want_email"}  # ponytail: want_* = fake doors
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email"}  # ponytail: want_* = fake doors
 
 
 @app.post("/e")
@@ -1774,7 +1775,7 @@ def stats():
     fail_by_err: dict[str, int] = {}
     recent_fails: list[dict] = []
     starts = 0
-    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "want_email": 0}
+    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0}
     try:
         for line in LOG.read_text().splitlines():
             try:
