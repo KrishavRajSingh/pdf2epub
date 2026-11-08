@@ -177,6 +177,26 @@ def main():
     hv = "".join(zv.read(n).decode("utf-8", "replace") for n in zv.namelist() if n.endswith(".xhtml"))
     assert "page 149" in hv and "page 150" not in hv, "page preview is not the first 150 pages"
     assert "the first 150 of 600 pages" in hv, "page preview does not sell the rest"
+    # one upload (11-08): the preview answer says it was cut, so the page pitches $5 without re-sending the file
+    assert pv.headers.get("x-cap") == "pages:600", pv.headers
+    caps0 = client.get("/stats").json()["cap_rejects"]
+    client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")}, data={"preview": "1"})
+    assert client.get("/stats").json()["cap_rejects"] == caps0 + 1, "a preview must still count as a cap hit"
+    small = client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")}, data={"preview": "1"},
+                        headers={"x-forwarded-for": "203.0.113.77"})
+    assert small.status_code == 200 and "x-cap" not in small.headers, "an under-limit book must not be marked cut"
+    from starlette.responses import Response as SR
+    jid = pdf2epub._job_start(lambda: SR(b"PK", headers={"X-Cap": "pages:600"}), "", "b.pdf")
+    for _ in range(50):
+        js = client.get(f"/job/{jid}").json()
+        if js["state"] != "queued" and js["state"] != "running":
+            break
+        time.sleep(0.1)
+    assert js.get("cap") == "pages:600", js
+    home = client.get("/").text
+    assert "fd.append('preview','1')" in home and "window.lastCap" in home and "X-Cap" in home
+    assert pdf2epub.MAX_MB >= 500, "a 490MB upload was refused on 11-05; keep the free size cap at 1GB"
+    assert "1GB" in home and "200MB" not in home
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"

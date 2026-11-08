@@ -65,13 +65,13 @@ the free tier is the pitch rather than a trial.
 
 ## Capabilities and Constraints
 
-- Free tier: 200MB / 500 pages per text PDF. Scans: OCR free for the first 20 pages
+- Free tier: 1GB / 150 pages per text PDF (first 150 pages of a longer book, free). Scans: OCR free for the first 20 pages
   (`FREE_OCR_PAGES`); a longer scan gets a 402 with the $5 offer and a free 20-page preview.
 - $5 one-book: paid up front, then the buyer lands on `/onebook` with an upload box and the book
   converts on the spot (up to 2,000 pages, OCR up to 600 pages in one request). One book per
   checkout, keyed by the file's hash, so re-running the same file is free. Needs `POLAR_TOKEN` on
   the host; without it every checkout reads as unconfirmed and falls back to email.
-- $10/month Shelf: a mailed URL key (`?k=KEY`) lifts the per-file ceiling to 2,000 pages / 500MB.
+- $10/month Shelf: a mailed URL key (`?k=KEY`) lifts the per-file ceiling to 2,000 pages / 1GB.
   The Shelf page also promises batch conversion and Kindle delivery; those are not implemented.
 - No accounts, no database. Keys are lines in a file on the volume; the checkout id prevents a
   second key being minted on refresh.

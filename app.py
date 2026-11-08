@@ -56,7 +56,9 @@ except Exception:  # ponytail: same rule, the english page must survive a missin
 import time
 
 app = FastAPI()
-MAX_MB = 200  # ponytail: launched at 50, scan crowd files run bigger; raise when paid
+MAX_MB = 1000  # ponytail: launched at 50, then 200; 11-08 a 490MB upload was refused 3x, a 1GB test peaks ~5GB of the 8GB box
+BIG_MB = 200  # ponytail: files over this convert one at a time across both workers, so two 1GB books cannot OOM the box together
+BIG_LOCK = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs")).parent / "pdf2epub-big.lock"
 MAX_PAGES = 150  # ponytail: 500 let almost every book through, so the $5 offer met ~1 reader a day (11-03)
 OCR_MAX_PAGES = 200
 # ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
@@ -98,7 +100,7 @@ PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified i
 USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
 FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
 SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of most books
-SHELF_MAX_MB = 500
+SHELF_MAX_MB = 1000
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
 
@@ -275,7 +277,7 @@ def _mail_key(checkout_id: str, key: str, days: int = 0):
         return
     plan = f"Batch pass ({days} days, it does not renew)" if days else "Shelf"
     body = (f"Thanks for buying pdf2epub {plan}. Your key:\n\n{key}\n\n"
-            f"Open this link to convert with the paid limits (books up to 2,000 pages, 500MB, scans included):\n\n"
+            f"Open this link to convert with the paid limits (books up to 2,000 pages, 1GB, scans included):\n\n"
             f"https://epub.ftak.net/?k={key}\n\n"
             "No account, no password. The browser you open it in remembers the key. "
             "Keep this email: on a new device, open the link again.\n\n"
@@ -636,7 +638,7 @@ async function runJob(url,fd,hdr,tick){
   fd.set('f',new File([b],f0.name||'book.pdf',{type:'application/pdf'}))}
  let r;try{r=await fetch(url,{method:'POST',body:fd,headers:Object.assign({'X-Job':'1'},hdr||{})})}
  catch(e){const er=new Error('The upload did not reach the server. Check your connection and try again. If you opened this inside the Reddit or Instagram app, open epub.ftak.net in Chrome or Safari instead.');er.status='net';throw er}
- if(r.status!==202){if(!r.ok)throw fail(r.status,(await r.text()).slice(0,160));return URL.createObjectURL(await r.blob())}
+ if(r.status!==202){if(!r.ok)throw fail(r.status,(await r.text()).slice(0,160));window.lastCap=r.headers.get('X-Cap')||'';return URL.createObjectURL(await r.blob())}
  const j=(await r.json()).job;
  try{localStorage.setItem('job',JSON.stringify({j:j,t:Date.now(),name:(fd.get('f')&&fd.get('f').name)||'book.pdf'}))}catch(e){}
  return pollJob(j,tick)}
@@ -653,7 +655,7 @@ async function pollJob(j,tick){
   let s;try{const q=await fetch('/job/'+j,{cache:'no-store'});if(q.status===404){end();throw fail(502,'job lost')}s=await q.json()}
   catch(e){if(e.status)throw e;continue}
   if(tick)tick(secs);
-  if(s.state==='done'){end();return '/job/'+j+'/epub'}
+  if(s.state==='done'){end();window.lastCap=s.cap||'';return '/job/'+j+'/epub'}
   if(s.state==='error'){end();throw fail(s.status,JSON.stringify({detail:s.detail}).slice(0,200))}
  }}
 function clock(n){return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
@@ -807,7 +809,7 @@ __ALT__
 <h1>Your PDF, as a <span class="em">real book</span>.</h1>
 <p class="lede">Real chapters, real paragraphs. Free, no signup, nothing kept.</p>
 <div class="facts mono">
-  <span class="fact"><b>200MB</b> / 150 pages</span>
+  <span class="fact"><b>1GB</b> / 150 pages</span>
   <span class="fact">Scans: OCR free for <b>__FREEOCR__ pages</b></span>
   <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
   <span class="fact" id="st" hidden></span>
@@ -870,7 +872,7 @@ __ALT__
 <h2>Prices</h2>
 <div class="prices">
   <div class="price"><h3>Free</h3><div class="amt">$0</div>
-    <p>One PDF at a time, up to 150 pages and 200MB. Scans: the first __FREEOCR__ pages.</p>
+    <p>One PDF at a time, up to 150 pages and 1GB. Scans: the first __FREEOCR__ pages.</p>
     <span class="here">It is the converter above</span></div>
   <div class="price"><h3>One book</h3><div class="amt">$5 once</div>
     <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
@@ -969,7 +971,8 @@ async function convert(preview){
  fd.append('title',document.getElementById('title').value);
  fd.append('author',document.getElementById('author').value);
  fd.append('email',document.getElementById('email').value);
- if(preview)fd.append('preview','1');
+ // ponytail: always ask for the free part, so an over-limit book uploads once (not refused, then re-sent)
+ fd.append('preview','1');window.lastCap='';
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
    +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up'
@@ -977,6 +980,9 @@ async function convert(preview){
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');showNext();
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'
+  const lc=(window.lastCap||'').split(':');
+  if(!preview&&(lc[0]==='pages'||lc[0]==='ocr')){window.capKind=lc[0];window.capPages=+lc[1]||0;window.capName=(f&&f.name)||'book';
+   PN=lc[0]==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:lc[0]});preview=true}
   if(preview&&window.capKind){window.previewDone=true;msg.className='';
    msg.innerHTML=window.capKind==='ocr'?pitchOcr(window.capPages):pitchPages(window.capPages);ev('pitch',{why:window.capKind+'-seen'})}}
  catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
@@ -1338,7 +1344,7 @@ def thanks(request: Request):
     if key:
         key_html = (f'<div class="card"><p><b>Your {"Batch pass" if batch else "Shelf"} key</b></p>'
             f'<p>Put this on the end of the converter link and your uploads get the paid limits '
-            f'(2,000 pages per file, 500MB){f" for the next {BATCH_DAYS} days. It does not renew" if batch else ""}. '
+            f'(2,000 pages per file, 1GB){f" for the next {BATCH_DAYS} days. It does not renew" if batch else ""}. '
             f'This browser remembers it too:</p>'
             f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
             f'<p>No account, no password. I also emailed it to the address you paid with, so it is '
@@ -1373,7 +1379,7 @@ and we will rerun it on the big-file converter.</p>
 <p>Nothing is stored. The PDF is never saved and the EPUB is deleted after the download, same as the
 <a href="/">free converter</a>.</p>
 </div>
-<p>Questions about the plan, or a file that is over 500MB? Same address.</p>
+<p>Questions about the plan, or a file that is over 1GB? Same address.</p>
 </div><script>{TRACK_JS}
 ev('return',{{cid:{json.dumps(cid)}}});
 if({json.dumps(key)})try{{localStorage.setItem('k',{json.dumps(key)})}}catch(e){{}}</script></body></html>""")
@@ -1513,7 +1519,7 @@ limits. No account, no password, nothing to set up.</p>
 <p>Bigger than 2,000 pages? Still $5.
 <a href="mailto:{SHELF_MAIL}?subject=Over%202000%20pages">Email us the page count</a>
 and we raise the limit for your book.</p>
-<p>The <a href="/">free converter</a> handles one PDF up to 200MB and 150 pages, and scans up to
+<p>The <a href="/">free converter</a> handles one PDF up to 1GB and 150 pages, and scans up to
 {FREE_OCR_PAGES} pages, with no signup.</p>
 </div><script>{TRACK_JS}
 document.querySelectorAll('[data-go]').forEach(a=>a.href+='&v='+V);</script></body></html>""")
@@ -1542,7 +1548,7 @@ def llms_txt():
 
 ## Pricing
 
-- Free: one PDF at a time, up to 150 pages and 200MB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
+- Free: one PDF at a time, up to 150 pages and 1GB. Scanned books: the first {FREE_OCR_PAGES} pages get OCR free.
 - One book: $5 once, up to 2,000 pages, scans included: https://epub.ftak.net/shelf
 - Shelf: $10 a month, no monthly limit, any number of books up to 2,000 pages each, scans included: https://epub.ftak.net/shelf
 - Batch pass: $10 once, the Shelf limits for 30 days, no renewal: https://epub.ftak.net/shelf
@@ -2372,7 +2378,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         total = len(doc)
         # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
         cut_pages = preview == "1" and not paid and total > max_pages
+        cap = ""  # ponytail: "pages:380" / "ocr:246" tells the page to pitch $5 after the free part, one upload instead of two
         if cut_pages:
+            log(False, total, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)  # same cap stat as before
+            cap = f"pages:{total}"
             doc.select(range(max_pages))
         if len(doc) > max_pages:
             n0 = len(doc)
@@ -2386,8 +2395,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             if book:
                 onebook_use(cid, digest)
                 event("paid_convert", request, checkout_id=cid, pages=pages)
-            return Response(data, media_type="application/epub+zip",
-                headers={"Content-Disposition": "attachment; filename=book.epub"})
+            hdr = {"Content-Disposition": "attachment; filename=book.epub"}
+            if cap:
+                hdr["X-Cap"] = cap
+            return Response(data, media_type="application/epub+zip", headers=hdr)
 
         blocks = _text_blocks(doc)
         npages = len(doc)
@@ -2407,6 +2418,9 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
                                     f"{FREE_OCR_PAGES} pages, the whole book is $5")
             if cut:
+                cap = f"ocr:{total}"
+                if not cut_pages:
+                    log(False, total, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
                 doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
             if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
                 pages = ocr_doc(doc, layout=True) or []
@@ -2446,6 +2460,11 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         # ponytail: a crash used to leave only a traceback on stdout, so /stats never saw it.
         # log the exception type and where it broke; the file itself is never kept
         try:
+            if kb_in > BIG_MB * 1024:
+                import fcntl
+                with open(BIG_LOCK, "w") as lk:
+                    fcntl.flock(lk, fcntl.LOCK_EX)  # released when the file closes
+                    return work()
             return work()
         except HTTPException:
             raise
@@ -2499,7 +2518,7 @@ def _job_run(jid: str, work, email: str = "", name: str = "book"):
     try:
         resp = work()
         (JOB_DIR / f"{jid}.epub").write_bytes(resp.body)
-        _job_write(jid, state="done")
+        _job_write(jid, state="done", cap=resp.headers.get("x-cap", ""))
         to = (email or "").strip()
         if RESEND_KEY and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}", to):
             threading.Thread(target=_mail_link, args=(jid, to, name), daemon=True).start()
