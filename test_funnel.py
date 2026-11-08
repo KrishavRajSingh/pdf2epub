@@ -406,6 +406,20 @@ def main():
     assert client.get(f"/job/{jid}/epub").status_code == 404, "epub must be gone 10 min after the download"
     assert not got.exists()
 
+    # 11-08: big paid scans run as one long job, never refused; a long-running job survives the 1h sweep
+    assert pdf2epub.PAID_OCR_MAX_PAGES >= pdf2epub.SHELF_MAX_PAGES, "paid scans up to the paid page cap must OCR"
+    run = "longrun" + "y" * 20
+    pdf2epub._job_write(run, state="running")
+    old = time.time() - pdf2epub.JOB_TTL - 60
+    os.utime(pdf2epub.JOB_DIR / f"{run}.json", (old, old))
+    pdf2epub._job_sweep()
+    assert client.get(f"/job/{run}").json()["state"] == "running", "sweep killed a running long job"
+    # 11-08: every failure tells the reader to mail the PDF in
+    for path in ("/", "/pt/", "/es/", "/scan", "/shelf"):
+        page = client.get(path).text
+        assert "function failHtml" in page and pdf2epub.SHELF_MAIL in page, path
+    assert "msg.textContent=e.message" not in Path(pdf2epub.__file__).read_text(), "a raw error with no mail-us line"
+
     print("ok: paragraphs joined, header+page number stripped, 2 chapters, email captured, sample.pdf serves, paid key lifts the cap, fulfilment email ok")
 
 

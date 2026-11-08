@@ -64,12 +64,13 @@ OCR_MAX_PAGES = 200
 # ponytail: OCR is the expensive work and the real pain, so that is where the wall sits. text PDFs
 # stay free to 150 pages; a scan is free to 20 pages, then $5 unlocks the whole book right away
 FREE_OCR_PAGES = 20
-PAID_OCR_MAX_PAGES = 600  # ponytail: OCR runs as a background job now (the page polls), so railway's
+PAID_OCR_MAX_PAGES = 2000  # ponytail: 11-08 raised from 600 (user: run big paid scans as one long job, never refuse). ponytail: OCR runs as a background job now (the page polls), so railway's
 # 5-minute idle cut no longer applies. 11-05: a 302-page scan in the request got a 502 and was thrown away
 OCR_THREADS = 4  # ponytail: tesseract is a subprocess, so threads run it in parallel; hobby plan has 8 vCPU
 FIG_MAX_PX = 2000  # ponytail: long side cap; 3x renders of a full page are ~1850x2400
 JOB_DIR = Path(os.environ.get("JOB_DIR", "/tmp/pdf2epub-jobs"))  # ponytail: /tmp is shared by both uvicorn workers
 JOB_TTL = 3600  # an unfetched epub is deleted after an hour
+JOB_MAX_RUN = 6 * 3600  # ponytail: the longest a job may run (2,000-page OCR); the page polls this long
 GOT_GRACE = 600  # ponytail: a re-click or a phone download manager re-fetch within 10 min still gets the file (11-08: 200 then 404 x2)
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
 # ponytail: epub.ftak.net was added in resend on 11-05 (dns on vercel); until resend verifies it, a send
@@ -645,23 +646,27 @@ async function runJob(url,fd,hdr,tick){
 // ponytail: the job id sits in localStorage, so closing the tab and opening the site again within the
 // hour picks the book back up. no email provider needed
 function pendingJob(){try{const p=JSON.parse(localStorage.getItem('job')||'null');
- if(p&&Date.now()-p.t<3500000)return p;localStorage.removeItem('job')}catch(e){}return null}
+ if(p&&Date.now()-p.t<21600000)return p;localStorage.removeItem('job')}catch(e){}return null}
 async function pollJob(j,tick){
  const fail=(st,t)=>{const er=new Error(st+': '+t);er.status=st;return er},t0=Date.now();
  const end=()=>{try{localStorage.removeItem('job')}catch(e){}};
  for(;;){
   await new Promise(z=>setTimeout(z,2500));
-  const secs=Math.round((Date.now()-t0)/1000);if(secs>2700)throw fail(504,'took too long');
+  const secs=Math.round((Date.now()-t0)/1000);if(secs>21600)throw fail(504,'took too long');
   let s;try{const q=await fetch('/job/'+j,{cache:'no-store'});if(q.status===404){end();throw fail(502,'job lost')}s=await q.json()}
   catch(e){if(e.status)throw e;continue}
   if(tick)tick(secs);
   if(s.state==='done'){end();window.lastCap=s.cap||'';return '/job/'+j+'/epub'}
   if(s.state==='error'){end();throw fail(s.status,JSON.stringify({detail:s.detail}).slice(0,200))}
  }}
+// ponytail: any failure ends with "email it to us", so a broken book becomes a fixed one (and a test case)
+function failHtml(e){const t=String(e&&e.message||e||'Something went wrong.'),x=t.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+ if(e&&e.status===429||/__SUPPORT__/.test(t))return x;
+ return x+'<br><br>Email the PDF to <a href="mailto:__SUPPORT__?subject='+encodeURIComponent('PDF that failed on epub.ftak.net')+'">__SUPPORT__</a> and we will get it converted and send you the EPUB, usually within a day. Files that fail show us what to fix next.'}
 function clock(n){return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
 function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:SRC},x||{})))}catch(e){}}
 ev('view',{path:location.pathname});
-"""
+""".replace("__SUPPORT__", SHELF_MAIL)
 
 PAGE_CSS = """
 :root{--bg:#faf7f0;--panel:#fffdf8;--well:#f4f0e7;--line:#e4ded2;--line2:#d3ccbe;
@@ -961,7 +966,7 @@ let PN='__FREEOCR__';
  try{const u=await pollJob(p.j,n=>{msg.textContent='Still converting '+p.name+' ('+clock(n)+')...'});
   const a=document.createElement('a');a.href=u;a.download=p.name.replace(/\.pdf$/i,'')+'.epub';a.click();ev('done',{why:'resume'});
   msg.className='ok';msg.textContent='Done. '+p.name.replace(/\.pdf$/i,'')+'.epub downloaded.'}
- catch(e){msg.className='err';msg.textContent=e.status===502?'That conversion is gone (over an hour old). Upload it again.':e.message}
+ catch(e){msg.className='err';if(e.status===502)msg.textContent='That conversion is gone (over an hour old). Upload it again.';else msg.innerHTML=failHtml(e)}
  go.disabled=false})();
 async function convert(preview){
  const f=fi.files[0];
@@ -986,7 +991,7 @@ async function convert(preview){
    PN=lc[0]==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:lc[0]});preview=true}
   if(preview&&window.capKind){window.previewDone=true;msg.className='';
    msg.innerHTML=window.capKind==='ocr'?pitchOcr(window.capPages):pitchPages(window.capPages);ev('pitch',{why:window.capKind+'-seen'})}}
- catch(e){msg.className='err';msg.textContent=e.message;ev('fail',{status:String(e.status||'net')});
+ catch(e){msg.className='err';msg.innerHTML=failHtml(e);ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   const cap=e.status===413&&!K?'pages':(e.status===402&&/scanned/.test(e.message)?'ocr':'');
   // over the limit on a full run: convert the free part straight away instead of asking first
@@ -994,8 +999,8 @@ async function convert(preview){
    PN=cap==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:cap});go.disabled=false;return convert(true)}
   if(!preview){window.capPages=n;window.capName=(f&&f.name)||'book'}
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
-  else if(e.status===502||e.status===503||e.status===504){msg.textContent='This file was too heavy for the '
-   +'instant converter. That is on our side, not your file. Email it to __MAIL__ and we will rerun it on the big-file converter today.'}
+  else if(e.status===502||e.status===503||e.status===504){msg.innerHTML='This file was too heavy for the instant converter. That is on our side, not your file.'
+   +'<br><br>Email the PDF to <a href="mailto:__MAIL__">__MAIL__</a> and we will get it converted and send you the EPUB, usually within a day.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
 go.onclick=()=>convert(false);
@@ -1009,7 +1014,7 @@ smp.onclick=async()=>{
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sample.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open sample.epub and check the chapter list.'}
- catch(e){msg.className='err';msg.textContent=e.message}
+ catch(e){msg.className='err';msg.innerHTML=failHtml(e)}
  smp.disabled=false;go.disabled=false};
 fetch('/stats').then(r=>r.json()).then(s=>{const el=document.getElementById('st');
  if(s.conversions_ok>=50){el.textContent=s.conversions_ok+' books converted';el.hidden=false}}).catch(()=>{});
@@ -1168,7 +1173,7 @@ go.onclick=async()=>{
   if(!r.ok){const t=await r.text();throw new Error(r.status+': '+t.slice(0,140))}
   const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='book.epub';a.click();
   msg.className='ok';msg.textContent='Done. Open the EPUB and check the chapter list.'}
- catch(e){msg.className='err';msg.textContent=e.message;
+ catch(e){msg.className='err';msg.innerHTML=failHtml(e);
   if(/^413/.test(e.message))msg.innerHTML=PITCH}
  go.disabled=false};
 </script></body></html>"""
@@ -1448,7 +1453,7 @@ if(go)go.onclick=async()=>{{
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();
   msg.className='ok';msg.textContent='Done. EPUB downloaded.';try{{localStorage.removeItem('onebook')}}catch(e){{}}}}
- catch(e){{msg.className='err';msg.textContent=e.message}}
+ catch(e){{msg.className='err';msg.innerHTML=failHtml(e)}}
  go.disabled=false}};
 </script></body></html>""")
 
@@ -2490,9 +2495,13 @@ def _job_sweep():
     now = time.time()
     try:
         for f in JOB_DIR.iterdir():
-            if f.suffix == ".got" and now - f.stat().st_mtime > GOT_GRACE:
+            age = now - f.stat().st_mtime
+            if f.suffix == ".got" and age > GOT_GRACE:
                 _job_drop(f.stem)
-            elif now - f.stat().st_mtime > JOB_TTL:
+            elif age > JOB_TTL:
+                # ponytail: a 2,000-page paid scan runs for well over an hour; its status file must outlive the TTL
+                if f.suffix == ".json" and age < JOB_MAX_RUN and '"running"' in f.read_text()[:200]:
+                    continue
                 f.unlink(missing_ok=True)
     except OSError:
         pass
