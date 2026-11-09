@@ -85,6 +85,16 @@ def main():
     assert 'rel="canonical" href="https://epub.ftak.net/"' in client.get("/").text, "english canonical missing"
     # indexnow: the engines fetch the key file to prove we own the host
     assert client.get(f"/{pdf2epub.INDEXNOW_KEY}.txt").text == pdf2epub.INDEXNOW_KEY, "indexnow key not served"
+    # 11-10: GSC "crawled - not indexed" on every guide. Scan guide = converter link first + FAQ JSON-LD,
+    # home links each guide directly, /stats is noindex.
+    g = client.get("/guides/scanned-pdf-to-epub")
+    assert g.status_code == 200 and '"@type": "FAQPage"' in g.text and 'href="/?s=seo-scan"' in g.text, "scan guide"
+    assert "<h1>Scanned PDF to EPUB</h1>" in g.text, "scan guide h1"
+    assert client.get("/guides/pdf-to-epub").status_code == 200, "plain guide (no faq) broke"
+    home = client.get("/").text
+    for slug in ("scanned-pdf-to-epub", "send-pdf-to-kindle", "pdf-to-epub-vs-calibre"):
+        assert f'href="/guides/{slug}"' in home, f"home lacks link to {slug}"
+    assert client.get("/stats").headers.get("x-robots-tag") == "noindex", "/stats indexable"
 
     # email capture + sample endpoint
     st = client.get("/stats").json()

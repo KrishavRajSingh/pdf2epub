@@ -901,6 +901,9 @@ __ALT__
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
   <a href="/shelf">Shelf: $10/mo, no monthly limit</a>
+  <a href="/guides/scanned-pdf-to-epub">Scanned PDF to EPUB</a>
+  <a href="/guides/send-pdf-to-kindle">PDF to Kindle, Kobo, Boox</a>
+  <a href="/guides/pdf-to-epub-vs-calibre">vs Calibre</a>
   <a href="/guides">Guides</a>
   <a href="/privacy">Privacy</a>
   <a href="/" hreflang="en" lang="en">English</a>
@@ -1233,8 +1236,9 @@ def guide(slug: str):
     g = GUIDES.get(slug)
     if not g:
         raise HTTPException(404, "no such guide")
-    title, desc, body = g
-    return guide_page(title, desc, body, "/guides/" + slug)
+    title, desc, body, *rest = g
+    return guide_page(title, desc, body, "/guides/" + slug, faq=rest[0] if rest else None,
+                      h1=rest[1] if len(rest) > 1 else None)
 
 
 # ponytail: IndexNow key is public by design, the file only proves we own the host
@@ -1265,14 +1269,20 @@ def sitemap():
                     media_type="application/xml")
 
 
-def guide_page(title: str, desc: str, body: str, canonical: str) -> HTMLResponse:
-    # ponytail: one template for every guide, no framework
+def guide_page(title: str, desc: str, body: str, canonical: str, faq=None, h1=None) -> HTMLResponse:
+    # ponytail: one template for every guide, no framework. faq = [(q, a)] -> visible list + FAQPage JSON-LD
+    faq_html = faq_ld = ""
+    if faq:
+        faq_html = "<h2>FAQ</h2>" + "".join(f"<p><b>{html.escape(q)}</b><br>{html.escape(a)}</p>" for q, a in faq)
+        faq_ld = '<script type="application/ld+json">' + json.dumps({"@context": "https://schema.org", "@type": "FAQPage",
+            "mainEntity": [{"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in faq]}) + "</script>"
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
 <title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(desc)}">
 <link rel="canonical" href="https://epub.ftak.net{canonical}">
+{faq_ld}
 <style>
 :root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--mut:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
@@ -1285,8 +1295,9 @@ a{{color:#553bc4}}.cta{{display:inline-block;background:var(--acc);color:#fff;bo
 .mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:19px;text-decoration:none;color:var(--txt);margin-bottom:26px}}.mark .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--acc);margin-right:9px}}
 </style></head><body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
-<h1>{html.escape(title)}</h1>
+<h1>{html.escape(h1 or title)}</h1>
 {body}
+{faq_html}
 <div class="box"><b>Convert a PDF to EPUB</b><br>Free, no signup, real chapters and a table of contents.
 <a class="cta" href="/">Open the converter</a></div>
 <div class="foot">Other guides: <a href="/guides">all guides</a> · <a href="/scan">scan a physical book</a></div>
@@ -1767,8 +1778,9 @@ that made it from the step before. The smallest red number is where you lose peo
 
 
 @app.get("/stats")
-def stats():
-    # ponytail: totals from log file, no DB/dashboard lib
+def stats(response: Response):
+    # ponytail: totals from log file, no DB/dashboard lib. noindex: GSC listed /stats as a crawled page (11-10)
+    response.headers["X-Robots-Tag"] = "noindex"
     ok = fail = pages = visits = ocr = scan_fail = emails = 0
     emailset = set()
     leads = cap_rejects = checkouts = 0
