@@ -14,18 +14,18 @@ LANGS = {
         "pairs": [
             ('<html lang="en">', '<html lang="pt-BR">'),
             ("<title>PDF to EPUB - real chapters, real paragraphs, free</title>",
-             "<title>PDF para EPUB grátis - converter PDF em EPUB com capítulos de verdade</title>"),
+             "<title>Converter PDF para EPUB grátis, com capítulos de verdade</title>"),
             ("Free PDF to EPUB with real chapters, a clickable table of contents, scanned books read with OCR. No signup, no watermark, nothing stored.",
-             "Converta PDF em EPUB grátis, com capítulos de verdade, sumário clicável e OCR para livros escaneados. Sem cadastro, sem marca d’água, nada fica guardado."),
+             "Converta PDF em EPUB grátis: parágrafos inteiros, capítulos e sumário clicável. Até 150 páginas sem cadastro. Abre no Kindle, Kobo e Apple Books."),
             ('content="PDF to EPUB - real chapters, real paragraphs, free"',
              'content="PDF para EPUB grátis - capítulos e parágrafos de verdade"'),
             ("No signup, no watermark, nothing stored. Scans read with OCR.",
-             "Sem cadastro, sem marca d’água, nada fica guardado. Escaneados lidos com OCR."),
+             "Grátis até 150 páginas, sem cadastro e sem marca d’água. Parágrafos inteiros e capítulos, não uma linha por linha impressa."),
             ("files not stored &middot; <b>no account</b>", "arquivos não guardados &middot; <b>sem conta</b>"),
             ('<h1>Your PDF, as a <span class="em">real book</span>.</h1>',
-             '<h1>Seu PDF, como um <span class="em">livro de verdade</span>.</h1>'),
+             '<h1>Converter PDF em EPUB <span class="em">grátis</span></h1>'),
             ("Real chapters, real paragraphs. Free, no signup, nothing kept.",
-             "Converter PDF para EPUB com capítulos e parágrafos de verdade. Grátis, sem cadastro, nada fica guardado."),
+             "Seu PDF, como um livro de verdade: parágrafos inteiros e capítulos no sumário, pronto para o Kindle, o Kobo ou o Apple Books. Até 150 páginas é grátis, sem cadastro e sem marca d’água."),
             ("/ 150 pages</span>", "/ 150 páginas</span>"),
             ("Scans: OCR free for <b>__FREEOCR__ pages</b>", "Escaneados: OCR grátis em <b>__FREEOCR__ páginas</b>"),
             ("<h2>Convert a PDF</h2>", "<h2>Converter PDF em EPUB</h2>"),
@@ -238,11 +238,19 @@ LANGS = {
 # FAQ answers per language: rendered as <details> and as FAQPage JSON-LD by app._page()
 FAQS = {
     "pt": [
-        ("Funciona no meu Kindle?",
-         "Sim. Mande o EPUB para o Kindle pelo Send to Kindle da Amazon (por e-mail, pelo app ou pela página web) e ele "
-         "aparece na sua biblioteca. Kobo, Apple Books e a maioria dos leitores de celular abrem direto."),
+        ("Como transformar PDF em EPUB para o Kindle?",
+         "Solte o PDF na caixa acima e baixe o EPUB. Depois mande o arquivo pelo Send to Kindle da Amazon (por e-mail, "
+         "pelo app ou pela página web). Ele aparece na sua biblioteca do Kindle com o sumário funcionando. Kobo, Apple Books "
+         "e a maioria dos leitores de celular abrem o EPUB direto."),
+        ("É grátis mesmo?",
+         "Sim, até 150 páginas por PDF, sem cadastro e sem marca d’água. Livros escaneados têm OCR grátis nas primeiras "
+         "__FREEOCR__ páginas. Livro maior que isso custa US$5, uma vez, e vale para até 2.000 páginas."),
+        ("Qual a diferença para os outros conversores grátis?",
+         "A maioria copia o PDF linha por linha, então cada linha impressa vira uma linha solta no leitor e o texto fica "
+         "picado. Aqui as linhas voltam a ser parágrafos, os títulos viram capítulos e o cabeçalho e o número de página saem "
+         "do texto. Teste com o PDF de exemplo e compare."),
         ("Meu arquivo fica guardado?",
-         "Não. O PDF nunca é salvo, e o EPUB pronto é apagado assim que você baixa (ou depois de uma hora, se não baixar). Não há conta nem biblioteca do nosso lado."),
+         "Não. O PDF nunca é salvo, e o EPUB pronto é apagado dez minutos depois que você baixa (ou depois de uma hora, se não baixar). Não há conta nem biblioteca do nosso lado."),
         ("Meu PDF é um livro escaneado. Funciona?",
          "Sim. As páginas escaneadas passam por OCR e depois são divididas em capítulos e parágrafos como qualquer PDF. "
          "As primeiras __FREEOCR__ páginas são grátis, e o livro inteiro custa US$5, uma vez."),
