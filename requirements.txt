@@ -3,3 +3,4 @@ uvicorn
 pymupdf
 ebooklib
 python-multipart
+pillow

@@ -80,6 +80,7 @@ MAIL_FROMS = [x for x in [os.environ.get("MAIL_FROM", ""), "pdf2epub <books@epub
                           "pdf2epub <books@opencorp.live>"] if x]
 MAIL_AFTER = 90  # ponytail: mail the link only if the epub is still unfetched this long after it is done
 _JOB_POOL = ThreadPoolExecutor(max_workers=2)  # per uvicorn worker, so 4 books at once on the box
+OCR_MAX_PX = 3400  # long side; A4 at 200dpi is 2339
 OCR_DPI = 200  # ponytail: 300 was 2x the cpu for no readable gain on print; trial credit is scarce
 SCAN_FIG_DPI = 150  # ponytail: full-page scan at 200dpi is 4k pixels; 150 keeps maps readable and epub smaller
 SCAN_MAX_PAGES = 60  # ponytail: 60 phone photos per batch keeps OCR under a couple of minutes  # ponytail: sync OCR ~2-5 req-min this size, queue (RQ) when bigger scans show up
@@ -445,7 +446,7 @@ def calibre_convert(raw: bytes) -> bytes | None:
 def _ocr_page(page):
     """Render one page and return (text, ink coverage) from Tesseract's TSV output."""
     try:
-        pix = page.get_pixmap(dpi=OCR_DPI)
+        pix = page.get_pixmap(dpi=_ocr_dpi(page))
     except Exception:
         return "", 0.0
     return _tess(pix.tobytes("png"), pix.width, pix.height)
@@ -514,7 +515,7 @@ def ocr_lang(doc) -> tuple[str, str]:
         if used >= 3:
             break
         try:
-            png = doc[i].get_pixmap(dpi=OCR_DPI).tobytes("png")
+            png = doc[i].get_pixmap(dpi=_ocr_dpi(doc[i])).tobytes("png")
         except Exception:
             continue
         runs = {m: _tess(png, 1, 1, m, conf=True) for m in models}
@@ -594,12 +595,39 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
         return text, cov, (sum(confs) / len(confs) if confs else 0.0), pics
     return text, cov
 
+def _blurred(png: bytes):
+    try:
+        from PIL import Image, ImageFilter
+        im = Image.open(BytesIO(png)).filter(ImageFilter.GaussianBlur(1.2))
+        out = BytesIO()
+        im.save(out, "PNG")
+        return out.getvalue()
+    except Exception:
+        return None
+
+
+def _ocr_dpi(page):
+    """OCR_DPI, lowered for pages printed huge: a 300dpi scan saved at 72dpi is a 33-inch page,
+    and 200dpi of that is a 6700px image where Tesseract finds a sixth of the words (11-11)."""
+    side = max(page.rect.width, page.rect.height) or 842
+    return max(36, min(OCR_DPI, int(OCR_MAX_PX * 72 / side)))
+
+
 def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     """_tess, and for an Indian-language book a second pass with English on pages where the
     first came out as native digits: a cover or blurb page printed in English read with the
     Telugu model alone gives "111౮1 & 4018010" (11-10). Only those pages pay for the second pass;
     tel+eng on every page garbled some Telugu words."""
     text, cov, c, pics = _tess(png, page_w, page_h, lang, conf=True)
+    if any((x1 - x0) * (y1 - y0) >= 0.4 for x0, y0, x1, y1 in pics):
+        # ponytail: paper texture and halftone on a tinted magazine page made Tesseract read three
+        # text columns as one picture (Vijayachitra 1986: 64 words of 600, 11-11); a light blur gives 501
+        soft = _blurred(png)
+        if soft:
+            t2, cov2, c2, pics2 = _tess(soft, page_w, page_h, lang, conf=True)
+            if len(t2.split()) > len(text.split()):
+                text, cov, c, pics = t2, cov2, c2, pics2
+                png = soft
     if "eng" not in lang and len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", text)) >= 3:
         # ponytail: only when English reads the page better. An old magazine typeface also makes
         # native-digit junk, and there lang+eng sprinkled "SHY", "OSH" through the Telugu (11-10)
@@ -654,7 +682,7 @@ def ocr_doc(doc, layout: bool = False, lang: str | None = None, pics: dict | Non
                 window.append(layer)
                 continue
             try:
-                pix = page.get_pixmap(dpi=OCR_DPI)
+                pix = page.get_pixmap(dpi=_ocr_dpi(page))
                 window.append(ex.submit(_tess_mixed, pix.tobytes("png"), pix.width, pix.height, lang))
             except Exception:
                 window.append(None)
@@ -832,6 +860,9 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
     heads = _running_heads(pages)
     head_words = _head_words(pages)
     stories = _story_numbers(pages)
+    letters = [c for c in "".join(pages[:: max(1, len(pages) // 40)]) if c.isalpha()]
+    # ponytail: in a Telugu magazine the CAPS lines are English ads ("MITSUBISHI PAPER MILLS LTD.", 11-11)
+    latin = not letters or sum(c.isascii() for c in letters) >= 0.5 * len(letters)
 
     def flush():
         if cur:
@@ -859,7 +890,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
                 continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
-            head = HEAD_WORD.match(text) or _caps_head(text) or (stories and NUMBERED.match(text))
+            head = HEAD_WORD.match(text) or (latin and _caps_head(text)) or (stories and NUMBERED.match(text))
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 flush()
                 cur.append(("h1", text))
@@ -2575,7 +2606,7 @@ def _broken_indic(doc, text: str) -> bool:
     if len(words) < 12:
         return False
     try:
-        ocr = _word_set(_tess(doc[i].get_pixmap(dpi=OCR_DPI).tobytes("png"), 1, 1, tess)[0])
+        ocr = _word_set(_tess(doc[i].get_pixmap(dpi=_ocr_dpi(doc[i])).tobytes("png"), 1, 1, tess)[0])
     except Exception:
         return False
     return len(words & ocr) < 0.6 * len(words)

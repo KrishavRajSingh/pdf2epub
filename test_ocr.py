@@ -160,9 +160,40 @@ def library_sample_rules():
     print("ok — library sample paragraph rules")
 
 
+def magazine_page_rules():
+    """11-11: English ad lines in a Telugu magazine are not chapters; textured pages retry blurred;
+    a 33-inch page (300dpi scan saved at 72dpi) is not rendered at 6700px."""
+    import app
+    tel = "దర్శకుడు కుటుంబంలోని తల్లి వంటి వాడైతే, నిర్మాత తండ్రి వంటి వాడు. " * 8
+    rows = [r for ch in ocr_chapters([tel + "\n\nMITSUBISHI PAPER MILLS LTD.\n\n" + tel] * 3) for r in ch]
+    assert not any(k == "h1" for k, _ in rows), "English caps ad became a chapter in a Telugu book"
+    eng = "The quick brown fox jumps over the lazy dog again and again. " * 8
+    rows = [r for ch in ocr_chapters([eng + "\n\nTHE LONG WINTER\n\n" + eng] * 3) for r in ch]
+    assert any(k == "h1" for k, _ in rows), "caps heading lost in an English book"
+    big = pymupdf.open(); big.new_page(width=2406, height=2902)
+    assert app._ocr_dpi(big[0]) * 2902 / 72 <= app.OCR_MAX_PX + 72
+    a4 = pymupdf.open(); a4.new_page(width=595, height=842)
+    assert app._ocr_dpi(a4[0]) == app.OCR_DPI
+    calls, real = [], app._tess
+    def fake(png, w, h, lang="eng", conf=False):
+        calls.append(png)
+        if len(calls) == 1:
+            return ("బం", 0.1, 50.0, [(0.05, 0.0, 0.96, 0.96)])
+        return ("కూచోడం కాదు దర్శకుడు " * 50, 0.5, 70.0, [])
+    app._tess = fake
+    try:
+        pm = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 40), 0)
+        text, cov, pics = app._tess_mixed(pm.tobytes("png"), 40, 40, "tel")
+    finally:
+        app._tess = real
+    assert len(calls) == 2 and "దర్శకుడు" in text and pics == [], "page read as one picture was not retried"
+    print("ok — magazine page rules")
+
+
 if __name__ == "__main__":
     main()
     heads_with_misread_numbers()
     clean_layer_page_kept()
     mixed_page_second_pass()
     library_sample_rules()
+    magazine_page_rules()
