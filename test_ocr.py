@@ -66,5 +66,38 @@ def main():
     print("ok — headings:", heads, "figures:", len(imgs))
 
 
+def heads_with_misread_numbers():
+    """11-10 Telugu novel: "మాయ 77" headers whose page number OCR misread as letters stayed in."""
+    from app import ocr_chapters
+    body = "ఒక చిన్న గ్రామంలో ఒక రైతు ఉండేవాడు. అతను ప్రతి రోజు పొలానికి వెళ్ళేవాడు."
+    nums = ["7", "డే", "ర్\u200c1", "9", "క్\u200c", "11", "డ9", "13"]
+    pages = [f"మాయ {n}\n\n{body} {i}" for i, n in enumerate(nums)]
+    text = " ".join(t for ch in ocr_chapters(pages) for k, t in ch)
+    assert "మాయ" not in text, text[:200]
+    assert text.count("గ్రామంలో") == len(nums), "body text was dropped with the headers"
+    # a short line that only starts some pages is dialogue, not a header
+    talk = [f"“అంటే?” అన్నాడు\n\n{body}" if i % 4 == 0 else body for i in range(8)]
+    assert "అంటే" in " ".join(t for ch in ocr_chapters(talk) for k, t in ch), "dialogue dropped as a header"
+    print("ok — misread running heads dropped")
+
+
+def clean_layer_page_kept():
+    """A real-text page (English copyright page) in an OCR'd book keeps its own text."""
+    from app import _clean_layer
+    d = pymupdf.open()
+    d.new_page().insert_textbox(pymupdf.Rect(72, 72, 520, 400),
+        "SURYADEVARA RAM MOHANA RAO\nPublished by Test Press, Hyderabad 500 096\nFirst edition 2019", fontsize=12)
+    got = _clean_layer(d[0])
+    assert got and "Test Press" in got[0], got
+    img = pymupdf.open()  # a scan page with a stamp keeps going to OCR
+    pg = img.new_page()
+    pg.insert_image(pg.rect, stream=d[0].get_pixmap(dpi=72).tobytes("png"))
+    pg.insert_text((72, 820), "Downloaded from somelibrary.org on 2026-11-10 by a reader", fontsize=7)
+    assert _clean_layer(pg) is None, "a scanned page with a stamp skipped OCR"
+    print("ok — clean text pages keep their layer")
+
+
 if __name__ == "__main__":
     main()
+    heads_with_misread_numbers()
+    clean_layer_page_kept()

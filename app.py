@@ -560,6 +560,29 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
     return "\n\n".join("\n".join(p) for p in paras.values()), cov
 
+def _done(w):
+    return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0))
+
+
+def _clean_layer(page):
+    """(text, 1.0) when a page in an OCR'd book is real text, not a picture, with a clean
+    layer: a Telugu novel in an old font (11-10) still has its copyright page in plain English,
+    which the Telugu model turned into "111౮1 & 4018010". None means OCR the page."""
+    try:
+        text = page.get_text().strip()
+        if len(text) < 40 or _junk_share(text) >= 0.1:
+            return None
+        area = abs(page.rect) or 1
+        if sum(abs(pymupdf.Rect(im["bbox"]) & page.rect) for im in page.get_image_info()) / area > 0.5:
+            return None
+        if any(LEGACY_FONTS.search(f[3]) for f in page.get_fonts()):
+            return None
+        blocks = [b[4].strip() for b in page.get_text("blocks") if b[6] == 0 and b[4].strip()]
+        return "\n\n".join(blocks), 1.0
+    except Exception:
+        return None
+
+
 def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
@@ -570,15 +593,19 @@ def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
     out, window = [], []
     with ThreadPoolExecutor(OCR_THREADS) as ex:
         for page in doc:
+            layer = _clean_layer(page)
+            if layer:
+                window.append(layer)
+                continue
             try:
                 pix = page.get_pixmap(dpi=OCR_DPI)
                 window.append(ex.submit(_tess, pix.tobytes("png"), pix.width, pix.height, lang))
             except Exception:
                 window.append(None)
             if len(window) >= OCR_THREADS * 2:
-                out.extend(w.result() if w else ("", 0.0) for w in window)
+                out.extend(_done(w) for w in window)
                 window = []
-        out.extend(w.result() if w else ("", 0.0) for w in window)
+        out.extend(_done(w) for w in window)
     return out if layout else [t for t, _ in out]
 
 def _fig_bytes(pm) -> bytes:
@@ -646,9 +673,18 @@ def _running_heads(pages: list[str]) -> set:
     for txt in pages:
         paras = _page_paras(txt)
         for para in {paras[0], paras[-1]} if paras else ():
-            if len(para) <= 50 and not HEAD_WORD.match(para) and len(k := _head_key(para)) >= 3:
-                seen[k] += 1
+            if len(para) <= 50 and not HEAD_WORD.match(para):
+                for k in {_head_key(para), _head_first(para)}:
+                    if len(k) >= 3:
+                        seen[k] += 1
     return {k for k, c in seen.items() if c >= max(3, len(pages) // 10)}
+
+
+def _head_first(para: str) -> str:
+    """Title word of a short "title + page number" line: OCR misreads the number as letters
+    ("మాయ డే", "మాయ ర్‌1"), so the whole line no longer repeats but its first word does."""
+    toks = para.split()
+    return "#" + _head_key(toks[0]) if 2 <= len(toks) <= 3 and len(para) <= 25 and len(toks[-1]) <= 4 else ""
 
 
 def _head_key(text: str) -> str:
@@ -685,7 +721,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         paras = _page_paras(txt)
         for j, para in enumerate(paras):
-            if (j in (0, len(paras) - 1) and len(para) <= 50 and _head_key(para) in heads) or _ornament(para):
+            if (j in (0, len(paras) - 1) and len(para) <= 50
+                    and (_head_key(para) in heads or _head_first(para) in heads)) or _ornament(para):
                 continue
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
             head = HEAD_WORD.match(text) or (
