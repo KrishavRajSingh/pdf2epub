@@ -560,6 +560,17 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
     return "\n\n".join("\n".join(p) for p in paras.values()), cov
 
+def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
+    """_tess, and for an Indian-language book a second pass with English on pages where the
+    first came out as native digits: a cover or blurb page printed in English read with the
+    Telugu model alone gives "111౮1 & 4018010" (11-10). Only those pages pay for the second pass;
+    tel+eng on every page garbled some Telugu words."""
+    text, cov = _tess(png, page_w, page_h, lang)
+    if "eng" not in lang and len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", text)) >= 3:
+        return _tess(png, page_w, page_h, lang + "+eng")
+    return text, cov
+
+
 def _done(w):
     return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0))
 
@@ -599,7 +610,7 @@ def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
                 continue
             try:
                 pix = page.get_pixmap(dpi=OCR_DPI)
-                window.append(ex.submit(_tess, pix.tobytes("png"), pix.width, pix.height, lang))
+                window.append(ex.submit(_tess_mixed, pix.tobytes("png"), pix.width, pix.height, lang))
             except Exception:
                 window.append(None)
             if len(window) >= OCR_THREADS * 2:

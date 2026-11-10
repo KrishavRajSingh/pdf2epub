@@ -97,7 +97,25 @@ def clean_layer_page_kept():
     print("ok — clean text pages keep their layer")
 
 
+def mixed_page_second_pass():
+    """A page printed half in English inside a Telugu book (cover, web links) read with the
+    Telugu model alone came out as "111౮1 & 4018010" junk (11-10)."""
+    css = ('@font-face {font-family: tel; src: url("Telugu MN.ttc");} body {font-family: tel; font-size: 15px;}')
+    src = pymupdf.open().new_page()
+    src.insert_text((72, 90), "For My eBooks : www.example.com", fontsize=16)
+    src.insert_text((72, 120), "For My Web Magazine Serials : www.gotelugu.com", fontsize=16)
+    src.insert_htmlbox(pymupdf.Rect(72, 160, 520, 400), "<p>ఒక చిన్న గ్రామంలో ఒక రైతు ఉండేవాడు.</p>",
+                       css=css, archive=pymupdf.Archive("/System/Library/Fonts/Supplemental"))
+    d = pymupdf.open()
+    pg = d.new_page()
+    pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+    text = ocr_doc(d, lang="tel")[0]
+    assert "www.example.com" in text and "గ్రామంలో" in text, text
+    print("ok — mixed English/Telugu page reads both")
+
+
 if __name__ == "__main__":
     main()
     heads_with_misread_numbers()
     clean_layer_page_kept()
+    mixed_page_second_pass()
