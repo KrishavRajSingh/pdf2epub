@@ -26,6 +26,14 @@
   "imgs": 0,
   "words": 1050
  },
+ "scan_quotes": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 864
+ },
  "scan_stamped": {
   "path": "ocr",
   "chapters": 1,

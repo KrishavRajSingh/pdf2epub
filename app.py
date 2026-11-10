@@ -540,7 +540,10 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
         return "", 0.0
     lines = {}
     ink = 0
-    for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t"):
+    # ponytail: QUOTE_NONE. A word starting with " opened a csv quoted field and swallowed the next
+    # rows, so "5 1 2 1 5 4 402 452 90 61 95.07" leaked into the book (Telugu novel, reddit 11-10)
+    for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t",
+                          quoting=csv.QUOTE_NONE):
         if len(row) < 12 or row[0] != "5" or not row[11].strip():
             continue
         try:

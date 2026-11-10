@@ -71,6 +71,12 @@ def make_scan(prose=PROSE * 14):
     return d
 
 
+def make_scan_quotes():
+    """Scan with dialogue: a word starting with a straight quote made the TSV parser swallow
+    the following rows, so OCR coordinates ("5 1 2 1 5 4 402 452 90 61 95.07") filled the book (11-10)."""
+    return make_scan(('He looked up. "Stop there, he said, and do not move. ' + PROSE) * 8)
+
+
 def make_scan_stamped():
     """Scan with a 'Downloaded from' footer: used to come out empty (11-05)."""
     d = make_scan()
@@ -248,6 +254,8 @@ CASES = {
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
+    "scan_quotes": (make_scan_quotes, {"path": "ocr", "has": ["Stop there", "clocks were striking"],
+                                       "hasnt": ["\t", " 1 2 1 "]}),
     "scan_stamped": (make_scan_stamped, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
     # low-ink page: kept as a picture and, since 11-06, its OCR text too
     "scan_short_page": (make_scan_short_page, {"path": "ocr", "has": ["end of the short last page"]}),
