@@ -70,8 +70,10 @@ def convert(raw: bytes, title: str) -> tuple[bytes, bool]:
         lang = pdf2epub.doc_lang(doc)
     else:
         tlang, lang = pdf2epub.ocr_lang(doc)
-        pages = pdf2epub.ocr_doc(doc, lang=tlang) or []
-        chapters = pdf2epub.ocr_chapters(pages, toc=pdf2epub.pdf_toc(doc))
+        pics = {}  # ponytail: same pictures as the site; these scripts used to drop every figure
+        layout = pdf2epub.ocr_doc(doc, layout=True, lang=tlang, pics=pics) or []
+        pages = [t for t, _ in layout]
+        chapters = pdf2epub.ocr_chapters(pages, pdf2epub._scan_figures(doc, layout, pics), pdf2epub.pdf_toc(doc))
         was_ocr = True
     doc.close()
     if not chapters:

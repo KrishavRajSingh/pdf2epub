@@ -20,8 +20,10 @@ def convert(path: str, out: str | None = None, title: str = "", author: str = ""
     lang = "en"
     if not blocks:  # scanned or old-font text: OCR it
         tlang, lang = pdf2epub.ocr_lang(doc)
-        pages = pdf2epub.ocr_doc(doc, lang=tlang) or []
-        chapters = pdf2epub.ocr_chapters(pages, toc=pdf2epub.pdf_toc(doc))
+        pics = {}  # ponytail: same pictures as the site; these scripts used to drop every figure
+        layout = pdf2epub.ocr_doc(doc, layout=True, lang=tlang, pics=pics) or []
+        pages = [t for t, _ in layout]
+        chapters = pdf2epub.ocr_chapters(pages, pdf2epub._scan_figures(doc, layout, pics), pdf2epub.pdf_toc(doc))
         kind = "ocr"
     else:
         chapters = pdf2epub._structure(blocks, doc)

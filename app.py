@@ -496,21 +496,6 @@ def _tess_langs() -> set:
     return _TESS_LANGS
 
 
-def _sample_page(doc) -> int:
-    """A middle page with ink on it: the one most worth reading to pick the language."""
-    n = len(doc)
-    best, ink = n // 2, -1
-    for i in sorted({n // 3, n // 2, (2 * n) // 3}):
-        try:
-            pm = doc[i].get_pixmap(dpi=30, colorspace=pymupdf.csGRAY)
-            dark = sum(1 for b in pm.samples if b < 128)
-        except Exception:
-            continue
-        if dark > ink:
-            best, ink = i, dark
-    return best
-
-
 def ocr_lang(doc) -> tuple[str, str]:
     """(tesseract lang, epub lang) for this book: read one page with English and with each
     Indian-script model, keep the one Tesseract is most sure of.
@@ -520,18 +505,31 @@ def ocr_lang(doc) -> tuple[str, str]:
     Devanagari or nothing (11-10 library sample); mean word confidence was 90 for tel vs 27 for eng."""
     if not len(doc) or not shutil.which("tesseract"):
         return "eng", "en"
-    try:
-        pix = doc[_sample_page(doc)].get_pixmap(dpi=OCR_DPI)
-        png = pix.tobytes("png")
-    except Exception:
+    # ponytail: up to 3 pages that have words; one sample page in a magazine was a picture,
+    # both models scored 0 and the Telugu magazine was read as English (Cinema Rangam, 11-10)
+    n = len(doc)
+    score, eng_text, used = Counter(), "", 0
+    models = ["eng"] + [t for t, _ in OCR_SCRIPTS.values() if t in _tess_langs()]
+    for i in sorted({n // 2, n // 3, (2 * n) // 3, n // 4, (3 * n) // 4, n // 5}, key=lambda k: abs(k - n // 2)):
+        if used >= 3:
+            break
+        try:
+            png = doc[i].get_pixmap(dpi=OCR_DPI).tobytes("png")
+        except Exception:
+            continue
+        runs = {m: _tess(png, 1, 1, m, conf=True) for m in models}
+        if max(len(r[0].split()) for r in runs.values()) < 20:
+            continue  # a picture or a blank page
+        used += 1
+        eng_text += runs["eng"][0] + "\n"
+        for m, r in runs.items():
+            score[m] += r[2]
+    if not used:
         return "eng", "en"
-    eng_text, _, best_conf = _tess(png, 1, 1, "eng", conf=True)
-    best = "eng"
-    for tess, code in OCR_SCRIPTS.values():
-        if tess in _tess_langs():
-            c = _tess(png, 1, 1, tess, conf=True)[2]
-            if c > best_conf + 10:
-                best, best_conf = tess, c
+    best, best_conf = "eng", score["eng"]
+    for m in models[1:]:
+        if score[m] > best_conf + 10 * used:
+            best, best_conf = m, score[m]
     if best != "eng":
         return best, next(code for t, code in OCR_SCRIPTS.values() if t == best)
     # Latin: pick en/pt/es by its words. ponytail: English OCR on Portuguese drops every ã and ç
@@ -542,8 +540,9 @@ def ocr_lang(doc) -> tuple[str, str]:
 
 def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = False):
     """Tesseract on one rendered page. Thread-safe: no pymupdf objects in here.
-    Returns (text, ink coverage), plus the mean word confidence when conf=True."""
-    fail = ("", 0.0, 0.0) if conf else ("", 0.0)
+    Returns (text, ink coverage); with conf=True (text, coverage, mean word confidence,
+    picture boxes), the boxes as page fractions (x0, y0, x1, y1)."""
+    fail = ("", 0.0, 0.0, []) if conf else ("", 0.0)
     try:
         r = subprocess.run(["tesseract", "stdin", "stdout", "-l", lang, "tsv"],
             input=png, capture_output=True, timeout=60)
@@ -554,12 +553,19 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
     lines = {}
     ink = 0
     confs = []
+    blocks, worded = {}, set()
     # ponytail: QUOTE_NONE. A word starting with " opened a csv quoted field and swallowed the next
     # rows, so "5 1 2 1 5 4 402 452 90 61 95.07" leaked into the book (Telugu novel, reddit 11-10)
     for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t",
                           quoting=csv.QUOTE_NONE):
+        if len(row) >= 10 and row[0] == "2":
+            try:
+                blocks[row[2]] = tuple(int(x) for x in row[6:10])
+            except ValueError:
+                pass
         if len(row) < 12 or row[0] != "5" or not row[11].strip():
             continue
+        worded.add(row[2])
         try:
             left, top, width, height = int(row[6]), int(row[7]), int(row[8]), int(row[9])
         except ValueError:
@@ -578,7 +584,14 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
     text = "\n\n".join("\n".join(p) for p in paras.values())
     if conf:
-        return text, cov, (sum(confs) / len(confs) if confs else 0.0)
+        # ponytail: Tesseract's layout pass marks illustrations as blocks with no words in them.
+        # Magazine pictures (Chandamama, 11-10) were dropped; these boxes get cropped as figures
+        pics = []
+        if page_w > 1 and page_h > 1:
+            for b, (x, y, w, h) in blocks.items():
+                if b not in worded and w * h >= 0.04 * page_w * page_h and w >= 0.15 * page_w and h >= 0.08 * page_h:
+                    pics.append((x / page_w, y / page_h, (x + w) / page_w, (y + h) / page_h))
+        return text, cov, (sum(confs) / len(confs) if confs else 0.0), pics
     return text, cov
 
 def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
@@ -586,17 +599,17 @@ def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     first came out as native digits: a cover or blurb page printed in English read with the
     Telugu model alone gives "111౮1 & 4018010" (11-10). Only those pages pay for the second pass;
     tel+eng on every page garbled some Telugu words."""
-    text, cov, c = _tess(png, page_w, page_h, lang, conf=True)
+    text, cov, c, pics = _tess(png, page_w, page_h, lang, conf=True)
     if "eng" not in lang and len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", text)) >= 3:
         # ponytail: only when English reads the page better. An old magazine typeface also makes
         # native-digit junk, and there lang+eng sprinkled "SHY", "OSH" through the Telugu (11-10)
         if _tess(png, page_w, page_h, "eng", conf=True)[2] > c:
-            return _tess(png, page_w, page_h, lang + "+eng")
-    return text, cov
+            text, cov = _tess(png, page_w, page_h, lang + "+eng")
+    return text, cov, pics
 
 
 def _done(w):
-    return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0))
+    return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0, []))
 
 
 def _clean_layer(page):
@@ -607,6 +620,14 @@ def _clean_layer(page):
         text = page.get_text().strip()
         if len(text) < 40 or _junk_share(text) >= 0.1:
             return None
+        # ponytail: Latin-script pages only (the English copyright page). A Unicode Telugu layer
+        # can be broken (vowel signs out of order), which is why the book is being OCR'd (11-10)
+        letters = [c for c in text if c.isalpha()]
+        if not letters or sum(c.isascii() for c in letters) < 0.9 * len(letters) or _mixed_share(text) > 0.15:
+            return None
+        toks = re.findall(r"[a-z]{2,}", text.lower())
+        if len(toks) >= 30 and sum(t in _ANY_STOP for t in toks) < 0.03 * len(toks):
+            return None  # Latin letters but no language: font codes
         area = abs(page.rect) or 1
         if sum(abs(pymupdf.Rect(im["bbox"]) & page.rect) for im in page.get_image_info()) / area > 0.5:
             return None
@@ -618,7 +639,7 @@ def _clean_layer(page):
         return None
 
 
-def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
+def ocr_doc(doc, layout: bool = False, lang: str | None = None, pics: dict | None = None) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
         return None
@@ -641,6 +662,9 @@ def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
                 out.extend(_done(w) for w in window)
                 window = []
         out.extend(_done(w) for w in window)
+    if pics is not None:  # {page index: [picture boxes as page fractions]}
+        pics.update({i: r[2] for i, r in enumerate(out) if len(r) > 2 and r[2]})
+    out = [(r[0], r[1]) for r in out]
     return out if layout else [t for t, _ in out]
 
 def _fig_bytes(pm) -> bytes:
@@ -665,10 +689,38 @@ def _fig_bytes(pm) -> bytes:
         return pm.tobytes("png")
 
 
-def _scan_figures(doc, pages):
-    """PNG for low-ink scan pages (maps, plates, tables), so OCR does not turn them into prose."""
+def _inked(pm) -> bool:
+    """A crop with something on it, not a blank margin or a faint stain."""
+    try:
+        g = pymupdf.Pixmap(pymupdf.csGRAY, pm) if pm.n > 1 else pm
+        s = g.samples
+        return sum(1 for b in s[::7] if b < 200) > 0.08 * (len(s) / 7)
+    except Exception:
+        return False
+
+
+def _scan_figures(doc, pages, pics: dict | None = None):
+    """Pictures from scan pages: low-ink pages (maps, plates, tables) whole, so OCR does not turn
+    them into prose, and illustration boxes Tesseract found on text pages, cropped (magazines).
+    Values are bytes for one picture or a list for several."""
     figs = {}
+    for i, boxes in (pics or {}).items():
+        if i >= len(doc):
+            continue
+        r, crops = doc[i].rect, []
+        for x0, y0, x1, y1 in boxes:
+            if (x1 - x0) * (y1 - y0) >= 0.85:  # the whole page is a picture
+                crops = [doc[i].get_pixmap(dpi=SCAN_FIG_DPI)]
+                break
+            clip = pymupdf.Rect(r.x0 + x0 * r.width, r.y0 + y0 * r.height, r.x0 + x1 * r.width, r.y0 + y1 * r.height)
+            pm = doc[i].get_pixmap(dpi=SCAN_FIG_DPI, clip=clip)
+            if _inked(pm):
+                crops.append(pm)
+        if crops:
+            figs[i] = [_fig_bytes(pm) for pm in crops]
     for i, (text, cov) in enumerate(pages):
+        if i in figs:
+            continue
         clean = re.sub(r"\s+", " ", text).strip()
         if len(clean) < 3 or cov >= 0.12:
             continue
@@ -755,7 +807,7 @@ def _ornament(text: str) -> bool:
             and not any(c.isascii() and c.isalpha() for c in text))
 
 
-NUMBERED = re.compile(r"^(\d{1,3})[.)]\s+\S.{0,38}$")
+NUMBERED = re.compile(r"^([0-9]{1,3})[.)]\s+\S.{0,38}(?<![0-9])$")  # "23. ఆ కిటికీ"; "01. గతం 18" is a contents line
 
 
 def _caps_head(text: str) -> bool:
@@ -791,7 +843,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             flush()
             cur.append(("h1", toc[i]))
         if figures and i in figures:
-            cur.append(("img", (figures[i], "")))
+            for fig in (figures[i] if isinstance(figures[i], list) else [figures[i]]):
+                cur.append(("img", (fig, "")))
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         paras = _page_paras(txt)
@@ -802,6 +855,9 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 continue
             if not any(c.isalpha() for c in para):
                 continue  # ponytail: "|" and "( |" from column rules and picture borders (11-10)
+            nd = len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", para))
+            if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
+                continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
             head = HEAD_WORD.match(text) or _caps_head(text) or (stories and NUMBERED.match(text))
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
@@ -816,8 +872,10 @@ def pdf_toc(doc) -> dict:
     """Top-level PDF bookmarks as {page index: title}; empty when the PDF has none."""
     try:
         # "38CaliberStoriesPart2.pdf": merged PDFs keep the file name as the bookmark
-        return {p - 1: re.sub(r"\.pdf$", "", _clean(t).strip(), flags=re.I)[:120]
-                for lvl, t, p, *_ in doc.get_toc() if lvl == 1 and p >= 1 and t.strip()}
+        toc = {p - 1: re.sub(r"\.pdf$", "", _clean(t).strip(), flags=re.I)[:120]
+               for lvl, t, p, *_ in doc.get_toc() if lvl == 1 and p >= 1 and t.strip()}
+        # a bookmark on nearly every page ("Cinema Rangam_1958_02_001", "1", "2") is a page list, not chapters
+        return {} if len(toc) > max(30, len(doc) // 3) else toc
     except Exception:
         return {}
 
@@ -1511,13 +1569,14 @@ async def scan(request: Request, files: list[UploadFile] = File(...), title: str
         raise HTTPException(400, "could not read those images")
     npages = doc.page_count
     tlang, elang = ocr_lang(doc)
-    pages = ocr_doc(doc, layout=True, lang=tlang) or []
+    pics = {}
+    pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics) or []
     texts = [t for t, _ in pages]
     if not any(len(t) for t in texts):
         doc.close()
         log(False, npages, kb_in, 0, "scan-no-text", ref, request=request)
         raise HTTPException(422, "no readable text found, try a clearer photo of the page")
-    figs = _scan_figures(doc, pages)
+    figs = _scan_figures(doc, pages, pics)
     doc.close()
     data = build_epub(ocr_chapters(texts, figs), (title or "Scanned book")[:120], "", elang)
     log(True, npages, kb_in, len(data) // 1024, "scan+fig" if figs else "scan", ref, request=request)
@@ -2478,11 +2537,24 @@ def _garbled(doc) -> bool:
 def _no_language(text: str) -> bool:
     """Latin letters that are not any Latin-script language: old Indian fonts mapped onto ASCII
     and Latin-1 ("ÌÁÕ³ÁLiÂ¿Á[µj¶ NSµR¶V", TL-TTHemalatha, 11-10) came out as "Spanish"."""
-    toks = re.findall(r"[^\W\d_]+", text.lower())
+    if _mixed_share(text) > 0.25:
+        return True
+    toks = [t for t in re.findall(r"[^\W\d_]+", text.lower()) if len(t) >= 2]
     latin = [t for t in toks if all(c.isascii() or "\u00c0" <= c <= "\u024f" for c in t)]
     if len(latin) < 150 or len(latin) < 0.7 * len(toks):
         return False
-    return sum(t in _ANY_STOP for t in latin) < 0.02 * len(latin)
+    return sum(t in _ANY_STOP for t in latin) < 0.03 * len(latin)
+
+
+def _mixed_share(text: str) -> float:
+    """Share of words that mix letters with digits or symbols ("6l$ssa", "6;aqg6c{F%a6€e5"): a
+    junk text layer from an old Indian font or a bad Latin OCR over a Telugu scan (Ramayana, 11-10)."""
+    toks = [t.strip(".,;:!?\"'()[]“”‘’-") for t in text.split()]
+    toks = [t for t in toks if len(t) >= 3]
+    if len(toks) < 50:
+        return 0.0
+    mixed = sum(1 for t in toks if any(c.isalpha() for c in t) and any(not c.isalpha() and not c in "-'’." for c in t))
+    return mixed / len(toks)
 
 
 def _word_set(text: str) -> set:
@@ -2838,10 +2910,11 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
             if npages <= (min(PAID_OCR_MAX_PAGES, max_pages) if paid else FREE_OCR_PAGES) or cut:
                 tlang, elang = ocr_lang(doc)
-                pages = ocr_doc(doc, layout=True, lang=tlang) or []
+                pics = {}
+                pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics) or []
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):
-                    figs = _scan_figures(doc, pages)
+                    figs = _scan_figures(doc, pages, pics)
                     chapters = ocr_chapters(texts, figs, pdf_toc(doc))
                     if cut:
                         chapters.append([("h1", "The rest of this book"),

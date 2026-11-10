@@ -284,6 +284,22 @@ def make_broken_unicode_telugu():
     return d
 
 
+def make_magazine_scan():
+    """Magazine scan: text above a coloured illustration. The pictures were dropped and only the
+    text kept (Chandamama, 11-10); Tesseract's word-free blocks are now cropped as figures."""
+    d = _doc()
+    for k in range(3):
+        src = pymupdf.open().new_page()
+        src.insert_textbox(pymupdf.Rect(60, 50, 535, 470), PROSE * 6, fontsize=11)
+        src.draw_rect(pymupdf.Rect(80, 500, 515, 790), fill=(0.55, 0.8, 0.95))
+        src.draw_circle((200, 640), 70, fill=(0.95, 0.6, 0.2))
+        src.draw_oval(pymupdf.Rect(300, 560, 480, 760), fill=(0.3, 0.6, 0.3))
+        src.draw_rect(pymupdf.Rect(120, 700, 260, 780), fill=(0.6, 0.3, 0.5))
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+    return d
+
+
 def make_accented_text():
     """Portuguese prose, accents everywhere: must stay on the text path, not count as font codes."""
     d = _doc()
@@ -324,6 +340,7 @@ CASES = {
     "scan_running_head": (make_scan_running_head, {"path": "ocr", "has": ["clocks were striking"],
                                                    "hasnt": ["LONG ROAD"], "h_min": 2}),
     "accented_text": (make_accented_text, {"path": "text", "has": ["São João não está"], "lang": "pt"}),
+    "magazine_scan": (make_magazine_scan, {"path": "ocr", "has": ["clocks were striking"], "imgs": 3}),
     "scan_margins": (make_scan_margins, {"path": "ocr", "has": ["clocks were striking"]}),
     "ascii_old_font": (make_ascii_old_font, {"path": "ocr", "has": ["గ్రామంలో"], "hasnt": ["NSRV"], "lang": "te"}),
     "broken_unicode_telugu": (make_broken_unicode_telugu, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"], "lang": "te"}),
@@ -338,11 +355,12 @@ def convert(doc):
     blocks = _text_blocks(doc)
     if blocks:
         return "text", _structure(blocks, doc)
-    pages = ocr_doc(doc, layout=True) or []
+    pics = {}
+    pages = ocr_doc(doc, layout=True, pics=pics) or []
     texts = [t for t, _ in pages]
     if not ocr_ok(texts):
         return "calibre", []  # the site falls back to calibre here: an image-only EPUB
-    return "ocr", ocr_chapters(texts, _scan_figures(doc, pages), pdf_toc(doc))
+    return "ocr", ocr_chapters(texts, _scan_figures(doc, pages, pics), pdf_toc(doc))
 
 
 def summary(path, chapters):

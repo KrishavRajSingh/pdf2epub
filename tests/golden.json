@@ -119,6 +119,14 @@
   "imgs": 0,
   "words": 540
  },
+ "magazine_scan": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 3,
+  "words": 450
+ },
  "scan_margins": {
   "path": "ocr",
   "chapters": 1,

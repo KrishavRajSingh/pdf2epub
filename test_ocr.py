@@ -141,6 +141,22 @@ def library_sample_rules():
     # merged PDFs keep the file name as the bookmark
     d = pymupdf.open(); d.new_page(); d.set_toc([[1, "38CaliberStoriesPart2.pdf", 1]])
     assert pdf_toc(d) == {0: "38CaliberStoriesPart2"}, pdf_toc(d)
+    # second batch of the sample: contents lines, native-digit junk, page-list bookmarks
+    from app import _mixed_share, _clean_layer, _garbled
+    toc_page = ["01. గతించని గతం 18\n\n02. పాపఫలం 44\n\n03. కథ ముగింపు 75\n\n" + body]
+    assert all(k == "p" for k, _ in rows(toc_page)), rows(toc_page)
+    junk = rows([f"{body}\n\n౬౧.౦) ౧-౧ ౫:7 ఇ ౫౨-౧౨-౨ --\n\n{body}"])
+    assert not any("౫౨" in t for _, t in junk), junk
+    d = pymupdf.open()
+    for i in range(60):
+        d.new_page()
+    d.set_toc([[1, f"Cinema Rangam_1958_02_{i:03d}", i + 1] for i in range(60)])
+    assert pdf_toc(d) == {}, "a bookmark per page is a page list, not chapters"
+    assert _mixed_share("6l$ssa I 6;aqg6c{F%a6€e5 € Eeg erde)ErdocsEf,D r gdroqdssootS " * 20) > 0.25
+    assert _mixed_share("The year was 1990 and the U.S. economy can't wait, e.g. for COVID-19 data. " * 20) < 0.25
+    t = pymupdf.open(); t.new_page().insert_text((72, 100), "చేస్ానానడు అజాఞనానిన " * 6, fontsize=11,
+        fontfile="/System/Library/Fonts/Supplemental/Telugu MN.ttc", fontname="tel")
+    assert _clean_layer(t[0]) is None, "a Telugu text layer must not skip OCR"
     print("ok — library sample paragraph rules")
 
 

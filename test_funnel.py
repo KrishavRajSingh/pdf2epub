@@ -233,7 +233,7 @@ def main():
     sraw = scan.tobytes()
     scan.close()
     real_ocr = pdf2epub.ocr_doc
-    pdf2epub.ocr_doc = lambda doc, layout=False, lang=None: [("This scanned page reads as ordinary prose with plenty of words. " * 4, 0.5)
+    pdf2epub.ocr_doc = lambda doc, layout=False, lang=None, pics=None: [("This scanned page reads as ordinary prose with plenty of words. " * 4, 0.5)
                                                   for _ in range(len(doc))]
     sc = client.post(f"/convert?k={key}", files={"f": ("scan.pdf", sraw, "application/pdf")})
     pdf2epub.ocr_doc = real_ocr
