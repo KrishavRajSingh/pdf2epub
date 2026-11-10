@@ -119,6 +119,30 @@
   "imgs": 0,
   "words": 540
  },
+ "scan_margins": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 1050
+ },
+ "ascii_old_font": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 3,
+  "words": 285
+ },
+ "broken_unicode_telugu": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 3,
+  "words": 285
+ },
  "hindi_old_font": {
   "path": "ocr",
   "chapters": 1,

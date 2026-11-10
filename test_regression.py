@@ -234,6 +234,56 @@ def make_spanish_text():
     return d
 
 
+def _tel_png(text, size=14):
+    css = '@font-face {font-family: tel; src: url("Telugu MN.ttc");} body {font-family: tel; font-size: %dpx;}' % size
+    src = pymupdf.open().new_page()
+    src.insert_htmlbox(pymupdf.Rect(72, 72, 520, 760), "<p>" + text + "</p>", css=css, archive=pymupdf.Archive(TEL_FONTS))
+    return src.get_pixmap(dpi=150).tobytes("png")
+
+
+def make_scan_margins():
+    """Scan pasted into Word: page image with margins covers ~75% of the page, so it was taken
+    for a text PDF with no text and came out empty (11-10 library sample)."""
+    d, png = _doc(), _page_png(PROSE * 14)
+    for _ in range(3):
+        pg = d.new_page(width=612, height=792)
+        pg.insert_image(pymupdf.Rect(48, 36, 564, 748), stream=png)
+        pg.insert_text((300, 780), " ", fontsize=8)
+    return d
+
+
+def make_ascii_old_font():
+    """Telugu in an old font mapped onto ASCII and Latin-1 letters, under a generic font name
+    ("F1"): came out as a "Spanish" text book of junk (TL-TTHemalatha, 11-10)."""
+    d, png = _doc(), _tel_png(TEL * 5)
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), "NSRV Ligi xqsLi NRPLi ÌÁÕÁ LiÂÁ Fnmsi LRiLigS zmsÖÁy "
+                          * 25, fontsize=11, render_mode=3)
+    for pg in d:
+        for f in pg.get_fonts():
+            d.xref_set_key(f[0], "BaseFont", "/F1")
+    return d
+
+
+def make_broken_unicode_telugu():
+    """Unicode Telugu made in Word: the page shows the right text, the text layer has vowel signs
+    in the wrong order ("చేస్ానానడు"), so the text path copied broken words (11-10)."""
+    broken = "".join(TEL[i + 1] + TEL[i] if i + 1 < len(TEL) and "\u0c3e" <= TEL[i + 1] <= "\u0c4d" and i % 3 == 0
+                     else TEL[i] for i in range(len(TEL)))
+    d, png = _doc(), _tel_png(TEL * 5)
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        y, line = 90, (broken * 5)
+        for k in range(20):
+            pg.insert_text((72, y), line[k * 40:k * 40 + 40], fontfile=TEL_FONTS + "/Telugu MN.ttc", fontname="tel",
+                           fontsize=11, render_mode=3)
+            y += 30
+    return d
+
+
 def make_accented_text():
     """Portuguese prose, accents everywhere: must stay on the text path, not count as font codes."""
     d = _doc()
@@ -274,6 +324,9 @@ CASES = {
     "scan_running_head": (make_scan_running_head, {"path": "ocr", "has": ["clocks were striking"],
                                                    "hasnt": ["LONG ROAD"], "h_min": 2}),
     "accented_text": (make_accented_text, {"path": "text", "has": ["São João não está"], "lang": "pt"}),
+    "scan_margins": (make_scan_margins, {"path": "ocr", "has": ["clocks were striking"]}),
+    "ascii_old_font": (make_ascii_old_font, {"path": "ocr", "has": ["గ్రామంలో"], "hasnt": ["NSRV"], "lang": "te"}),
+    "broken_unicode_telugu": (make_broken_unicode_telugu, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"], "lang": "te"}),
     "hindi_old_font": (make_hindi_old_font, {"path": "ocr", "has": ["किसान"], "hasnt": ["dk;Z"], "lang": "hi"}),
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
     "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),

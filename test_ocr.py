@@ -114,8 +114,39 @@ def mixed_page_second_pass():
     print("ok — mixed English/Telugu page reads both")
 
 
+def library_sample_rules():
+    """11-10 library sample (18 Telugu books and magazines): paragraph rules on OCR text."""
+    from app import ocr_chapters, _no_language, pdf_toc
+    rows = lambda pages: [(k, t) for ch in ocr_chapters(pages) for k, t in ch]
+    body = "ఆ రోజు ఉదయం అతను పొలానికి వెళ్ళాడు. సాయంత్రం ఇంటికి వచ్చాడు."
+    # a stray Latin capital in Telugu text is not an ALL CAPS heading
+    r = rows([f"{body} SHY ఇంకా కొంచెం."])
+    assert all(k == "p" for k, _ in r), r
+    # a lone "|" from a column rule is not a paragraph
+    assert "|" not in [t for _, t in rows([f"{body}\n\n|\n\n( |\n\n{body}"])]
+    # running head with mangled page numbers and brackets: dropped by its repeated words
+    nums = ["C48)", "G27)", "52", "(౩", "C22)", "61", "G75)", "80"]
+    text = " ".join(t for _, t in rows([f"[38 కాలిబర్‌ {n}\n\n{body}" for n in nums]))
+    assert "కాలిబర్" not in text and text.count("పొలానికి") == len(nums), text[:200]
+    # a story collection: numbered short titles become chapters
+    titles = ["1. ఆ కిటికీ", "2. అమ్మకూచి", "3. రాత్రి వేళ", "4. వర్షం"]
+    heads = [t for k, t in rows([f"{x}\n\n{body}" for x in titles]) if k == "h1"]
+    assert heads == titles, heads
+    # but one numbered line in prose stays a paragraph
+    assert all(k == "p" for k, _ in rows([f"1. ఒకటే వాక్యం\n\n{body}"]))
+    # ASCII-mapped old fonts read as no language; real prose does
+    assert _no_language("NSRV Ligi xqsLi NRPLi ÌÁÕÁ LiÂÁ Fnmsi " * 40)
+    assert not _no_language("It was the best of times, it was the worst of times, and the city slept. " * 20)
+    assert not _no_language("Der Hund und die Katze sind nicht da, aber das Haus ist groß und alt. " * 20)
+    # merged PDFs keep the file name as the bookmark
+    d = pymupdf.open(); d.new_page(); d.set_toc([[1, "38CaliberStoriesPart2.pdf", 1]])
+    assert pdf_toc(d) == {0: "38CaliberStoriesPart2"}, pdf_toc(d)
+    print("ok — library sample paragraph rules")
+
+
 if __name__ == "__main__":
     main()
     heads_with_misread_numbers()
     clean_layer_page_kept()
     mixed_page_second_pass()
+    library_sample_rules()

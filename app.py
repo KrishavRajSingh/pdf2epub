@@ -496,50 +496,64 @@ def _tess_langs() -> set:
     return _TESS_LANGS
 
 
-def ocr_lang(doc) -> tuple[str, str]:
-    """(tesseract lang, epub lang) for this book, from Tesseract's script detection on a few pages.
-
-    ponytail: every scan was read with "-l eng" until 11-10, so a Telugu book came out as
-    "SAOES aP HISPen Brow...". Latin or anything unsure stays English, the old behaviour."""
-    if "osd" not in _tess_langs() or not len(doc):
-        return "eng", "en"
-    n, votes = len(doc), Counter()
+def _sample_page(doc) -> int:
+    """A middle page with ink on it: the one most worth reading to pick the language."""
+    n = len(doc)
+    best, ink = n // 2, -1
     for i in sorted({n // 3, n // 2, (2 * n) // 3}):
         try:
-            png = doc[i].get_pixmap(dpi=150).tobytes("png")
-            r = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "0", "-l", "osd"],
-                               input=png, capture_output=True, timeout=30)
+            pm = doc[i].get_pixmap(dpi=30, colorspace=pymupdf.csGRAY)
+            dark = sum(1 for b in pm.samples if b < 128)
         except Exception:
             continue
-        m = re.search(r"Script: (\w+)", r.stdout.decode("utf-8", "replace"))
-        if m:
-            votes[m.group(1)] += 1
-    for script, _ in votes.most_common(1):
-        lang = OCR_SCRIPTS.get(script)
-        if lang and lang[0] in _tess_langs():
-            return lang
-    # Latin, or nothing detected: read one page in English, then pick en/pt/es by its words.
-    # ponytail: English OCR on Portuguese drops every ã and ç; the right model keeps them.
+        if dark > ink:
+            best, ink = i, dark
+    return best
+
+
+def ocr_lang(doc) -> tuple[str, str]:
+    """(tesseract lang, epub lang) for this book: read one page with English and with each
+    Indian-script model, keep the one Tesseract is most sure of.
+
+    ponytail: every scan was read with "-l eng" until 11-10, so a Telugu book came out as
+    "SAOES aP HISPen Brow...". Script detection (OSD) then called a Telugu scan Bengali,
+    Devanagari or nothing (11-10 library sample); mean word confidence was 90 for tel vs 27 for eng."""
+    if not len(doc) or not shutil.which("tesseract"):
+        return "eng", "en"
     try:
-        png = doc[n // 2].get_pixmap(dpi=OCR_DPI).tobytes("png")
-        code = latin_lang(_tess(png, 1, 1)[0])
+        pix = doc[_sample_page(doc)].get_pixmap(dpi=OCR_DPI)
+        png = pix.tobytes("png")
     except Exception:
-        code = "en"
+        return "eng", "en"
+    eng_text, _, best_conf = _tess(png, 1, 1, "eng", conf=True)
+    best = "eng"
+    for tess, code in OCR_SCRIPTS.values():
+        if tess in _tess_langs():
+            c = _tess(png, 1, 1, tess, conf=True)[2]
+            if c > best_conf + 10:
+                best, best_conf = tess, c
+    if best != "eng":
+        return best, next(code for t, code in OCR_SCRIPTS.values() if t == best)
+    # Latin: pick en/pt/es by its words. ponytail: English OCR on Portuguese drops every ã and ç
+    code = latin_lang(eng_text)
     tess = LATIN_LANGS[code]
     return (tess, code) if tess in _tess_langs() else ("eng", "en")
 
 
-def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
-    """Tesseract on one rendered page. Thread-safe: no pymupdf objects in here."""
+def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = False):
+    """Tesseract on one rendered page. Thread-safe: no pymupdf objects in here.
+    Returns (text, ink coverage), plus the mean word confidence when conf=True."""
+    fail = ("", 0.0, 0.0) if conf else ("", 0.0)
     try:
         r = subprocess.run(["tesseract", "stdin", "stdout", "-l", lang, "tsv"],
             input=png, capture_output=True, timeout=60)
     except Exception:
-        return "", 0.0
+        return fail
     if r.returncode != 0:
-        return "", 0.0
+        return fail
     lines = {}
     ink = 0
+    confs = []
     # ponytail: QUOTE_NONE. A word starting with " opened a csv quoted field and swallowed the next
     # rows, so "5 1 2 1 5 4 402 452 90 61 95.07" leaked into the book (Telugu novel, reddit 11-10)
     for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t",
@@ -552,22 +566,32 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
             continue
         lines.setdefault((row[2], row[3], row[4]), []).append((left, row[11].strip()))
         ink += width * height
+        try:
+            confs.append(float(row[10]))
+        except ValueError:
+            pass
     # ponytail: group printed lines into tesseract's paragraphs (block, par). Keyed by line, every
     # printed line became its own <p> from 10-23 to 11-05: the "one line per printed line" we sell against.
     paras = {}
     for k, v in sorted(lines.items(), key=lambda kv: tuple(int(x) for x in kv[0])):
         paras.setdefault(k[:2], []).append(" ".join(t for _, t in sorted(v)))
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
-    return "\n\n".join("\n".join(p) for p in paras.values()), cov
+    text = "\n\n".join("\n".join(p) for p in paras.values())
+    if conf:
+        return text, cov, (sum(confs) / len(confs) if confs else 0.0)
+    return text, cov
 
 def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     """_tess, and for an Indian-language book a second pass with English on pages where the
     first came out as native digits: a cover or blurb page printed in English read with the
     Telugu model alone gives "111౮1 & 4018010" (11-10). Only those pages pay for the second pass;
     tel+eng on every page garbled some Telugu words."""
-    text, cov = _tess(png, page_w, page_h, lang)
+    text, cov, c = _tess(png, page_w, page_h, lang, conf=True)
     if "eng" not in lang and len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", text)) >= 3:
-        return _tess(png, page_w, page_h, lang + "+eng")
+        # ponytail: only when English reads the page better. An old magazine typeface also makes
+        # native-digit junk, and there lang+eng sprinkled "SHY", "OSH" through the Telugu (11-10)
+        if _tess(png, page_w, page_h, "eng", conf=True)[2] > c:
+            return _tess(png, page_w, page_h, lang + "+eng")
     return text, cov
 
 
@@ -691,6 +715,27 @@ def _running_heads(pages: list[str]) -> set:
     return {k for k, c in seen.items() if c >= max(3, len(pages) // 10)}
 
 
+def _words(para: str) -> list:
+    return [k for t in para.split() if len(k := _head_key(t)) >= 3]
+
+
+def _head_words(pages: list[str]) -> set:
+    """Words that keep coming back in short first/last paragraphs: the title and author in a
+    running head, however OCR mangled the page number and brackets around them ("[38 కాలిబర్‌ C48)")."""
+    seen = Counter()
+    for txt in pages:
+        paras = _page_paras(txt)
+        for para in {paras[0], paras[-1]} if paras else ():
+            if len(para) <= 50 and not HEAD_WORD.match(para):
+                seen.update(set(_words(para)))
+    return {w for w, c in seen.items() if c >= max(3, len(pages) // 10)}
+
+
+def _mostly_head_words(para: str, head_words: set) -> bool:
+    w = _words(para)
+    return bool(w) and sum(x in head_words for x in w) * 2 >= len(w)
+
+
 def _head_first(para: str) -> str:
     """Title word of a short "title + page number" line: OCR misreads the number as letters
     ("మాయ డే", "మాయ ర్‌1"), so the whole line no longer repeats but its first word does."""
@@ -710,12 +755,31 @@ def _ornament(text: str) -> bool:
             and not any(c.isascii() and c.isalpha() for c in text))
 
 
+NUMBERED = re.compile(r"^(\d{1,3})[.)]\s+\S.{0,38}$")
+
+
+def _caps_head(text: str) -> bool:
+    """ALL CAPS short line = heading, but only for Latin text: Telugu has no case, so one stray
+    Latin capital in it made the whole line "upper" and a heading (11-10)."""
+    letters = [c for c in text if c.isalpha()]
+    latin = [c for c in letters if c.isascii()]
+    return bool(letters) and len(latin) >= 0.8 * len(letters) and text.isupper() and len(text) <= 60
+
+
+def _story_numbers(pages: list[str]) -> bool:
+    """A story collection: 3+ short paragraphs like "23. ఆ కిటికీ" with different numbers."""
+    nums = {m.group(1) for txt in pages for para in _page_paras(txt) if (m := NUMBERED.match(para))}
+    return len(nums) >= 3
+
+
 def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None = None):
     """Tesseract text -> same (kind, text) rows the text path emits. toc: {page index: title}
     from the PDF's own bookmarks, used as chapter breaks when present."""
     # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
     chapters, cur = [], []
     heads = _running_heads(pages)
+    head_words = _head_words(pages)
+    stories = _story_numbers(pages)
 
     def flush():
         if cur:
@@ -733,11 +797,13 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
         paras = _page_paras(txt)
         for j, para in enumerate(paras):
             if (j in (0, len(paras) - 1) and len(para) <= 50
-                    and (_head_key(para) in heads or _head_first(para) in heads)) or _ornament(para):
+                    and (_head_key(para) in heads or _head_first(para) in heads
+                         or _mostly_head_words(para, head_words))) or _ornament(para):
                 continue
+            if not any(c.isalpha() for c in para):
+                continue  # ponytail: "|" and "( |" from column rules and picture borders (11-10)
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
-            head = HEAD_WORD.match(text) or (
-                text.isupper() and len(text) <= 60 and any(c.isalpha() for c in text))
+            head = HEAD_WORD.match(text) or _caps_head(text) or (stories and NUMBERED.match(text))
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 flush()
                 cur.append(("h1", text))
@@ -749,7 +815,9 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
 def pdf_toc(doc) -> dict:
     """Top-level PDF bookmarks as {page index: title}; empty when the PDF has none."""
     try:
-        return {p - 1: _clean(t).strip()[:120] for lvl, t, p, *_ in doc.get_toc() if lvl == 1 and p >= 1 and t.strip()}
+        # "38CaliberStoriesPart2.pdf": merged PDFs keep the file name as the bookmark
+        return {p - 1: re.sub(r"\.pdf$", "", _clean(t).strip(), flags=re.I)[:120]
+                for lvl, t, p, *_ in doc.get_toc() if lvl == 1 and p >= 1 and t.strip()}
     except Exception:
         return {}
 
@@ -2334,7 +2402,8 @@ def _mostly_scanned(doc) -> bool:
         page = doc[i]
         area = abs(page.rect) or 1
         img = sum(abs(pymupdf.Rect(im["bbox"]) & page.rect) for im in page.get_image_info())
-        if img / area >= 0.8 and len(page.get_text().strip()) < 120:
+        # ponytail: 0.6, was 0.8. Scans pasted into Word keep page margins and cover 74-77% (11-10)
+        if img / area >= 0.6 and len(page.get_text().strip()) < 120:
             scans += 1
     return scans * 2 > len(idx)
 
@@ -2369,7 +2438,11 @@ def _junk_share(text: str) -> float:
 # Old non-Unicode Indian fonts. Kruti Dev and friends (Hindi) map glyphs onto plain ASCII
 # ("dk;Z dj jgs gSa"), so the symbol share misses them; the font name does not.
 LEGACY_FONTS = re.compile(r"kruti|devlys|chanakya|shusha|walkman|shree.?dev|aps.?dv|priyaanka|pallavi|"
-                          r"natyamayuri|pragathi|anupama", re.I)
+                          r"natyamayuri|pragathi|anupama|tl-tt|hemalatha", re.I)
+# common short words of Latin-script languages: real prose hits them every few words, font codes never
+_ANY_STOP = set("the and of to in is was he that it a an de la el en y que los las le les et des du un une "
+                "il est der die das und ist nicht ein eine den von zu mit het een van dat il di che non per "
+                "o os as do da em um não com para por se".split())
 
 
 def _legacy_font_share(doc, idx) -> float:
@@ -2396,7 +2469,44 @@ def _garbled(doc) -> bool:
         return False
     idx = sorted({int(k * n / 12) for k in range(12)})
     text = "".join(doc[i].get_text() for i in idx)
-    return len(text) >= 300 and (_junk_share(text) > 0.2 or _legacy_font_share(doc, idx) > 0.5)
+    if len(text) < 300:
+        return False
+    return (_junk_share(text) > 0.2 or _legacy_font_share(doc, idx) > 0.5 or _no_language(text)
+            or _broken_indic(doc, text))
+
+
+def _no_language(text: str) -> bool:
+    """Latin letters that are not any Latin-script language: old Indian fonts mapped onto ASCII
+    and Latin-1 ("ÌÁÕ³ÁLiÂ¿Á[µj¶ NSµR¶V", TL-TTHemalatha, 11-10) came out as "Spanish"."""
+    toks = re.findall(r"[^\W\d_]+", text.lower())
+    latin = [t for t in toks if all(c.isascii() or "\u00c0" <= c <= "\u024f" for c in t)]
+    if len(latin) < 150 or len(latin) < 0.7 * len(toks):
+        return False
+    return sum(t in _ANY_STOP for t in latin) < 0.02 * len(latin)
+
+
+def _word_set(text: str) -> set:
+    # split on spaces: \w breaks Telugu words at every vowel sign
+    return {w for t in text.split() if len(w := t.strip(".,;:!?\"'()[]“”‘’-—|")) >= 3}
+
+
+def _broken_indic(doc, text: str) -> bool:
+    """A Unicode Telugu/Hindi text layer whose vowel signs come out in the wrong order (made in
+    Word with Mandali: "చేస్ానానడు" for "చేస్తానన్నాడు", 11-10). It reads as Telugu but not as words,
+    so one page is OCR'd and compared; under 60% of its words found means OCR the book."""
+    code = text_lang(text)
+    tess = next((t for t, c in OCR_SCRIPTS.values() if c == code), None)
+    if not tess or tess not in _tess_langs():
+        return False
+    i = max(range(len(doc)), key=lambda k: len(doc[k].get_text()) if abs(k - len(doc) // 2) < 6 else -1)
+    words = _word_set(doc[i].get_text())
+    if len(words) < 12:
+        return False
+    try:
+        ocr = _word_set(_tess(doc[i].get_pixmap(dpi=OCR_DPI).tobytes("png"), 1, 1, tess)[0])
+    except Exception:
+        return False
+    return len(words & ocr) < 0.6 * len(words)
 
 
 def doc_lang(doc) -> str:
