@@ -554,7 +554,7 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
     lines = {}
     ink = 0
     confs = []
-    blocks, worded = {}, set()
+    blocks, worded, wboxes = {}, set(), []
     # ponytail: QUOTE_NONE. A word starting with " opened a csv quoted field and swallowed the next
     # rows, so "5 1 2 1 5 4 402 452 90 61 95.07" leaked into the book (Telugu novel, reddit 11-10)
     for row in csv.reader(r.stdout.decode("utf-8", "replace").splitlines(), delimiter="\t",
@@ -572,6 +572,7 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
         except ValueError:
             continue
         lines.setdefault((row[2], row[3], row[4]), []).append((left, row[11].strip()))
+        wboxes.append((left, top, left + width, top + height))
         ink += width * height
         try:
             confs.append(float(row[10]))
@@ -590,10 +591,23 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
         pics = []
         if page_w > 1 and page_h > 1:
             for b, (x, y, w, h) in blocks.items():
-                if b not in worded and w * h >= 0.04 * page_w * page_h and w >= 0.15 * page_w and h >= 0.08 * page_h:
+                if b not in worded and w * h >= 0.04 * page_w * page_h and w >= 0.15 * page_w and h >= 0.08 * page_h \
+                        and not _covers_text(x, y, x + w, y + h, wboxes):
                     pics.append((x / page_w, y / page_h, (x + w) / page_w, (y + h) / page_h))
         return text, cov, (sum(confs) / len(confs) if confs else 0.0), pics
     return text, cov
+
+def _covers_text(x0, y0, x1, y1, wboxes) -> bool:
+    """A word-free block that still has read words inside it is text, not a picture: the spine
+    shadow of a book scanned open, two pages a shot, made Tesseract call the column next to it a
+    picture, and the novel got 60 crops of its own text (Rudranetra, 38 Kathalu, 11-11)."""
+    inside = ink = 0
+    for a, b, c, d in wboxes:
+        if a >= x0 - 2 and b >= y0 - 2 and c <= x1 + 2 and d <= y1 + 2:
+            inside += 1
+            ink += (c - a) * (d - b)
+    return inside >= 8 or ink >= 0.05 * (x1 - x0) * (y1 - y0)
+
 
 def _blurred(png: bytes):
     try:

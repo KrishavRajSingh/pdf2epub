@@ -187,6 +187,11 @@ def magazine_page_rules():
     finally:
         app._tess = real
     assert len(calls) == 2 and "దర్శకుడు" in text and pics == [], "page read as one picture was not retried"
+    # spine shadow: a word-free block over a column of read words is text, not a picture
+    col = [(100, 100 + 30 * k, 400, 125 + 30 * k) for k in range(20)]
+    assert app._covers_text(80, 80, 420, 720, col), "text column kept as a picture"
+    assert not app._covers_text(500, 80, 900, 720, col), "real picture next to text dropped"
+    assert not app._covers_text(80, 80, 900, 720, col[:2]), "picture with a caption dropped"
     print("ok — magazine page rules")
 
 
