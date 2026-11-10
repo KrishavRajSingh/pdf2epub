@@ -95,6 +95,12 @@ def main():
     for slug in ("scanned-pdf-to-epub", "send-pdf-to-kindle", "pdf-to-epub-vs-calibre"):
         assert f'href="/guides/{slug}"' in home, f"home lacks link to {slug}"
     assert client.get("/stats").headers.get("x-robots-tag") == "noindex", "/stats indexable"
+    # 11-11: comparison page for AI answers: FAQ + ItemList JSON-LD, dated, in sitemap and /guides
+    c = client.get("/guides/pdf-to-epub-converters-compared")
+    assert c.status_code == 200 and '"@type": "FAQPage"' in c.text and '"@type":"ItemList"' in c.text, "compare page"
+    assert "Checked 11 November 2026" in c.text and 'href="/?s=seo-compare"' in c.text, "compare page date/cta"
+    assert "/guides/pdf-to-epub-converters-compared" in client.get("/sitemap.xml").text, "compare page not in sitemap"
+    assert 'href="/guides/pdf-to-epub-converters-compared"' in client.get("/guides").text, "compare page not in /guides"
 
     # email capture + sample endpoint
     st = client.get("/stats").json()

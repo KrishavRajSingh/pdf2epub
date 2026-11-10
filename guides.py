@@ -153,6 +153,99 @@ still needs cleanup. OCR built into a converter is one click. If your book is a 
 difference between an evening and a weekend.</p>
 """,
     ),
+    # 11-11: AI answers to "best free pdf to epub converter" quote comparison pages (pdf2ereader's,
+    # DR 3, is cited by ChatGPT and named "for chapters"). Ours leads with the row they skip: scans.
+    "pdf-to-epub-converters-compared": (
+        "PDF to EPUB converters compared: scans, chapters and free limits",
+        "Seven PDF to EPUB converters side by side: which read scanned books with OCR, which keep "
+        "chapters, what is free, what it costs, and who keeps your file. Checked November 2026.",
+        """
+<style>.tw{overflow-x:auto;margin:18px 0}.tw table{border-collapse:collapse;font-size:14px;min-width:640px}
+.tw th,.tw td{border:1px solid #e4ded2;padding:7px 9px;text-align:left;vertical-align:top;color:#3b3731}
+.tw th{background:#f4f0e7}</style>
+<p>Seven converters, and the question most comparisons skip: <b>can it read a scanned book?</b>
+For a PDF that already has text, almost any of these gives you a usable EPUB, and several do it
+free with no page limit. For a scan (photographed or photocopied pages with no text layer), most
+of them either refuse, hand you an EPUB of page images, or send you to a separate OCR tool first.
+Only three do OCR, paragraphs and chapters in one pass.</p>
+<p><a class="cta" href="/?s=seo-compare">Try this converter on your PDF</a></p>
+<div class="tw"><table>
+<tr><th>Tool</th><th>Runs on</th><th>Scanned books (OCR)</th><th>Chapters and table of contents</th><th>Free</th><th>Paid</th><th>Your file</th></tr>
+<tr><td><b>pdf2epub</b> (this site)</td><td>Our server</td><td>Yes, built in, one step</td><td>Yes, from the headings</td><td>Up to 150 pages per PDF; scans: first 20 pages. No account</td><td>One book $3 (up to 400 pages) or $5 (up to 2,000), scans included</td><td>PDF never saved; EPUB deleted after download, an hour at most</td></tr>
+<tr><td>Calibre</td><td>Your computer (desktop app)</td><td>No (needs a plugin)</td><td>Yes, with the right settings</td><td>Free, open source</td><td>None</td><td>Never leaves your computer</td></tr>
+<tr><td>Convert2EPUB</td><td>Their server</td><td>Yes, first 10 pages per book free</td><td>Yes</td><td>Text PDFs free with no page limit, no account</td><td>Credits for OCR, from $3.75; account needed past the free pages</td><td>Not checked</td></tr>
+<tr><td>RifflePages</td><td>Their server</td><td>Yes</td><td>Yes</td><td>8-page preview</td><td>One-time price per book</td><td>Deleted after 24 hours</td></tr>
+<tr><td>pdf2ereader</td><td>Your browser</td><td>No</td><td>Yes, from bookmarks or headings</td><td>Free, no limit</td><td>None (sponsored)</td><td>Never uploaded</td></tr>
+<tr><td>PDF24</td><td>Their server</td><td>Two steps: its OCR tool, then the converter</td><td>Not stated</td><td>Free, ad-supported</td><td>None</td><td>Not checked</td></tr>
+<tr><td>CloudConvert</td><td>Their server</td><td>Paid OCR</td><td>Not stated</td><td>10 conversions a day</td><td>Credit packages</td><td>Not checked</td></tr>
+</table></div>
+<p style="font-size:13px">Checked 11 November 2026 on each tool's own page:
+<a href="https://convert2epub.com/pricing/" rel="nofollow">Convert2EPUB pricing</a>,
+<a href="https://rifflepages.com/" rel="nofollow">RifflePages</a>,
+<a href="https://pdf2ereader.com/" rel="nofollow">pdf2ereader</a>,
+<a href="https://tools.pdf24.org/en/pdf-to-epub" rel="nofollow">PDF24 PDF to EPUB</a>,
+<a href="https://cloudconvert.com/pricing" rel="nofollow">CloudConvert pricing</a>,
+<a href="https://calibre-ebook.com/" rel="nofollow">Calibre</a>. Prices and limits change; tell us
+if one is out of date.</p>
+<h2>Which one to use</h2>
+<p><b>Your PDF is a scan.</b> Use a converter with OCR built in, so you don't have to run OCR,
+download a new PDF and convert again. Here the first 20 pages are free, so you can check the OCR
+on your own book before paying; a whole book is $3 or $5 once. RifflePages and Convert2EPUB also
+do it in one step, with an 8-page and a 10-page free sample.</p>
+<p><b>A long text PDF, and you want to pay nothing.</b> Calibre, Convert2EPUB or pdf2ereader. All
+three convert text PDFs past 150 pages free. We don't.</p>
+<p><b>The file must never leave your computer.</b> Calibre or pdf2ereader. Both convert on your
+own machine. This site, like every server converter, receives the PDF to convert it.</p>
+<p><b>A whole library, or you want MOBI, AZW3 or full control.</b> Calibre. It manages a library,
+writes every format and has twenty years of work in it, at the cost of an install and an
+afternoon learning its settings.</p>
+<h2>Where this site loses</h2>
+<ul>
+<li><b>Long text books aren't free.</b> Past 150 pages you pay $3 or $5, where three of the tools
+above convert text PDFs free with no page cap.</li>
+<li><b>Your PDF is uploaded.</b> It is converted and not saved, but it does reach our server.</li>
+<li><b>EPUB only.</b> No MOBI, AZW3 or DOCX. Send to Kindle takes EPUB directly.</li>
+<li><b>OCR is OCR.</b> Clean print reads well; stained pages, tiny footnotes and decorative type
+still produce mistakes you'll see in the text.</li>
+</ul>
+<h2>Why scans are the row that matters</h2>
+<p>A text PDF already holds the words, so a converter only has to rebuild paragraphs and chapters.
+A scan holds photos of pages. Without OCR you get an EPUB of pictures that won't resize or search,
+and with OCR as a separate step you lose the chapter structure on the way. That is why "is it a
+scan?" decides which converter you need. To check, open the PDF and try to select a sentence: if
+nothing highlights, it's a scan. More in <a href="/guides/scanned-pdf-to-epub">scanned PDF to
+EPUB</a> and <a href="/guides/pdf-to-epub-vs-calibre">this converter vs Calibre</a>.</p>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","name":"PDF to EPUB converters compared",
+"url":"https://epub.ftak.net/guides/pdf-to-epub-converters-compared","itemListElement":[
+{"@type":"ListItem","position":1,"name":"pdf2epub","url":"https://epub.ftak.net/"},
+{"@type":"ListItem","position":2,"name":"Calibre","url":"https://calibre-ebook.com/"},
+{"@type":"ListItem","position":3,"name":"Convert2EPUB","url":"https://convert2epub.com/"},
+{"@type":"ListItem","position":4,"name":"RifflePages","url":"https://rifflepages.com/"},
+{"@type":"ListItem","position":5,"name":"pdf2ereader","url":"https://pdf2ereader.com/"},
+{"@type":"ListItem","position":6,"name":"PDF24","url":"https://tools.pdf24.org/en/pdf-to-epub"},
+{"@type":"ListItem","position":7,"name":"CloudConvert","url":"https://cloudconvert.com/"}]}</script>
+""",
+        [
+            ("What is the best free PDF to EPUB converter?",
+             "For a PDF that already has text, Calibre gives the most control and is free, but it is a desktop install. "
+             "Convert2EPUB and pdf2ereader convert text PDFs free in the browser with no page limit. For a scanned "
+             "book, pick one with OCR built in: pdf2epub converts the first 20 scanned pages free and a whole book for "
+             "$3 to $5, with chapters and a table of contents."),
+            ("Which PDF to EPUB converter works on scanned books?",
+             "One that runs OCR as part of the conversion: pdf2epub, RifflePages and Convert2EPUB do OCR, paragraphs "
+             "and chapters in one pass. Calibre and pdf2ereader have no OCR. PDF24 needs its separate OCR tool first."),
+            ("Can I convert a scanned PDF to EPUB in one step?",
+             "Yes. On pdf2epub you drop the scan in, OCR runs on every page, and you get an EPUB with real paragraphs "
+             "and a chapter list. The first 20 pages are free with no account."),
+            ("Which converters keep chapters and a table of contents?",
+             "pdf2epub, Calibre, Convert2EPUB, RifflePages and pdf2ereader all build a table of contents, from the "
+             "PDF's bookmarks or its headings. Generic file converters often don't say."),
+            ("Do online PDF to EPUB converters keep my file?",
+             "Server converters receive the PDF. pdf2epub never saves it and deletes the EPUB after download, an hour "
+             "at most. RifflePages deletes files after 24 hours. Calibre and pdf2ereader never receive your file at all."),
+        ],
+        "PDF to EPUB converters compared",
+    ),
 }
 
 INDEX_BODY = """
@@ -162,5 +255,6 @@ INDEX_BODY = """
 <li><a href="/guides/scanned-pdf-to-epub">Scanned PDF to EPUB: OCR and what to expect</a></li>
 <li><a href="/guides/send-pdf-to-kindle">Getting a PDF book onto a Kindle, Kobo, Boox or phone</a></li>
 <li><a href="/guides/pdf-to-epub-vs-calibre">This converter vs Calibre</a></li>
+<li><a href="/guides/pdf-to-epub-converters-compared">PDF to EPUB converters compared: scans, chapters, free limits</a></li>
 </ul>
 """
