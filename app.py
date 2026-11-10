@@ -1162,6 +1162,37 @@ drop.onclick=()=>fi.click();
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0])ev('pick')});
 fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name}});
+// ponytail (11-10): a Shelf reader with 1,000 Telugu novels asked for this. With a Shelf key, pick many
+// PDFs or a whole folder: they convert one by one on the normal job path and each EPUB downloads as it finishes
+let BATCH=[];
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+function pickMany(list){BATCH=list.filter(f=>/\.pdf$/i.test(f.name||''));
+ if(BATCH.length>1){drop.querySelector('b').textContent=BATCH.length+' PDFs picked';ev('pick',{why:'batch'})}}
+if(K){fi.multiple=true;
+ const fb=document.createElement('input');fb.type='file';fb.webkitdirectory=true;fb.multiple=true;fb.hidden=true;
+ const bb=document.createElement('button');bb.className='ghost-btn';bb.id='folder';bb.type='button';
+ bb.textContent='Choose a whole folder';go.after(bb);bb.after(fb);
+ bb.onclick=()=>fb.click();fb.onchange=()=>pickMany([...fb.files]);
+ fi.addEventListener('change',()=>pickMany([...fi.files]));
+ drop.addEventListener('drop',x=>pickMany([...x.dataTransfer.files]))}
+async function convertMany(){
+ go.disabled=true;const ok=[],bad=[],n=BATCH.length;ev('submit',{why:'batch'});
+ const failed=()=>bad.map(b=>esc(b[0])+' - '+esc(b[1])).join('<br>');
+ const show=(i,name)=>{msg.className='';msg.innerHTML='Book '+(i+1)+' of '+n+': '+esc(name)+'<br>'+ok.length+' done'
+  +(bad.length?', '+bad.length+' failed':'')+'. Keep this tab open. If the browser asks to allow multiple downloads, allow it.'
+  +(bad.length?'<br><br>Failed so far:<br>'+failed():'')};
+ for(let i=0;i<n;i++){const f=BATCH[i];show(i,f.name);
+  const fd=new FormData();fd.append('f',f);fd.append('title','');fd.append('author','');
+  fd.append('email',document.getElementById('email').value);
+  try{const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},s=>show(i,f.name+' ('+clock(s)+')'));
+   const a=document.createElement('a');a.href=u;a.download=f.name.replace(/\.pdf$/i,'')+'.epub';
+   document.body.appendChild(a);a.click();a.remove();ok.push(f.name);ev('done',{why:'batch'})}
+  catch(e){const m=String(e&&e.message||e);bad.push([f.name,((m.match(/"detail":"([^"]+)"/)||[])[1]||m).slice(0,140)]);ev('fail',{status:String(e&&e.status||'net'),why:'batch'})}
+  await new Promise(z=>setTimeout(z,800))}
+ msg.className=bad.length?'err':'ok';
+ msg.innerHTML='All done: '+ok.length+' of '+n+' converted.'+(bad.length?'<br><br>These did not convert. Email them to '
+  +'<a href="mailto:__MAIL__">__MAIL__</a> and we fix the converter for them:<br>'+failed():'');
+ go.disabled=false}
 let PN='__FREEOCR__';
 (async()=>{const p=pendingJob();if(!p)return;
  msg.className='';msg.textContent='Picking up '+p.name+' where you left it...';go.disabled=true;
@@ -1205,7 +1236,7 @@ async function convert(preview){
    +'<br><br>Email the PDF to <a href="mailto:__MAIL__">__MAIL__</a> so we can rerun it on the big-file converter and send you the download link.'}
   if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
-go.onclick=()=>convert(false);
+go.onclick=()=>BATCH.length>1?convertMany():convert(false);
 smp.onclick=async()=>{
  msg.className='';msg.textContent='Converting the sample...';smp.disabled=true;go.disabled=true;ev('sample');
  try{

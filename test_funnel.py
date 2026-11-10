@@ -117,6 +117,8 @@ def main():
     assert client.get("/go/nope", follow_redirects=False).status_code == 404
     assert "quote a one-time" not in shelf.text, "shelf still quotes a one-time conversion"
     land = client.get("/").text
+    # Shelf batch upload (11-10): many PDFs or a folder, one job each
+    assert "convertMany" in land and "webkitdirectory" in land and "if(K){fi.multiple=true" in land, "no batch upload"
     assert "/shelf" in land, "landing page does not mention the paid tier"
     assert client.post("/lead", data={"email": "", "reason": "cap"}).status_code == 400, "lead takes no email"
     assert client.post("/lead", data={"email": "r@e.com", "reason": "cap"}).status_code == 200
