@@ -26,6 +26,7 @@ def convert(path: str, out: str | None = None, title: str = "", author: str = ""
     else:
         chapters = pdf2epub._structure(blocks, doc)
         kind = "text"
+        lang = pdf2epub.doc_lang(doc)
     doc.close()
     if not chapters:
         raise SystemExit("nothing readable in that file")

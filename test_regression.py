@@ -14,7 +14,7 @@ import json, sys
 from pathlib import Path
 
 import pymupdf
-from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc
+from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc, doc_lang
 
 GOLDEN = Path(__file__).parent / "tests" / "golden.json"
 PROSE = ("It was a bright cold day in April, and the clocks were striking thirteen. "
@@ -186,6 +186,48 @@ def make_scan_running_head():
     return d
 
 
+HIN = "एक छोटे गाँव में एक किसान रहता था। वह हर सुबह अपने खेत पर जाता था। शाम को वह बच्चों को कहानियाँ सुनाता था। "
+PT = ("Ele não está em casa hoje. A canção da manhã começou cedo e a ação continuou. "
+      "Você já viu o coração da cidade? Ela disse que não, mas que isso era muito bonito. ")
+ES = ("El niño no está en casa. La canción de la mañana empezó temprano y ella dijo que sí, "
+      "pero los días eran muy largos y el camino del pueblo estaba lleno de flores. ")
+
+
+def make_hindi_old_font():
+    """Hindi in an old Kruti Dev style font: the text layer is plain ASCII ("dk;Z dj jgs gSa"),
+    so only the font name gives it away (11-10)."""
+    css = ('@font-face {font-family: dev; src: url("Devanagari Sangam MN.ttc");} '
+           'body {font-family: dev; font-size: 15px;}')
+    d = _doc()
+    for _ in range(3):
+        src = pymupdf.open().new_page()
+        src.insert_htmlbox(pymupdf.Rect(72, 72, 520, 760), "<p>" + HIN * 11 + "</p>", css=css,
+                           archive=pymupdf.Archive(TEL_FONTS))
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), "dk;Z dj jgs gSa vkSj ;g ,d NksVk xk¡o gS " * 20,
+                          fontsize=11, render_mode=3)
+    for pg in d:
+        for f in pg.get_fonts():
+            d.xref_set_key(f[0], "BaseFont", "/KrutiDev010")
+    return d
+
+
+def make_portuguese_scan():
+    """Portuguese scan: read with the English model it lost every ã and ç (11-10)."""
+    d, png = _doc(), _page_png(PT * 13)
+    for _ in range(3):
+        d.new_page().insert_image(pymupdf.Rect(0, 0, 595, 842), stream=png)
+    return d
+
+
+def make_spanish_text():
+    d = _doc()
+    for _ in range(3):
+        d.new_page().insert_textbox(pymupdf.Rect(72, 72, 520, 780), ES * 8, fontsize=11)
+    return d
+
+
 def make_accented_text():
     """Portuguese prose, accents everywhere: must stay on the text path, not count as font codes."""
     d = _doc()
@@ -202,7 +244,7 @@ def make_accented_text():
 # would serve an image-only EPUB from it.
 CASES = {
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
-                           "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2}),
+                           "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
@@ -223,7 +265,10 @@ CASES = {
                                        "hasnt": ["ã¨", "Ñ", "మాయ", "యాయ", "ర ర ర"], "lang": "te"}),
     "scan_running_head": (make_scan_running_head, {"path": "ocr", "has": ["clocks were striking"],
                                                    "hasnt": ["LONG ROAD"], "h_min": 2}),
-    "accented_text": (make_accented_text, {"path": "text", "has": ["São João não está"]}),
+    "accented_text": (make_accented_text, {"path": "text", "has": ["São João não está"], "lang": "pt"}),
+    "hindi_old_font": (make_hindi_old_font, {"path": "ocr", "has": ["किसान"], "hasnt": ["dk;Z"], "lang": "hi"}),
+    "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
+    "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),
 }
 
 
@@ -286,7 +331,7 @@ def main():
         s, text = summary(*convert(doc))
         new[name] = s
         errs = check(name, rules, s, text)
-        if "lang" in rules and (got := ocr_lang(doc)[1]) != rules["lang"]:
+        if "lang" in rules and (got := ocr_lang(doc)[1] if s["path"] == "ocr" else doc_lang(doc)) != rules["lang"]:
             errs.append(f"epub language {got}, want {rules['lang']}")
         known = [e for e in errs if any(e.startswith(k) for k in rules.get("known", []))]
         errs = [e for e in errs if e not in known]

@@ -110,5 +110,29 @@
   "paragraphs": 3,
   "imgs": 0,
   "words": 540
+ },
+ "hindi_old_font": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 792
+ },
+ "portuguese_scan": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 1287
+ },
+ "spanish_text": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 792
  }
 }

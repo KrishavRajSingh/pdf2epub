@@ -67,6 +67,7 @@ def convert(raw: bytes, title: str) -> tuple[bytes, bool]:
     if blocks:
         chapters = pdf2epub._structure(blocks, doc)
         was_ocr = False
+        lang = pdf2epub.doc_lang(doc)
     else:
         tlang, lang = pdf2epub.ocr_lang(doc)
         pages = pdf2epub.ocr_doc(doc, lang=tlang) or []

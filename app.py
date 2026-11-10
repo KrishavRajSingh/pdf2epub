@@ -439,9 +439,36 @@ def _ocr_page(page):
 
 
 # Tesseract script name (OSD) -> traineddata to OCR with, and the EPUB language code for it.
-# ponytail: Telugu added 11-10 (reddit user, two Telugu novels came out as Latin junk). Add a
-# script here plus its tesseract-ocr-<lang> package in the Dockerfile when someone asks.
-OCR_SCRIPTS = {"Latin": ("eng", "en"), "Telugu": ("tel", "te")}
+# ponytail: Telugu added 11-10 (reddit user, two Telugu novels came out as Latin junk), Hindi
+# with it. Add a script here plus its tesseract-ocr-<lang> package in the Dockerfile when asked.
+# Latin is split by latin_lang() into the languages the site has pages in (en, pt, es).
+OCR_SCRIPTS = {"Telugu": ("tel", "te"), "Devanagari": ("hin", "hi")}
+LATIN_LANGS = {"en": "eng", "pt": "por", "es": "spa"}
+# words only one of the three languages uses, accents stripped (English OCR drops them)
+_STOP = {
+    "en": set("the and of to was he that it with his is for you i".split()),
+    "pt": set("nao com do da dos das ele ela voce em na um ao muito isso ja entao".split()),
+    "es": set("el los las y del con pero muy es su lo ella esta eso ya entonces".split()),
+}
+
+
+def latin_lang(text: str) -> str:
+    """"en", "pt" or "es" for Latin-script text, by words only that language uses; English if unsure."""
+    plain = unicodedata.normalize("NFKD", text.lower())
+    words = re.findall(r"[a-z]+", "".join(c for c in plain if not unicodedata.combining(c)))
+    score = {k: sum(w in v for w in words) for k, v in _STOP.items()}
+    best = max(score, key=score.get)
+    rest = max(v for k, v in score.items() if k != best)
+    return best if score[best] >= 5 and score[best] >= 1.5 * rest else "en"
+
+
+def text_lang(text: str) -> str:
+    """EPUB language of a text layer: the Indian script if most letters are one, else latin_lang."""
+    counts = Counter("te" if "\u0c00" <= c <= "\u0c7f" else "hi" if "\u0900" <= c <= "\u097f" else "latin"
+                     for c in text if c.isalpha())
+    top = counts.most_common(1)
+    return top[0][0] if top and top[0][0] != "latin" and top[0][1] > 0.5 * sum(counts.values()) \
+        else latin_lang(text)
 _TESS_LANGS: set | None = None
 
 
@@ -478,7 +505,15 @@ def ocr_lang(doc) -> tuple[str, str]:
         lang = OCR_SCRIPTS.get(script)
         if lang and lang[0] in _tess_langs():
             return lang
-    return "eng", "en"
+    # Latin, or nothing detected: read one page in English, then pick en/pt/es by its words.
+    # ponytail: English OCR on Portuguese drops every ã and ç; the right model keeps them.
+    try:
+        png = doc[n // 2].get_pixmap(dpi=OCR_DPI).tobytes("png")
+        code = latin_lang(_tess(png, 1, 1)[0])
+    except Exception:
+        code = "en"
+    tess = LATIN_LANGS[code]
+    return (tess, code) if tess in _tess_langs() else ("eng", "en")
 
 
 def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
@@ -2230,6 +2265,26 @@ def _junk_share(text: str) -> float:
     return junk / len(s)
 
 
+# Old non-Unicode Indian fonts. Kruti Dev and friends (Hindi) map glyphs onto plain ASCII
+# ("dk;Z dj jgs gSa"), so the symbol share misses them; the font name does not.
+LEGACY_FONTS = re.compile(r"kruti|devlys|chanakya|shusha|walkman|shree.?dev|aps.?dv|priyaanka|pallavi|"
+                          r"natyamayuri|pragathi|anupama", re.I)
+
+
+def _legacy_font_share(doc, idx) -> float:
+    """Share of the sampled text drawn in a known old non-Unicode Indian font."""
+    old = total = 0
+    for i in idx:
+        for b in doc[i].get_text("dict").get("blocks", []):
+            for line in b.get("lines", []):
+                for sp in line["spans"]:
+                    n = len(sp["text"].strip())
+                    total += n
+                    if LEGACY_FONTS.search(sp["font"]):
+                        old += n
+    return old / total if total else 0.0
+
+
 def _garbled(doc) -> bool:
     """True when the text layer is font codes, not words: Indian-language books typeset in old
     non-Unicode fonts (Priyaanka, Anu) extract as "ã¨∂~°º^Õ=~°". Those pages go to OCR.
@@ -2238,8 +2293,15 @@ def _garbled(doc) -> bool:
     n = len(doc)
     if not n:
         return False
-    text = "".join(doc[i].get_text() for i in sorted({int(k * n / 12) for k in range(12)}))
-    return len(text) >= 300 and _junk_share(text) > 0.2
+    idx = sorted({int(k * n / 12) for k in range(12)})
+    text = "".join(doc[i].get_text() for i in idx)
+    return len(text) >= 300 and (_junk_share(text) > 0.2 or _legacy_font_share(doc, idx) > 0.5)
+
+
+def doc_lang(doc) -> str:
+    """EPUB language for a text-path book, from a sample of its pages."""
+    n = len(doc)
+    return text_lang("".join(doc[i].get_text() for i in sorted({int(k * n / 12) for k in range(12)})) if n else "")
 
 
 def _paragraphs(rows, bbox, ocr=False):
@@ -2591,7 +2653,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
                       "The whole book is $5 at epub.ftak.net, converted on the spot.")])
 
-        data = build_epub(chapters, safe_title, author[:120])
+        data = build_epub(chapters, safe_title, author[:120], doc_lang(doc))
         # ponytail: nothing stored, files die with request — matches their privacy pitch for free
         doc.close()
         return done(data, npages, "pages-preview" if cut_pages else "")
