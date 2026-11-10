@@ -93,6 +93,11 @@ BATCH_URL = "https://buy.polar.sh/polar_cl_DIV8bQHOvUqSGLvGPOceLOSWaSGxXDe0iQPm5
 BATCH_PRODUCT = "4c35ff8c-8fc9-451b-9861-815c5448e733"
 BATCH_DAYS = 30
 ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
+# ponytail: 11-10 price test. Half the books over the free cap are 165-412 pages and the rival's
+# smallest pack is $3.75, so books up to 400 pages are offered at $3 instead of $5.
+SHORT_URL = "https://buy.polar.sh/polar_cl_0xs3znrEUDiRWhJrHmHtJhaL6utEFjmHy1nDI2jpW3C"
+SHORT_PRODUCT = "154810a2-37a4-4b8a-bc21-cb68fbd67ad8"
+SHORT_MAX_PAGES = 400
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN", "")  # ponytail: read-only OAT, only orders:read is needed
 POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
@@ -207,16 +212,24 @@ def paid_checkout(cid: str, product_id: str) -> bool:
     return True
 
 
-def onebook_ok(cid: str, digest: str) -> bool:
-    """A paid one-book checkout converts one file. Re-running that same file stays free."""
+def onebook_pages(cid: str) -> int:
+    """Page limit a paid one-book checkout buys: 2,000 for the $5 book, 400 for the $3 one, 0 unpaid."""
+    if paid_checkout(cid, ONEBOOK_PRODUCT):
+        return SHELF_MAX_PAGES
+    return SHORT_MAX_PAGES if paid_checkout(cid, SHORT_PRODUCT) else 0
+
+
+def onebook_ok(cid: str, digest: str) -> int:
+    """A paid one-book checkout converts one file (re-running that file stays free). Returns its
+    page limit, 0 when the checkout is unpaid or already used on a different file."""
     try:
         for line in USED.read_text().splitlines():
             parts = line.split()
-            if parts and parts[0] == cid:
-                return parts[1:2] == [digest]
+            if parts and parts[0] == cid and parts[1:2] != [digest]:
+                return 0
     except OSError:
         pass
-    return paid_checkout(cid, ONEBOOK_PRODUCT)
+    return onebook_pages(cid)
 
 
 def onebook_use(cid: str, digest: str):
@@ -1055,11 +1068,15 @@ const GHOST='display:inline-block;margin:8px 8px 0 0;background:transparent;colo
 try{const ob=localStorage.getItem('onebook');if(ob){msg.className='ok';msg.innerHTML='You have a paid book waiting. '
  +'<a href="/onebook?checkout_id='+encodeURIComponent(ob)+'">Convert it here</a>'}}catch(e){}
 function buy(why){return '/go/onebook?why='+why+'&v='+V}
+// ponytail (11-10 test): a book up to 400 pages gets the $3 offer instead of $5; 'short' clicks in /funnel
+function short(n){return n&&+n<=400}
+function buy3(why){return '/go/short?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 // ponytail (11-07): over the limit we convert the free part first, so the $5 ask comes after they've seen their own book
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
 function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
- +'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>'
+ +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
+  :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
@@ -1071,7 +1088,8 @@ function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. Th
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
 function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
- +'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>'
+ +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
+  :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot. Nothing stored. Not happy? Full refund.</span>'}
@@ -1540,11 +1558,12 @@ def onebook(request: Request):
     line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
                        "ref": "onebook", "checkout_id": cid, "ua": ua_of(request)[:120]})
     _write(line)
-    paid = paid_checkout(cid, ONEBOOK_PRODUCT)
+    limit = onebook_pages(cid)
+    paid = bool(limit)
     # ponytail: paid means the upload box right here, converted on the spot. email stays the fallback
     if paid:
         main = f"""<div class="card">
-<p><b>Payment confirmed.</b> Choose the PDF and it converts now, up to 2,000 pages, scans included.</p>
+<p><b>Payment confirmed.</b> Choose the PDF and it converts now, up to {limit:,} pages, scans included.</p>
 <input id="file" type="file" accept=".pdf">
 <button class="btn" id="go">Convert my book</button>
 <p id="msg"></p>
@@ -1785,7 +1804,7 @@ async def beacon(request: Request):
 @app.get("/go/{offer}")
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
-    url = {"onebook": ONETIME_URL, "shelf": SHELF_URL, "batch": BATCH_URL}.get(offer)
+    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "shelf": SHELF_URL, "batch": BATCH_URL}.get(offer)
     if not url:
         raise HTTPException(404, "no such offer")
     if not is_bot(ua_of(request)):
@@ -2553,13 +2572,14 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         # ponytail: ?paid=CHECKOUT_ID is the $5 one-book, converted on the spot by the converter
         cid = (request.query_params.get("paid") or "")[:80]
         digest = hashlib.sha256(raw).hexdigest()[:32]
-        book = bool(cid) and onebook_ok(cid, digest)
+        book_max = onebook_ok(cid, digest) if cid else 0
+        book = bool(book_max)
         if cid and not book:
             log(False, 0, kb_in, 0, "paid-refused", ref, request=request)
             raise HTTPException(402, "this checkout is not confirmed as paid, or it already converted a "
                                 f"different book. Reply to the Polar receipt or email {SHELF_MAIL}")
         paid = bool(key or book)
-        max_pages = SHELF_MAX_PAGES if paid else MAX_PAGES
+        max_pages = SHELF_MAX_PAGES if key else (book_max or MAX_PAGES)
         max_mb = SHELF_MAX_MB if paid else MAX_MB
         if len(raw) > max_mb * 1024 * 1024:
             log(False, 0, kb_in, 0, "too big", ref, email.strip()[:120], request=request)
@@ -2589,7 +2609,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             doc.close()
             log(False, n0, kb_in, 0, "too many pages", ref, email.strip()[:120], request=request)
             raise HTTPException(413, f"over {max_pages} pages ({n0} here) - one book is $5 (up to 2,000 pages)"
-                if not paid else f"{n0} pages is over the {max_pages}-page limit per file. Email it to {SHELF_MAIL} and we will raise your per-file limit, included in your plan")
+                if not paid else f"{n0} pages is over the {max_pages}-page limit of this purchase. Email {SHELF_MAIL} "
+                f"with your checkout ID and we will raise the limit for your book, no extra charge")
 
         def done(data: bytes, pages: int, kind: str):
             log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
@@ -2623,7 +2644,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 if not cut_pages:
                     log(False, total, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
                 doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
-            if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
+            if npages <= (min(PAID_OCR_MAX_PAGES, max_pages) if paid else FREE_OCR_PAGES) or cut:
                 tlang, elang = ocr_lang(doc)
                 pages = ocr_doc(doc, layout=True, lang=tlang) or []
                 texts = [t for t, _ in pages]

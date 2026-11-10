@@ -111,7 +111,7 @@ def main():
     assert "$5" in shelf.text and "on the spot" in shelf.text, \
         "shelf page does not pitch the $5 one-book job"
     # checkout links go through /go so the click is counted, then on to polar
-    for offer, url in (("onebook", pdf2epub.ONETIME_URL), ("shelf", pdf2epub.SHELF_URL)):
+    for offer, url in (("onebook", pdf2epub.ONETIME_URL), ("short", pdf2epub.SHORT_URL), ("shelf", pdf2epub.SHELF_URL)):
         g = client.get(f"/go/{offer}?why=test", follow_redirects=False)
         assert g.status_code == 302 and g.headers["location"] == url, (offer, g.status_code)
     assert client.get("/go/nope", follow_redirects=False).status_code == 404
@@ -280,6 +280,26 @@ def main():
     other = client.post(f"/convert?paid={bcid}", files={"f": ("c.pdf", craw, "application/pdf")})
     assert other.status_code == 402, "one payment converted a second, different book"
     assert convert_with("?paid=69c101bb-0ede-4bb1-893f-000000000000") == 402, "unpaid checkout lifted the cap"
+    pdf2epub.paid_checkout = real_paid
+
+    # the $3 short book (11-10 price test): lifts the cap for one book up to 400 pages, never past it
+    tcid = "3c9a7e21-5b4d-4f6a-8e2c-9d1b0a7f6e54"
+    pdf2epub.paid_checkout = lambda c, p: (c, p) == (tcid, pdf2epub.SHORT_PRODUCT)
+    mid = pymupdf.open()
+    for i in range(300):
+        mid.new_page().insert_text((72, 72), f"Page {i + 1} of a mid-length book.", fontsize=11)
+    mraw = mid.tobytes()
+    assert client.post("/convert", files={"f": ("m.pdf", mraw, "application/pdf")}).status_code == 413, \
+        "free tier should stop a 300 page pdf"
+    ok3 = client.post(f"/convert?paid={tcid}", files={"f": ("m.pdf", mraw, "application/pdf")})
+    assert ok3.status_code == 200, ("a paid $3 book must convert 300 pages", ok3.text[:200])
+    # a 600-page book on a fresh $3 checkout: over its 400 pages
+    tcid2 = "4d0b8f32-6c5e-4a7b-9f3d-0e2c1b8a7f65"
+    pdf2epub.paid_checkout = lambda c, p: (c, p) == (tcid2, pdf2epub.SHORT_PRODUCT)
+    over3 = client.post(f"/convert?paid={tcid2}", files={"f": ("b.pdf", braw, "application/pdf")})
+    assert over3.status_code == 413 and "400-page limit" in over3.text, over3.text[:200]
+    page3 = client.get(f"/onebook?checkout_id={tcid2}").text
+    assert "Payment confirmed" in page3 and "up to 400 pages" in page3, "a $3 checkout must confirm with its 400 limit"
     pdf2epub.paid_checkout = real_paid
 
     # the OCR wall: a short scan is free, a long scan is refused with a $5 offer, the preview
