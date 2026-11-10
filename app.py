@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
@@ -437,10 +438,53 @@ def _ocr_page(page):
     return _tess(pix.tobytes("png"), pix.width, pix.height)
 
 
-def _tess(png: bytes, page_w: int, page_h: int):
+# Tesseract script name (OSD) -> traineddata to OCR with, and the EPUB language code for it.
+# ponytail: Telugu added 11-10 (reddit user, two Telugu novels came out as Latin junk). Add a
+# script here plus its tesseract-ocr-<lang> package in the Dockerfile when someone asks.
+OCR_SCRIPTS = {"Latin": ("eng", "en"), "Telugu": ("tel", "te")}
+_TESS_LANGS: set | None = None
+
+
+def _tess_langs() -> set:
+    global _TESS_LANGS
+    if _TESS_LANGS is None:
+        try:
+            r = subprocess.run(["tesseract", "--list-langs"], capture_output=True, timeout=20)
+            _TESS_LANGS = set(r.stdout.decode().split()[1:]) if r.returncode == 0 else set()
+        except Exception:
+            _TESS_LANGS = set()
+    return _TESS_LANGS
+
+
+def ocr_lang(doc) -> tuple[str, str]:
+    """(tesseract lang, epub lang) for this book, from Tesseract's script detection on a few pages.
+
+    ponytail: every scan was read with "-l eng" until 11-10, so a Telugu book came out as
+    "SAOES aP HISPen Brow...". Latin or anything unsure stays English, the old behaviour."""
+    if "osd" not in _tess_langs() or not len(doc):
+        return "eng", "en"
+    n, votes = len(doc), Counter()
+    for i in sorted({n // 3, n // 2, (2 * n) // 3}):
+        try:
+            png = doc[i].get_pixmap(dpi=150).tobytes("png")
+            r = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "0", "-l", "osd"],
+                               input=png, capture_output=True, timeout=30)
+        except Exception:
+            continue
+        m = re.search(r"Script: (\w+)", r.stdout.decode("utf-8", "replace"))
+        if m:
+            votes[m.group(1)] += 1
+    for script, _ in votes.most_common(1):
+        lang = OCR_SCRIPTS.get(script)
+        if lang and lang[0] in _tess_langs():
+            return lang
+    return "eng", "en"
+
+
+def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     """Tesseract on one rendered page. Thread-safe: no pymupdf objects in here."""
     try:
-        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", "eng", "tsv"],
+        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", lang, "tsv"],
             input=png, capture_output=True, timeout=60)
     except Exception:
         return "", 0.0
@@ -465,10 +509,11 @@ def _tess(png: bytes, page_w: int, page_h: int):
     cov = ink / (page_w * page_h) if page_w and page_h else 0.0
     return "\n\n".join("\n".join(p) for p in paras.values()), cov
 
-def ocr_doc(doc, layout: bool = False) -> list | None:
+def ocr_doc(doc, layout: bool = False, lang: str | None = None) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
         return None
+    lang = lang or ocr_lang(doc)[0]
     # ponytail: pymupdf is not thread-safe, so pages render one by one here and only tesseract runs
     # in parallel. a small window keeps at most a few rendered pages in memory at once
     out, window = [], []
@@ -476,7 +521,7 @@ def ocr_doc(doc, layout: bool = False) -> list | None:
         for page in doc:
             try:
                 pix = page.get_pixmap(dpi=OCR_DPI)
-                window.append(ex.submit(_tess, pix.tobytes("png"), pix.width, pix.height))
+                window.append(ex.submit(_tess, pix.tobytes("png"), pix.width, pix.height, lang))
             except Exception:
                 window.append(None)
             if len(window) >= OCR_THREADS * 2:
@@ -526,14 +571,53 @@ def _wordy(text: str) -> bool:
     """OCR text that reads as words, not map-label junk. A low-ink page (a one-page form, a short
     last page) is kept as a picture and its text too; reddit 11-06 got a picture and no words."""
     toks = text.split()
-    words = [t for t in toks if len(w := t.strip("()[].,:;!?\"'/-")) >= 2 and w.isalpha()]  # any script, CAPS too
+    # any script, CAPS too; vowel signs (Telugu, Hindi) are marks, not letters, and ZWNJ joins them
+    words = [t for t in toks if len(w := t.strip("()[].,:;!?\"'/-")) >= 2
+             and all(c.isalpha() or unicodedata.category(c) in ("Mn", "Mc") or c == "\u200c" for c in w)]
     return len(words) >= 5 and len(words) >= 0.6 * len(toks)
 
 
-def ocr_chapters(pages: list[str], figures: dict | None = None):
-    """Tesseract text -> same (kind, text) rows the text path emits."""
+HEAD_WORD = re.compile(r"^(chapter|part|prologue|epilogue|book)\b", re.I)
+
+
+def _page_paras(txt: str) -> list[str]:
+    return [" ".join(l.strip() for l in para.splitlines() if l.strip())
+            for para in re.split(r"\n\s*\n", txt) if para.strip()]
+
+
+def _running_heads(pages: list[str]) -> set:
+    """Keys of short first/last paragraphs that repeat across pages: "మాయ 77", "24 AUTHOR NAME".
+
+    ponytail: the text path drops running headers by position; OCR text had none of that, so a
+    Telugu novel (11-10) kept "title + page number" as a paragraph on every page. Digits are
+    stripped before comparing, so the page number does not make each one unique."""
+    seen = Counter()
+    for txt in pages:
+        paras = _page_paras(txt)
+        for para in {paras[0], paras[-1]} if paras else ():
+            if len(para) <= 50 and not HEAD_WORD.match(para) and len(k := _head_key(para)) >= 3:
+                seen[k] += 1
+    return {k for k, c in seen.items() if c >= max(3, len(pages) // 10)}
+
+
+def _head_key(text: str) -> str:
+    # letters and vowel signs only: \W would strip Telugu/Hindi vowel signs and shrink the key
+    return "".join(c for c in text if c.isalpha() or unicodedata.category(c) in ("Mn", "Mc")).lower()
+
+
+def _ornament(text: str) -> bool:
+    """A dingbat scene break OCR'd as letters: "రె రె ర రె ర", "ష్‌ ష్‌ ష్‌"."""
+    toks = text.split()  # ponytail: no Latin letters, so "No, no, no." dialogue never matches
+    return (len(toks) >= 4 and all(len(t) <= 3 for t in toks) and len(set(toks)) <= 3
+            and not any(c.isascii() and c.isalpha() for c in text))
+
+
+def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None = None):
+    """Tesseract text -> same (kind, text) rows the text path emits. toc: {page index: title}
+    from the PDF's own bookmarks, used as chapter breaks when present."""
     # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
     chapters, cur = [], []
+    heads = _running_heads(pages)
 
     def flush():
         if cur:
@@ -541,18 +625,21 @@ def ocr_chapters(pages: list[str], figures: dict | None = None):
             cur.clear()
 
     for i, txt in enumerate(pages):
+        if toc and i in toc:
+            flush()
+            cur.append(("h1", toc[i]))
         if figures and i in figures:
             cur.append(("img", (figures[i], "")))
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
-        for para in re.split(r"\n\s*\n", txt):
-            lines = [l.strip() for l in para.splitlines() if l.strip()]
-            if not lines:
+        paras = _page_paras(txt)
+        for j, para in enumerate(paras):
+            if (j in (0, len(paras) - 1) and len(para) <= 50 and _head_key(para) in heads) or _ornament(para):
                 continue
-            text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", " ".join(lines))  # "horse- shoe" -> "horseshoe"
-            head = re.match(r"^(chapter|part|prologue|epilogue|book)\b", text, re.I) or (
+            text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
+            head = HEAD_WORD.match(text) or (
                 text.isupper() and len(text) <= 60 and any(c.isalpha() for c in text))
-            if head and len(text) < 120:
+            if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 flush()
                 cur.append(("h1", text))
             else:
@@ -560,17 +647,25 @@ def ocr_chapters(pages: list[str], figures: dict | None = None):
     flush()
     return chapters
 
+def pdf_toc(doc) -> dict:
+    """Top-level PDF bookmarks as {page index: title}; empty when the PDF has none."""
+    try:
+        return {p - 1: _clean(t).strip()[:120] for lvl, t, p, *_ in doc.get_toc() if lvl == 1 and p >= 1 and t.strip()}
+    except Exception:
+        return {}
+
+
 def _clean(t: str) -> str:
     # ponytail: PDF text can carry control chars, lxml refuses them in XML -> 500 on a good file
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", t or "")
 
 
-def build_epub(chapters, title: str, author: str) -> bytes:
+def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
     book = epub.EpubBook()
     book.set_title(_clean(title)[:120])
     if author:
         book.add_author(_clean(author)[:120])
-    book.set_language("en")
+    book.set_language(lang)  # ponytail: a Kindle picks the font and hyphenation by this
     items, toc, fig_no = [], [], 0
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
@@ -1212,7 +1307,8 @@ async def scan(request: Request, files: list[UploadFile] = File(...), title: str
         log(False, 0, kb_in, 0, "no images", ref, request=request)
         raise HTTPException(400, "could not read those images")
     npages = doc.page_count
-    pages = ocr_doc(doc, layout=True) or []
+    tlang, elang = ocr_lang(doc)
+    pages = ocr_doc(doc, layout=True, lang=tlang) or []
     texts = [t for t, _ in pages]
     if not any(len(t) for t in texts):
         doc.close()
@@ -1220,7 +1316,7 @@ async def scan(request: Request, files: list[UploadFile] = File(...), title: str
         raise HTTPException(422, "no readable text found, try a clearer photo of the page")
     figs = _scan_figures(doc, pages)
     doc.close()
-    data = build_epub(ocr_chapters(texts, figs), (title or "Scanned book")[:120], "")
+    data = build_epub(ocr_chapters(texts, figs), (title or "Scanned book")[:120], "", elang)
     log(True, npages, kb_in, len(data) // 1024, "scan+fig" if figs else "scan", ref, request=request)
     return StreamingResponse(BytesIO(data), media_type="application/epub+zip",
         headers={"Content-Disposition": "attachment; filename=book.epub"})
@@ -2118,7 +2214,32 @@ def ocr_ok(texts) -> bool:
 def _text_blocks(doc) -> list:
     """The text-path blocks, or [] when the PDF should go to OCR. One place, so /convert,
     manual_convert.py and test_regression.py all pick the same path."""
-    return [] if _mostly_scanned(doc) else list(_blocks(doc))
+    return [] if _mostly_scanned(doc) or _garbled(doc) else list(_blocks(doc))
+
+
+def _junk_share(text: str) -> float:
+    """Share of non-space characters that are symbols, odd punctuation or private-use glyphs:
+    non-ASCII ones (≤ ∞ ¨ ° «) plus the ASCII ones prose barely uses (~ ^ = ` < > # | \\).
+
+    ponytail: letters never count, so Unicode Telugu, Hindi, Russian or Vietnamese stay text
+    (0.05-0.09 measured 11-10); a dense English line of curly quotes and ligatures is 0.15."""
+    s = [c for c in text if not c.isspace()]
+    if not s:
+        return 0.0
+    junk = sum(1 for c in s if (ord(c) > 0x7F and unicodedata.category(c)[0] in "SPC") or c in "~^=`<>#|\\")
+    return junk / len(s)
+
+
+def _garbled(doc) -> bool:
+    """True when the text layer is font codes, not words: Indian-language books typeset in old
+    non-Unicode fonts (Priyaanka, Anu) extract as "ã¨∂~°º^Õ=~°". Those pages go to OCR.
+
+    ponytail: two Telugu novels (reddit 11-10) measured 0.26-0.43 on every page. Samples up to 12 pages."""
+    n = len(doc)
+    if not n:
+        return False
+    text = "".join(doc[i].get_text() for i in sorted({int(k * n / 12) for k in range(12)}))
+    return len(text) >= 300 and _junk_share(text) > 0.2
 
 
 def _paragraphs(rows, bbox, ocr=False):
@@ -2441,16 +2562,17 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                     log(False, total, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
                 doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
             if npages <= (PAID_OCR_MAX_PAGES if paid else FREE_OCR_PAGES) or cut:
-                pages = ocr_doc(doc, layout=True) or []
+                tlang, elang = ocr_lang(doc)
+                pages = ocr_doc(doc, layout=True, lang=tlang) or []
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):
                     figs = _scan_figures(doc, pages)
-                    chapters = ocr_chapters(texts, figs)
+                    chapters = ocr_chapters(texts, figs, pdf_toc(doc))
                     if cut:
                         chapters.append([("h1", "The rest of this book"),
                             ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
                                   "The whole book is $5 at epub.ftak.net, converted on the spot.")])
-                    data = build_epub(chapters, safe_title, author[:120])
+                    data = build_epub(chapters, safe_title, author[:120], elang)
                     doc.close()
                     return done(data, len(texts), "ocr-preview" if cut else ("ocr+fig" if figs else "ocr"))
             # ponytail: calibre still last resort (image-only epub beats error)

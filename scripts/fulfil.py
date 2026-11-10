@@ -62,18 +62,20 @@ def convert(raw: bytes, title: str) -> tuple[bytes, bool]:
     import pymupdf
     import app as pdf2epub
     doc = pymupdf.open(stream=raw, filetype="pdf")
-    blocks = list(pdf2epub._blocks(doc))
+    blocks = pdf2epub._text_blocks(doc)  # same scan / old-font choice as the site
+    lang = "en"
     if blocks:
         chapters = pdf2epub._structure(blocks, doc)
         was_ocr = False
     else:
-        pages = pdf2epub.ocr_doc(doc) or []
-        chapters = pdf2epub.ocr_chapters(pages)
+        tlang, lang = pdf2epub.ocr_lang(doc)
+        pages = pdf2epub.ocr_doc(doc, lang=tlang) or []
+        chapters = pdf2epub.ocr_chapters(pages, toc=pdf2epub.pdf_toc(doc))
         was_ocr = True
     doc.close()
     if not chapters:
         raise RuntimeError("nothing readable in that pdf")
-    return pdf2epub.build_epub(chapters, title or "book", ""), was_ocr
+    return pdf2epub.build_epub(chapters, title or "book", "", lang), was_ocr
 
 
 def log_lead(row):

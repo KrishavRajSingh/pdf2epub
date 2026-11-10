@@ -14,7 +14,7 @@ import json, sys
 from pathlib import Path
 
 import pymupdf
-from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok
+from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc
 
 GOLDEN = Path(__file__).parent / "tests" / "golden.json"
 PROSE = ("It was a bright cold day in April, and the clocks were striking thirteen. "
@@ -145,6 +145,56 @@ def make_text_with_plates():
     return d
 
 
+# Telugu prose written for this test (not from any book). Needs tesseract's "tel" and "osd"
+# data locally (the Railway image installs tesseract-ocr-tel) and macOS's Telugu MN font.
+TEL = ("ఒక చిన్న గ్రామంలో ఒక రైతు ఉండేవాడు. అతను ప్రతి రోజు ఉదయాన్నే పొలానికి వెళ్ళేవాడు. "
+       "సాయంత్రం ఇంటికి వచ్చి పిల్లలకు కథలు చెప్పేవాడు. ")
+TEL_FONTS = "/System/Library/Fonts/Supplemental"
+
+
+def make_legacy_font():
+    """Indian-language book in an old non-Unicode font (reddit 11-10, two Telugu novels): the
+    page shows Telugu, but the text layer extracts as font codes like "ã¨∂~°º^Õ=~°"."""
+    css = '@font-face {font-family: tel; src: url("Telugu MN.ttc");} body {font-family: tel; font-size: 14px;}'
+    d = _doc()
+    for k in range(4):
+        # running header "title + page number" on every page, and a dingbat scene break line
+        page = pymupdf.open()
+        hp = page.new_page()
+        hp.insert_htmlbox(pymupdf.Rect(250, 30, 450, 60), f"<p>మాయ {k + 7}</p>", css=css, archive=pymupdf.Archive(TEL_FONTS))
+        hp.insert_htmlbox(pymupdf.Rect(72, 110, 520, 700), "<p>" + TEL * 4 + "</p>", css=css, archive=pymupdf.Archive(TEL_FONTS))
+        hp.insert_htmlbox(pymupdf.Rect(200, 710, 450, 740), "<p>ర ర ర ర ర</p>", css=css, archive=pymupdf.Archive(TEL_FONTS))
+        png = hp.get_pixmap(dpi=150).tobytes("png")
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), "ã¨ÕåÑÏ «û~°O... U„Ñ≤ÖÒ Jã≤ÃÕ =~°Í Åˆ " * 20,
+                          fontsize=11, render_mode=3)
+    return d
+
+
+def make_scan_running_head():
+    """Scan with a running header and page number on every page (11-10): OCR kept them as
+    paragraphs. The PDF's own bookmarks give the chapters."""
+    d = _doc()
+    for k in range(4):
+        src = pymupdf.open().new_page()
+        src.insert_text((230, 50), f"THE LONG ROAD    {k + 12}", fontsize=10)
+        src.insert_textbox(pymupdf.Rect(72, 90, 520, 760), PROSE * 12, fontsize=12)
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+    d.set_toc([[1, "Part One", 1], [1, "Part Two", 3]])
+    return d
+
+
+def make_accented_text():
+    """Portuguese prose, accents everywhere: must stay on the text path, not count as font codes."""
+    d = _doc()
+    for _ in range(3):
+        d.new_page().insert_textbox(pymupdf.Rect(72, 72, 520, 780),
+            "São João não está à espera da ação. Você já viu a canção do coração? " * 12, fontsize=11)
+    return d
+
+
 # name -> (maker, rules). path / path_in: which pipeline. has / hasnt: phrases. imgs: minimum
 # pictures kept. known: problems we know about and accept for now (error prefixes); they print
 # as KNOWN instead of failing. When one goes away, the run says so: drop it from known.
@@ -168,6 +218,12 @@ CASES = {
     "photo_book": (make_photo_book, {"path_in": ["ocr", "calibre"]}),
     "text_with_plates": (make_text_with_plates, {"path": "text", "has": ["clocks were striking"], "imgs": 2,
         "known": ["0 pictures kept"]}),  # _figure_rect skips images over 80% of the page
+    # 11-10: legacy-font text layer was copied as junk, and OCR only read English
+    "legacy_font": (make_legacy_font, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"],
+                                       "hasnt": ["ã¨", "Ñ", "మాయ", "యాయ", "ర ర ర"], "lang": "te"}),
+    "scan_running_head": (make_scan_running_head, {"path": "ocr", "has": ["clocks were striking"],
+                                                   "hasnt": ["LONG ROAD"], "h_min": 2}),
+    "accented_text": (make_accented_text, {"path": "text", "has": ["São João não está"]}),
 }
 
 
@@ -180,7 +236,7 @@ def convert(doc):
     texts = [t for t, _ in pages]
     if not ocr_ok(texts):
         return "calibre", []  # the site falls back to calibre here: an image-only EPUB
-    return "ocr", ocr_chapters(texts, _scan_figures(doc, pages))
+    return "ocr", ocr_chapters(texts, _scan_figures(doc, pages), pdf_toc(doc))
 
 
 def summary(path, chapters):
@@ -230,6 +286,8 @@ def main():
         s, text = summary(*convert(doc))
         new[name] = s
         errs = check(name, rules, s, text)
+        if "lang" in rules and (got := ocr_lang(doc)[1]) != rules["lang"]:
+            errs.append(f"epub language {got}, want {rules['lang']}")
         known = [e for e in errs if any(e.startswith(k) for k in rules.get("known", []))]
         errs = [e for e in errs if e not in known]
         for k in rules.get("known", []):

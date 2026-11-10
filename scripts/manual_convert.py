@@ -17,9 +17,11 @@ def convert(path: str, out: str | None = None, title: str = "", author: str = ""
     raw = Path(path).read_bytes()
     doc = pymupdf.open(stream=raw, filetype="pdf")
     blocks = pdf2epub._text_blocks(doc)
-    if not blocks:  # scanned: OCR it
-        pages = pdf2epub.ocr_doc(doc) or []
-        chapters = pdf2epub.ocr_chapters(pages)
+    lang = "en"
+    if not blocks:  # scanned or old-font text: OCR it
+        tlang, lang = pdf2epub.ocr_lang(doc)
+        pages = pdf2epub.ocr_doc(doc, lang=tlang) or []
+        chapters = pdf2epub.ocr_chapters(pages, toc=pdf2epub.pdf_toc(doc))
         kind = "ocr"
     else:
         chapters = pdf2epub._structure(blocks, doc)
@@ -27,7 +29,7 @@ def convert(path: str, out: str | None = None, title: str = "", author: str = ""
     doc.close()
     if not chapters:
         raise SystemExit("nothing readable in that file")
-    data = pdf2epub.build_epub(chapters, title or Path(path).stem, author)
+    data = pdf2epub.build_epub(chapters, title or Path(path).stem, author, lang)
     dest = Path(out or Path(path).with_suffix(".epub"))
     dest.write_bytes(data)
     heads = [t for ch in chapters for k, t in ch if k in ("h1", "h2")]

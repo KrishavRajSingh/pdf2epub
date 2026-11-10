@@ -30,9 +30,9 @@
   "path": "ocr",
   "chapters": 1,
   "headings": [],
-  "paragraphs": 6,
+  "paragraphs": 3,
   "imgs": 0,
-  "words": 1059
+  "words": 1050
  },
  "scan_short_page": {
   "path": "ocr",
@@ -83,5 +83,32 @@
   "paragraphs": 4,
   "imgs": 0,
   "words": 600
+ },
+ "legacy_font": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 4,
+  "imgs": 4,
+  "words": 304
+ },
+ "scan_running_head": {
+  "path": "ocr",
+  "chapters": 2,
+  "headings": [
+   "Part One",
+   "Part Two"
+  ],
+  "paragraphs": 4,
+  "imgs": 0,
+  "words": 1204
+ },
+ "accented_text": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 540
  }
 }
