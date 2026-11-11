@@ -97,7 +97,7 @@
   "chapters": 1,
   "headings": [],
   "paragraphs": 4,
-  "imgs": 4,
+  "imgs": 0,
   "words": 304
  },
  "scan_running_head": {
@@ -140,7 +140,7 @@
   "chapters": 1,
   "headings": [],
   "paragraphs": 3,
-  "imgs": 3,
+  "imgs": 0,
   "words": 285
  },
  "broken_unicode_telugu": {
@@ -148,7 +148,7 @@
   "chapters": 1,
   "headings": [],
   "paragraphs": 3,
-  "imgs": 3,
+  "imgs": 0,
   "words": 285
  },
  "hindi_old_font": {

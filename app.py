@@ -771,6 +771,9 @@ def _scan_figures(doc, pages, pics: dict | None = None):
         # A map can OCR into one huge garbage line; very low ink still means picture.
         if len(clean) >= 1800 and cov >= 0.03:
             continue
+        if _wordy(text) and len(clean.split()) >= 30:
+            continue  # ponytail: a short chapter-end or poem page is text; whole-page copies filled
+            # Telugu memoirs with pictures of their own pages (Brahmanandam 87 of 195, 11-11)
         figs[i] = _fig_bytes(doc[i].get_pixmap(dpi=SCAN_FIG_DPI))
     return figs
 
