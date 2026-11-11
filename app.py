@@ -106,6 +106,7 @@ POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
 SHELF_KEYS = Path(os.environ.get("LOG_DIR", ".")) / "shelf-keys.txt"  # one key per line
 PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified ids, so refresh is free
 USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
+FREEBOOK = Path(os.environ.get("LOG_DIR", ".")) / "freebook.txt"  # token email ip date [digest], one free whole book per email
 FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
 SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of most books
 SHELF_MAX_MB = 1000
@@ -238,6 +239,30 @@ def onebook_use(cid: str, digest: str):
     try:
         with USED.open("a") as fh:
             fh.write(f"{cid} {digest}\n")
+    except OSError:
+        pass
+
+
+def _freebook_rows() -> list[list[str]]:
+    try:
+        return [l.split() for l in FREEBOOK.read_text().splitlines() if l.strip()]
+    except OSError:
+        return []
+
+
+def freebook_ok(token: str, digest: str) -> bool:
+    """A free-book token converts one whole book (re-running that same file stays free)."""
+    rows = _freebook_rows()
+    if not token or not any(r[0] == token for r in rows):
+        return False
+    used = [r for r in rows if r[0] == "used" and r[1:2] == [token]]
+    return not used or any(r[2:3] == [digest] for r in used)
+
+
+def freebook_use(token: str, digest: str):
+    try:
+        with FREEBOOK.open("a") as fh:
+            fh.write(f"used {token} {digest}\n")
     except OSError:
         pass
 
@@ -1331,8 +1356,19 @@ function short(n){return n&&+n<=400}
 function buy3(why){return '/go/short?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 // ponytail (11-07): over the limit we convert the free part first, so the $5 ask comes after they've seen their own book
+// ponytail (11-12): first whole book free for an email, once per browser. the paid offers sit under it for the next book
+function fbUsed(){try{return !!localStorage.getItem('fb_used')}catch(e){return false}}
+function freeOffer(n){return fbUsed()?'':'<div style="margin:10px 0 14px;padding:12px 14px;background:#efeafd;border-radius:6px">'
+ +'<b>Your first whole book is free.</b> Leave your email and all '+(n||'')+' pages convert now. '
+ +'We may write once to ask how it came out.<br>'
+ +'<input id="fbmail" type="email" placeholder="your email" '
+ +'style="max-width:300px;margin-top:8px;background:#fff;border:1px solid #d3ccbe;color:#1b1916;'
+ +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
+ +'<button id="fbbtn" style="'+BTN+'">Convert the whole book free</button></div>'
+ +'<span style="font-size:13px;color:#5b564d">Already had your free book? </span>'}
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
 function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
+ +freeOffer(n)
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
@@ -1346,6 +1382,7 @@ function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. Th
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
 function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
+ +freeOffer(n)
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
@@ -1353,6 +1390,18 @@ function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so e
  +'on the spot. Nothing stored. Not happy? Full refund.</span>'}
 document.addEventListener('click',async(e)=>{
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
+ if(e.target.id==='fbbtn'){const em=document.getElementById('fbmail');
+  if(!em||!em.value){em&&em.focus();return}
+  e.target.disabled=true;ev('freebook_ask');
+  const fd=new FormData();fd.append('email',em.value);if(window.capPages)fd.append('pages',window.capPages);
+  const r=await fetch('/freebook',{method:'POST',body:fd});const j=await r.json().catch(()=>({}));
+  if(r.ok&&j.token){window.FREE=j.token;try{localStorage.setItem('fb_used','1')}catch(x){}
+   if(!document.getElementById('email').value)document.getElementById('email').value=em.value;
+   ev('freebook');window.previewDone=false;window.capKind='';return convert(false)}
+  e.target.disabled=false;
+  em.insertAdjacentHTML('afterend',j.why==='email'?'<br><span style="color:#a33">That email does not look right.</span>'
+   :'<br><span style="color:#a33">That email already had its free book. The next one is $5, or $10 for 30 days of unlimited books.</span>');
+  return}
  if(e.target.id!=='leadbtn')return;
  const em=document.getElementById('leadmail');
  if(!em||!em.value)return;
@@ -1419,6 +1468,7 @@ async function convert(preview){
  fd.append('email',document.getElementById('email').value);
  // ponytail: always ask for the free part, so an over-limit book uploads once (not refused, then re-sent)
  fd.append('preview','1');window.lastCap='';
+ if(window.FREE)fd.append('free',window.FREE);
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
    +'). Big books and scans take a few minutes. If you close this tab, open epub.ftak.net again within the hour and it picks up'
@@ -1426,6 +1476,9 @@ async function convert(preview){
   const a=document.createElement('a');a.href=u;
   a.download=(f.name||'book').replace(/\.pdf$/i,'')+'.epub';a.click();ev('done');showNext();
   msg.className='ok';msg.textContent=preview?'Done. The preview EPUB has the first '+PN+' pages.':'Done. EPUB downloaded.'
+  if(window.FREE&&!preview){window.FREE='';msg.innerHTML='Done. The whole book is downloaded, that one was on us.<br>'
+   +'<span style="font-size:14px">More books coming? <a href="/go/batch?why=freebook-done&v='+V+'">$10 for 30 days, unlimited books</a>'
+   +' or <a href="/go/onebook?why=freebook-done&v='+V+'">$5 for the next one</a>.</span>';ev('free_done')}
   const lc=(window.lastCap||'').split(':');
   if(!preview&&(lc[0]==='pages'||lc[0]==='ocr')){window.capKind=lc[0];window.capPages=+lc[1]||0;window.capName=(f&&f.name)||'book';
    PN=lc[0]==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:lc[0]});preview=true}
@@ -1920,6 +1973,35 @@ async def lead(request: Request, email: str = Form(""), pages: int = Form(0), re
                        "email": e, "ua": ua_of(request)[:120]})
     _write(line)
     return {"ok": True}
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+
+
+@app.post("/freebook")
+async def freebook(request: Request, email: str = Form(""), pages: int = Form(0)):
+    # ponytail (11-12): sales came from talking to readers, and 102 cap hits left 6 emails. so the first whole
+    # book is free for an email: they see the full book work, and we can write to them about the next one
+    e = email.strip().lower()[:120]
+    if not EMAIL_RE.match(e):
+        return JSONResponse({"ok": False, "why": "email"}, status_code=400)
+    rows = _freebook_rows()
+    if any(len(r) > 1 and r[1] == e for r in rows if r[0] != "used"):
+        return JSONResponse({"ok": False, "why": "used"}, status_code=409)
+    ip = (request.client.host if request.client else "") or "-"
+    today = datetime.now(timezone.utc).date().isoformat()
+    if sum(1 for r in rows if r[0] != "used" and r[2:4] == [ip, today]) >= 2:
+        return JSONResponse({"ok": False, "why": "used"}, status_code=429)
+    token = secrets.token_urlsafe(12)
+    try:
+        with FREEBOOK.open("a") as fh:
+            fh.write(f"{token} {e} {ip} {today}\n")
+    except OSError:
+        return JSONResponse({"ok": False}, status_code=500)
+    _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ok": False, "pages": pages, "in": 0,
+                       "out": 0, "err": "lead:freebook", "ref": ref_of(request), "email": e,
+                       "ua": ua_of(request)[:120]}))
+    return {"ok": True, "token": token}
 
 
 @app.get("/shelf", response_class=HTMLResponse)
@@ -2904,7 +2986,7 @@ def _structure(blocks, doc):
 
 @app.post("/convert")
 async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""),
-                  email: str = Form(""), preview: str = Form("")):
+                  email: str = Form(""), preview: str = Form(""), free: str = Form("")):
     throttle(request)
     ref = ref_of(request)
     key = shelf_key(request)  # ponytail: a paying subscriber gets a bigger ceiling, no account needed
@@ -2923,7 +3005,14 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             log(False, 0, kb_in, 0, "paid-refused", ref, request=request)
             raise HTTPException(402, "this checkout is not confirmed as paid, or it already converted a "
                                 f"different book. Reply to the Polar receipt or email {SHELF_MAIL}")
-        paid = bool(key or book)
+        freeb = bool(free) and not key and not book and freebook_ok(free[:40], digest)
+        if free and not freeb and not key and not book:
+            log(False, 0, kb_in, 0, "free-refused", ref, request=request)
+            raise HTTPException(402, "this free book was already used on a different file. The next book is $5, "
+                                "or $10 for 30 days of unlimited books")
+        if freeb:
+            book_max = SHELF_MAX_PAGES
+        paid = bool(key or book or freeb)
         max_pages = SHELF_MAX_PAGES if key else (book_max or MAX_PAGES)
         max_mb = SHELF_MAX_MB if paid else MAX_MB
         if len(raw) > max_mb * 1024 * 1024:
@@ -2962,6 +3051,9 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             if book:
                 onebook_use(cid, digest)
                 event("paid_convert", request, checkout_id=cid, pages=pages)
+            if freeb:
+                freebook_use(free[:40], digest)
+                event("free_convert", request, pages=pages)
             hdr = {"Content-Disposition": "attachment; filename=book.epub"}
             if cap:
                 hdr["X-Cap"] = cap

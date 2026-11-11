@@ -216,6 +216,22 @@ def main():
     assert pdf2epub.MAX_MB >= 500, "a 490MB upload was refused on 11-05; keep the free size cap at 1GB"
     assert "1GB" in home and "200MB" not in home
     assert convert_with("?k=not-a-real-key") == 413, "a junk key must not lift the cap"
+    # free whole book for an email (11-12): one book per email, same file reruns free, a second file is refused
+    assert client.post("/freebook", data={"email": "nope"}).status_code == 400, "freebook takes a bad email"
+    fb = client.post("/freebook", data={"email": "Reader@Example.com", "pages": 600})
+    assert fb.status_code == 200 and fb.json()["token"], fb.text
+    tok = fb.json()["token"]
+    assert client.post("/freebook", data={"email": "reader@example.com"}).status_code == 409, "same email twice"
+    whole = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")}, data={"preview": "1", "free": tok})
+    assert whole.status_code == 200 and not whole.headers.get("X-Cap"), "free book did not convert the whole book"
+    again = client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")}, data={"free": tok})
+    assert again.status_code == 200, "rerunning the same free book must stay free"
+    other = client.post("/convert", files={"f": ("c.pdf", craw, "application/pdf")}, data={"free": tok})
+    assert other.status_code == 402, "a used free token converted a different file"
+    assert client.post("/convert", files={"f": ("b.pdf", braw, "application/pdf")},
+                       data={"free": "junk"}).status_code == 402, "a junk free token must not lift the cap"
+    home2 = client.get("/").text
+    assert "freeOffer(n)" in home2 and "/freebook" in home2 and "fd.append('free',window.FREE)" in home2
     junk = client.get("/thanks?checkout_id=nonsense").text
     assert "Shelf key" not in junk, "a junk checkout id must not mint a key"
     fake = client.get("/thanks?checkout_id=polar_c_AAAAAAAAAAAAAAAAAAAAAAAA").text
