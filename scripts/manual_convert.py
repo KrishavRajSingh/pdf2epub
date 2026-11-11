@@ -25,7 +25,9 @@ def _gdrive_pages(doc, layout, confs, lang):
     """Swap Tesseract text for Drive OCR on low-confidence text pages, in place."""
     from concurrent.futures import ThreadPoolExecutor
     from gdrive_ocr import drive_ocr
-    todo = [i for i, (t, _) in enumerate(layout) if confs.get(i, 100) < GDRIVE_CONF and len(t.split()) >= 20]
+    # a page Tesseract gave up on (timeout under load) has no words and conf 0: Drive gets it too
+    todo = [i for i, (t, _) in enumerate(layout) if confs.get(i, 100) < GDRIVE_CONF
+            and (len(t.split()) >= 20 or confs.get(i) == 0)]
     imgs = {}
     for i in todo:  # pymupdf is not thread-safe: render here, upload in threads
         p = doc[i]
@@ -35,7 +37,8 @@ def _gdrive_pages(doc, layout, confs, lang):
         got = dict(zip(todo, ex.map(lambda i: drive_ocr(imgs[i], lang), todo)))
     ok = 0
     for i, text in got.items():
-        if text and len(text.split()) >= 0.5 * len(layout[i][0].split()):
+        n = len(layout[i][0].split())
+        if text and len(text.split()) >= (0.5 * n if n >= 20 else 40):
             layout[i] = (text, layout[i][1])
             ok += 1
     print(f"gdrive: {ok}/{len(todo)} low-confidence pages re-read ({len(layout)} pages)")
