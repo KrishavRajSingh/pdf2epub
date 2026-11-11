@@ -627,6 +627,21 @@ def _ocr_dpi(page):
     return max(36, min(OCR_DPI, int(OCR_MAX_PX * 72 / side)))
 
 
+_VATTU = re.compile(r"[(|]((?:[\u0c15-\u0c39]\u0c4d)*[\u0c15-\u0c39])")
+
+
+def _fix_vattu(text: str) -> str:
+    """Old Telugu typefaces print the ra-vattu (్ర) as a hook before the letter and Tesseract reads
+    it as "(" or "|": "(పాణి" for ప్రాణి, "(ప్రజలు", "విశ్వామి(త్రుడు". 4,102 in one Ramayana (11-11).
+    A bracket with a ")" close by is a real one and stays."""
+    toks = text.split(" ")
+    for k, t in enumerate(toks):
+        if ("(" in t or "|" in t) and not any(")" in x for x in toks[k:k + 5]):
+            toks[k] = _VATTU.sub(lambda m: m.group(1) if "\u0c4d\u0c30" in m.group(1) or
+                                 t[m.end():m.end() + 2] == "\u0c4d\u0c30" else m.group(1) + "\u0c4d\u0c30", t)
+    return " ".join(toks)
+
+
 def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     """_tess, and for an Indian-language book a second pass with English on pages where the
     first came out as native digits: a cover or blurb page printed in English read with the
@@ -647,6 +662,8 @@ def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
         # native-digit junk, and there lang+eng sprinkled "SHY", "OSH" through the Telugu (11-10)
         if _tess(png, page_w, page_h, "eng", conf=True)[2] > c:
             text, cov = _tess(png, page_w, page_h, lang + "+eng")
+    if "tel" in lang:
+        text = "\n".join(_fix_vattu(l) for l in text.split("\n"))
     return text, cov, pics
 
 

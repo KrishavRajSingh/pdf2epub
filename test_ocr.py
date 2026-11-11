@@ -192,6 +192,12 @@ def magazine_page_rules():
     assert app._covers_text(80, 80, 420, 720, col), "text column kept as a picture"
     assert not app._covers_text(500, 80, 900, 720, col), "real picture next to text dropped"
     assert not app._covers_text(80, 80, 900, 720, col[:2]), "picture with a caption dropped"
+    # old typefaces: ra-vattu read as "(" or "|"; real brackets stay
+    for a, b in [("(పాణి", "ప్రాణి"), ("(ప్రజలు", "ప్రజలు"), ("విశ్వామి(త్రుడు", "విశ్వామిత్రుడు"), ("(శీ", "శ్రీ"),
+                 ("|శ్రమల", "శ్రమల"), ("(స్తీ", "స్త్రీ"), ("కామేశ్వ(ర్రావు.", "కామేశ్వర్రావు."),
+                 ("అతను (రాముడు) వచ్చాడు", "అతను (రాముడు) వచ్చాడు"), ("ఆమె (నవ్వుతూ అంది)", "ఆమె (నవ్వుతూ అంది)"),
+                 ("(1945)", "(1945)")]:
+        assert app._fix_vattu(a) == b, (a, app._fix_vattu(a))
     print("ok — magazine page rules")
 
 
