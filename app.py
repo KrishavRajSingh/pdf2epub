@@ -675,11 +675,11 @@ def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
             text, cov = _tess(png, page_w, page_h, lang + "+eng")
     if "tel" in lang:
         text = "\n".join(_fix_vattu(l) for l in text.split("\n"))
-    return text, cov, pics
+    return text, cov, pics, c
 
 
 def _done(w):
-    return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0, []))
+    return w if isinstance(w, tuple) else (w.result() if w else ("", 0.0, [], 0.0))
 
 
 def _clean_layer(page):
@@ -709,7 +709,8 @@ def _clean_layer(page):
         return None
 
 
-def ocr_doc(doc, layout: bool = False, lang: str | None = None, pics: dict | None = None) -> list | None:
+def ocr_doc(doc, layout: bool = False, lang: str | None = None, pics: dict | None = None,
+            confs: dict | None = None) -> list | None:
     # ponytail: 200dpi render + tesseract CLI, same subprocess pattern as calibre; swap engine if quality complaints
     if not shutil.which("tesseract"):
         return None
@@ -734,6 +735,8 @@ def ocr_doc(doc, layout: bool = False, lang: str | None = None, pics: dict | Non
         out.extend(_done(w) for w in window)
     if pics is not None:  # {page index: [picture boxes as page fractions]}
         pics.update({i: r[2] for i, r in enumerate(out) if len(r) > 2 and r[2]})
+    if confs is not None:  # {page index: mean word confidence}; a clean text layer counts as 100
+        confs.update({i: (r[3] if len(r) > 3 else 100.0) for i, r in enumerate(out)})
     out = [(r[0], r[1]) for r in out]
     return out if layout else [t for t, _ in out]
 
@@ -929,6 +932,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                     and (_head_key(para) in heads or _head_first(para) in heads
                          or _mostly_head_words(para, head_words))) or _ornament(para):
                 continue
+            if len(para) <= 30 and _head_key(para) in heads:
+                continue  # ponytail: Drive OCR puts the footer between the columns ("చందమామ", "జూలై 2004", 11-11)
             if not any(c.isalpha() for c in para):
                 continue  # ponytail: "|" and "( |" from column rules and picture borders (11-10)
             nd = len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", para))

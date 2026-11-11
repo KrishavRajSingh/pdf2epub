@@ -183,7 +183,7 @@ def magazine_page_rules():
     app._tess = fake
     try:
         pm = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 40), 0)
-        text, cov, pics = app._tess_mixed(pm.tobytes("png"), 40, 40, "tel")
+        text, cov, pics, _ = app._tess_mixed(pm.tobytes("png"), 40, 40, "tel")
     finally:
         app._tess = real
     assert len(calls) == 2 and "దర్శకుడు" in text and pics == [], "page read as one picture was not retried"
@@ -216,6 +216,12 @@ def magazine_page_rules():
     finally:
         sp.run = real_run
     assert len(calls2) == 2 and "quick" in text, (calls2, text)
+    # a running head that lands mid-page (Drive OCR column order) is still dropped
+    body = "గుణనిధి చంద్రుణ్ణి పిలకరించి కుటుంబ పరిస్థితి గురించి కవిత్వం చెప్పాడు. " * 4
+    pages = [f"చందమామ\n\n{body}\n\nజూలై 2004\n\n{body}\n\nజూలై 2004" for _ in range(6)]
+    pages[2] = f"{body}\n\nజూలై 2004\n\n{body}"
+    rows = [t for ch in ocr_chapters(pages) for k, t in ch if k == "p"]
+    assert not any("జూలై" in r for r in rows), "mid-page footer kept"
     print("ok — magazine page rules")
 
 
