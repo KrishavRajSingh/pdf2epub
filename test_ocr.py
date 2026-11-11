@@ -198,6 +198,24 @@ def magazine_page_rules():
                  ("అతను (రాముడు) వచ్చాడు", "అతను (రాముడు) వచ్చాడు"), ("ఆమె (నవ్వుతూ అంది)", "ఆమె (నవ్వుతూ అంది)"),
                  ("(1945)", "(1945)")]:
         assert app._fix_vattu(a) == b, (a, app._fix_vattu(a))
+    # a tesseract timeout retries once instead of returning an empty page (11-11)
+    import subprocess as sp
+    real_run, calls2 = sp.run, []
+    def slow_once(cmd, **kw):
+        calls2.append(kw.get("timeout"))
+        assert kw["env"]["OMP_THREAD_LIMIT"] == "1"
+        if len(calls2) == 1:
+            raise sp.TimeoutExpired(cmd, kw.get("timeout"))
+        return real_run(cmd, **kw)
+    sp.run = slow_once
+    try:
+        pm = pymupdf.open(); pg = pm.new_page(width=300, height=120)
+        pg.insert_text((10, 60), "The quick brown fox jumps.", fontsize=16)
+        pix = pg.get_pixmap(dpi=150)
+        text = app._tess(pix.tobytes("png"), pix.width, pix.height)[0]
+    finally:
+        sp.run = real_run
+    assert len(calls2) == 2 and "quick" in text, (calls2, text)
     print("ok — magazine page rules")
 
 

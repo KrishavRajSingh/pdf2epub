@@ -544,10 +544,21 @@ def _tess(png: bytes, page_w: int, page_h: int, lang: str = "eng", conf: bool = 
     Returns (text, ink coverage); with conf=True (text, coverage, mean word confidence,
     picture boxes), the boxes as page fractions (x0, y0, x1, y1)."""
     fail = ("", 0.0, 0.0, []) if conf else ("", 0.0)
-    try:
-        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", lang, "tsv"],
-            input=png, capture_output=True, timeout=60)
-    except Exception:
+    # ponytail: one OpenMP thread per tesseract; pages already run OCR_THREADS at a time, and the
+    # oversubscribed box hit the 60s timeout and dropped whole pages without a word (11-11, 38 Kathalu
+    # lost 15k of 50k words). A timeout now gets one long retry instead of an empty page.
+    env = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+    r = None
+    for limit in (90, 300):
+        try:
+            r = subprocess.run(["tesseract", "stdin", "stdout", "-l", lang, "tsv"],
+                input=png, capture_output=True, timeout=limit, env=env)
+            break
+        except subprocess.TimeoutExpired:
+            print(f"ocr: tesseract timeout {limit}s ({lang})", flush=True)
+        except Exception:
+            return fail
+    if r is None:
         return fail
     if r.returncode != 0:
         return fail
