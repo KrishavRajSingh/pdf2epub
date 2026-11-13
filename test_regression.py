@@ -63,6 +63,35 @@ def make_ia_layer():
     return d
 
 
+def make_ia_memoir():
+    """Internet Archive scan like Marcela's Divine Challenge (11-14): chapter lines in body type
+    ("Chapter | - Childhood", OCR read the 1 as |), Bible verses set big, and a handwritten
+    letter whose OCR is junk. Came out as 207 chapters, one per verse or letter line."""
+    d, png = _doc(), _page_png(PROSE * 6)
+    junk = "Gue Sf hewW muck gar Lthw aad anch ttm vaihd Yete Pande fhe COitsee aclecn tft Arsene " * 4
+    verses = ["27What I tell you in darkness, that speak ye in light.",
+              "31Fear ye not therefore, ye are of more value than many sparrows.",
+              "32Whosoever therefore shall confess me before men, him will I confess also."]
+    heads = {2: "Chapter | - Childhood", 12: "Chapter 2 - The Convent", 22: "Chapter 3 - The Trial"}
+    for i in range(32):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        if i == 1:
+            for j, v in enumerate(verses):
+                pg.insert_textbox(pymupdf.Rect(72, 72 + j * 90, 520, 160 + j * 90), v, fontsize=17, render_mode=3)
+            pg.insert_textbox(pymupdf.Rect(72, 360, 520, 760), PROSE * 3, fontsize=11, render_mode=3)
+            continue
+        if i == 27:
+            pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), junk, fontsize=11, render_mode=3)
+            continue
+        top = 72
+        if i in heads:
+            pg.insert_textbox(pymupdf.Rect(72, 72, 520, 100), heads[i], fontsize=11, render_mode=3)
+            top = 120
+        pg.insert_textbox(pymupdf.Rect(72, top, 520, 760), PROSE * 5, fontsize=11, render_mode=3)
+    return d
+
+
 def make_scan(prose=PROSE * 14):
     """Plain scan, no text at all. Full pages of prose, as in a real book."""
     d, png = _doc(), _page_png(prose)
@@ -318,6 +347,10 @@ CASES = {
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
                            "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
+    # ch_max: verses and letter lines set big must not each start a chapter (Marcela 11-14)
+    "ia_memoir": (make_ia_memoir, {"path": "text", "has": ["Chapter 1 - Childhood", "Chapter 3 - The Trial",
+                                                        "many sparrows"],
+                                   "hasnt": ["hewW", "Chapter | -"], "ch_max": 4, "imgs": 1}),
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
     "scan_quotes": (make_scan_quotes, {"path": "ocr", "has": ["Stop there", "clocks were striking"],
@@ -385,6 +418,8 @@ def check(name, rules, s, text):
         errs.append(f"{s['imgs']} pictures kept, want {rules['imgs']}")
     if s["paragraphs"] > rules.get("p_max", 10**9):
         errs.append(f"{s['paragraphs']} paragraphs, want at most {rules['p_max']} (one per printed line?)")
+    if s["chapters"] > rules.get("ch_max", 10**9):
+        errs.append(f"{s['chapters']} chapters, want at most {rules['ch_max']}: {s['headings']}")
     if len(s["headings"]) < rules.get("h_min", 0):
         errs.append(f"headings {s['headings']}")
     return errs

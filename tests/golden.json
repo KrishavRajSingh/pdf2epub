@@ -18,6 +18,18 @@
   "imgs": 0,
   "words": 450
  },
+ "ia_memoir": {
+  "path": "text",
+  "chapters": 4,
+  "headings": [
+   "Chapter 1 - Childhood",
+   "Chapter 2 - The Convent",
+   "Chapter 3 - The Trial"
+  ],
+  "paragraphs": 34,
+  "imgs": 1,
+  "words": 3874
+ },
  "scan": {
   "path": "ocr",
   "chapters": 1,

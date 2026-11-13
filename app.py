@@ -2825,6 +2825,28 @@ def _place_fields(page, raw, body):
     return out
 
 
+WORD3 = re.compile(r"[^\W\d_]{3,}")
+
+
+def _junk_pages(doc) -> set:
+    """Pages of an OCR layer whose words mostly appear nowhere else in the book.
+
+    ponytail: Internet Archive scans of handwritten letters, faxes and photos OCR to
+    "Gue Sf and ~-hewW muck gar". Real words recur across a book, OCR junk mostly doesn't,
+    so the book is its own dictionary and no word list ships (Marcela, Divine Challenge 11-14).
+    Those pages go in as pictures, which a reader can still read.
+    """
+    if len(doc) < 30:
+        return set()
+    words = {i: [w.lower() for w in WORD3.findall(pg.get_text("text"))] for i, pg in enumerate(doc)}
+    df = Counter(w for ws in words.values() for w in set(ws))
+    return {i for i, ws in words.items()
+            if len(ws) >= 3 and sum(df[w] >= 3 for w in ws) < 0.6 * len(ws)}
+
+
+IA_NOTICE = re.compile(r"digitized by the internet archive", re.I)
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -2836,7 +2858,15 @@ def _blocks(doc):
     body = _body_size(doc)
     ocr = _ocr_layer(doc)
     ligmap = _lig_map(doc)
+    junk = _junk_pages(doc) if ocr else set()
     for i, page in enumerate(doc):
+        if ocr and (i in junk or (i == 0 and len(page.get_text("text").split()) < 40)):
+            if IA_NOTICE.search(page.get_text("text")):
+                continue  # the archive's own "Digitized by" page, not the book
+            # cover and handwritten/fax pages: the picture, not their OCR junk
+            pm = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))
+            yield i, 0.0, -1.0, (_fig_bytes(pm), "")
+            continue
         raw = page.get_text("dict")["blocks"]
         raw = _place_fields(page, raw, body)
         if not page.rotation:
@@ -2925,6 +2955,20 @@ def _structure(blocks, doc):
     chapters, cur, cur_notes = [], [], []
     ocr = _ocr_layer(doc)
     list_item = re.compile(r"^(?:[-–•·*▪◦]|\d{1,3}[.)]|#)\s")
+    # "Chapter 1 — Childhood" in body type; OCR reads the 1 as | or l ("Chapter | - Childhood")
+    ch_title = re.compile(r"^(chapter|part)\s+(\d{1,3}|[ivxlc]{1,7}|\|)\s*[—–:.\-]+\s*\S.{0,80}$", re.I)
+    named = sum(1 for _, _, sz, t in blocks if sz > 0 and len(t) < 120
+                and (ch_title.match(t) or head_word.match(t)))
+    known = Counter(w.lower() for _, _, sz, t in blocks if sz > 0 for w in WORD3.findall(t))
+
+    def size_head(t):
+        """A line set big by an OCR layer, is it a heading? Bible verses and quoted letters
+        set large end in a full stop; OCR junk ("; oe ¢ pee ee") has no real words."""
+        if not ocr:
+            return True
+        ws = WORD3.findall(t)
+        return (len(t.split()) <= 12 and not SENT_END.search(t) and not t[:1].islower()
+                and bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws))
 
     def continues(t):
         # OCR layers size each line differently, so a mid-paragraph line can look like a heading
@@ -2962,9 +3006,9 @@ def _structure(blocks, doc):
         if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55 \
            and body_pages[pno] >= 3 and re.search(r"[a-z]{3}", t):
             cur_notes.append(t)
-        elif head_word.match(t) and len(t) < 120:
+        elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
             flush()
-            cur.append(("h1", t))
+            cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
         elif continues(t):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
             # an OCR text layer that cut the paragraph into blocks) is the same paragraph.
@@ -2972,11 +3016,16 @@ def _structure(blocks, doc):
             glue = prev[:-1] if prev.endswith("-") and prev[-2:-1].isalpha() else \
                 prev if t[:1] in "—…" else prev + " "
             cur[-1] = ("p", glue + t)
+        elif sz >= h2_cut and len(t) < 120 and not OPEN_END.search(t) and ocr and not size_head(t):
+            if any(c.isalpha() for c in t) and WORD3.search(t):
+                cur.append(("p", t))  # big but not a heading: a verse, a quoted letter
         elif sz >= h1_cut and len(t) < 120 and not OPEN_END.search(t):
-            flush()
+            if not (ocr and named >= 3):
+                flush()  # ponytail: an OCR scan with its own "Chapter N" lines splits on those only
             cur.append(("h1", t))
         elif sz >= h2_cut and len(t) < 120 and not OPEN_END.search(t):
-            flush()
+            if not (ocr and named >= 3):
+                flush()
             cur.append(("h2", t))
         else:
             cur.append(("p", t))
