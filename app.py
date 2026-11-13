@@ -1216,7 +1216,7 @@ padding:13px 0;font-size:15px;font-weight:600}
 background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
 .end p{margin:0;font-family:var(--serif);font-size:22px;letter-spacing:-.01em}
 .end .go{width:auto;margin:0;padding:13px 28px}
-@media(max-width:720px){.grid2{grid-template-columns:1fr}.fixes{grid-template-columns:1fr}
+@media(max-width:720px){.grid2{grid-template-columns:minmax(0,1fr)}.fixes{grid-template-columns:1fr}
 .said,.prices{grid-template-columns:1fr}.said .feat{border-left:0;padding:0}
 h1{letter-spacing:-.015em}}
 @media(max-width:560px){header.top{padding:18px 0 12px}.pill{display:none}.card{padding:16px}}
@@ -1356,25 +1356,26 @@ function short(n){return n&&+n<=400}
 function buy3(why){return '/go/short?why='+why+'&v='+V}
 // ponytail: the free converter refuses big files, so the refusal is where the paid tier gets pitched
 // ponytail (11-07): over the limit we convert the free part first, so the $5 ask comes after they've seen their own book
-// ponytail (11-12): first whole book free for an email, once per browser. the paid offers sit under it for the next book
+// ponytail (11-12): first whole book free for an email, once per browser.
+// ponytail (11-14): moved under the paid button: the $5 at the wall is the one sale that came on its own
+// (11-03), and with the free box on top 17 wall hits in 2.5 days left 1 email, 0 sales
 function fbUsed(){try{return !!localStorage.getItem('fb_used')}catch(e){return false}}
-function freeOffer(n){return fbUsed()?'':'<div style="margin:10px 0 14px;padding:12px 14px;background:#efeafd;border-radius:6px">'
- +'<b>Your first whole book is free.</b> Leave your email and all '+(n||'')+' pages convert now. '
+function freeOffer(n){return fbUsed()?'':'<div style="margin:12px 0 6px;padding:10px 14px;background:#efeafd;border-radius:6px;font-size:14px">'
+ +'<b>New here? Your first whole book is free.</b> Leave your email and all '+(n||'')+' pages convert now. '
  +'We may write once to ask how it came out.<br>'
  +'<input id="fbmail" type="email" placeholder="your email" '
  +'style="max-width:300px;margin-top:8px;background:#fff;border:1px solid #d3ccbe;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
- +'<button id="fbbtn" style="'+BTN+'">Convert the whole book free</button></div>'
- +'<span style="font-size:13px;color:#5b564d">Already had your free book? </span>'}
+ +'<button id="fbbtn" style="'+GHOST+'">Convert it free</button></div>'}
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
 function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
- +freeOffer(n)
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
+ +freeOffer(n)
  +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Still $5. Leave your email and we raise the limit for your book.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
@@ -1382,12 +1383,11 @@ function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. Th
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
 function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
- +freeOffer(n)
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot. Nothing stored. Not happy? Full refund.</span>'}
+ +'on the spot. Nothing stored. Not happy? Full refund.</span>'+freeOffer(n)}
 document.addEventListener('click',async(e)=>{
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id==='fbbtn'){const em=document.getElementById('fbmail');
