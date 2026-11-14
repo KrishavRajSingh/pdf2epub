@@ -78,6 +78,9 @@ def main():
     # unpaid unlock is refused, bad input is refused
     r = c.post(f"/translate/{jid}/full", data={"checkout": "00000000-0000-0000-0000-000000000000"})
     assert r.status_code == 402, r.text
+    r = c.post("/translate", files={"f": ("x.pdf", b"nope", "application/pdf")}, data={"lang": "es"},
+               headers={"Origin": "https://ftak.net"})
+    assert r.status_code == 400 and r.headers.get("access-control-allow-origin") == "https://ftak.net"
     r = c.post("/translate", files={"f": ("x.pdf", b"not a pdf", "application/pdf")}, data={"lang": "es"})
     assert r.status_code == 400
     r = c.post("/translate", files={"f": ("x.pdf", make_pdf(1), "application/pdf")}, data={"lang": "xx"})

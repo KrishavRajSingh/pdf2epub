@@ -3461,6 +3461,17 @@ async def http_err(request: Request, exc: HTTPException):
 import translate  # noqa: E402  ponytail: ftak.net/translate-pdf backend, kept out of this file
 app.include_router(translate.router)
 
+
+@app.middleware("http")
+async def translate_cors(request: Request, call_next):
+    # ponytail: errors (400/402/429) must carry the header too, or ftak.net can't show the message
+    resp = await call_next(request)
+    origin = request.headers.get("origin", "")
+    if request.url.path.startswith("/translate") and origin in translate.ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+    return resp
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, port=8000)
