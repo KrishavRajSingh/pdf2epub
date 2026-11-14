@@ -19,6 +19,7 @@ import traceback
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
+import urllib.parse
 import urllib.request
 import pymupdf
 from ebooklib import epub
@@ -123,6 +124,19 @@ SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of mos
 SHELF_MAX_MB = 1000
 LOG = Path(os.environ.get("LOG_DIR", ".")) / "conversions.log"  # ponytail: on Railway set LOG_DIR=/data + volume, else dies with container
 _HITS: dict[str, list[float]] = {}  # ponytail: in-mem throttle, redis when paid
+
+
+def _epub_disp(fn: str) -> str:
+    """Content-Disposition naming the EPUB after the uploaded PDF.
+
+    ponytail: browsers let this header beat the page's a.download, so "book.epub" here renamed every
+    folder conversion to the same name (ysvsr 11-14). filename* carries Telugu and other non-ASCII names.
+    """
+    base = re.sub(r"[\x00-\x1f\x7f/\\\"]", "", (fn or "").rsplit("/", 1)[-1])
+    base = re.sub(r"\.pdf$", "", base, flags=re.I).strip()[:150] or "book"
+    name = base + ".epub"
+    ascii_ = re.sub(r"[^\x20-\x7e]", "_", name)
+    return f"attachment; filename=\"{ascii_}\"; filename*=UTF-8''{urllib.parse.quote(name)}"
 
 
 def shelf_key(request: Request) -> str:
@@ -1444,6 +1458,11 @@ __ALT__
 
 <footer>
   <span>No account &middot; no watermark &middot; files deleted after download</span>
+  <form id="keyform" action="/" method="get" style="margin-top:10px;font-size:14px">
+    <label for="kin">Paid on another device? Paste your key:</label>
+    <input id="kin" name="k" pattern="[0-9A-Za-z_-]{6,64}" required autocomplete="off" style="font:inherit;padding:4px 6px;width:15em">
+    <button type="submit" style="font:inherit">Use key</button>
+  </form>
 </footer>
 </div><script>
 __TRACK__const drop=document.getElementById('drop'),fi=document.getElementById('file'),
@@ -1529,6 +1548,9 @@ let BATCH=[];
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
 function pickMany(list){BATCH=list.filter(f=>/\.pdf$/i.test(f.name||''));
  if(BATCH.length>1){drop.querySelector('b').textContent=BATCH.length+' PDFs picked';ev('pick',{why:'batch'})}}
+// ponytail (11-14): the key lives in one browser's storage; a buyer who paid on an iPad got the free tier on
+// their Mac (ysvsr). the footer box puts the key on this browser too; with a key, it says so instead
+if(K){const kf=document.getElementById('keyform');if(kf)kf.innerHTML='Paid key active in this browser.';}
 if(K){fi.multiple=true;
  const fb=document.createElement('input');fb.type='file';fb.webkitdirectory=true;fb.multiple=true;fb.hidden=true;
  const bb=document.createElement('button');bb.className='ghost-btn';bb.id='folder';bb.type='button';
@@ -3232,7 +3254,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             if freeb:
                 freebook_use(free[:40], digest)
                 event("free_convert", request, pages=pages)
-            hdr = {"Content-Disposition": "attachment; filename=book.epub"}
+            hdr = {"Content-Disposition": _epub_disp(f.filename)}
             if cap:
                 hdr["X-Cap"] = cap
             return Response(data, media_type="application/epub+zip", headers=hdr)
@@ -3380,6 +3402,10 @@ def _job_start(work, email: str = "", name: str = "book") -> str:
     _job_sweep()
     jid = secrets.token_urlsafe(18)
     _job_write(jid, state="queued")
+    try:
+        (JOB_DIR / f"{jid}.name").write_text(name)
+    except OSError:
+        pass
     _JOB_POOL.submit(_job_run, jid, work, email, name)
     return jid
 
@@ -3412,11 +3438,15 @@ def job_file(jid: str):
         t = threading.Timer(GOT_GRACE, _job_drop, args=(jid,))
         t.daemon = True
         t.start()
-    return FileResponse(p, media_type="application/epub+zip", filename="book.epub")
+    try:
+        name = _job_path(jid, "name").read_text()
+    except OSError:
+        name = "book.pdf"
+    return FileResponse(p, media_type="application/epub+zip", headers={"Content-Disposition": _epub_disp(name)})
 
 
 def _job_drop(jid: str):
-    for ext in ("epub", "json", "got"):
+    for ext in ("epub", "json", "got", "name"):
         (JOB_DIR / f"{jid}.{ext}").unlink(missing_ok=True)
 
 
