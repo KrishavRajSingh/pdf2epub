@@ -242,7 +242,7 @@ def main():
         "unverified checkout minted a key"
     pdf2epub.paid_checkout = lambda c, p: (c, p) == (cid, pdf2epub.SHELF_PRODUCT)
     real_mail_key, key_mails = pdf2epub._mail_key, []
-    pdf2epub._mail_key = lambda c, k, d=0: key_mails.append((c, k, d))
+    pdf2epub._mail_key = lambda c, k, d=0, s=0: key_mails.append((c, k, d))
     page = client.get(f"/thanks?checkout_id={cid}").text
     assert "Shelf key" in page, "a verified checkout must mint a key"
     key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
@@ -255,7 +255,7 @@ def main():
     sraw = scan.tobytes()
     scan.close()
     real_ocr = pdf2epub.ocr_doc
-    pdf2epub.ocr_doc = lambda doc, layout=False, lang=None, pics=None: [("This scanned page reads as ordinary prose with plenty of words. " * 4, 0.5)
+    pdf2epub.ocr_doc = lambda doc, layout=False, lang=None, pics=None, confs=None: [("This scanned page reads as ordinary prose with plenty of words. " * 4, 0.5)
                                                   for _ in range(len(doc))]
     sc = client.post(f"/convert?k={key}", files={"f": ("scan.pdf", sraw, "application/pdf")})
     pdf2epub.ocr_doc = real_ocr

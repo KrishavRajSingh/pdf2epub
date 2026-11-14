@@ -93,6 +93,17 @@ SHELF_PRODUCT = "8c3386ae-0aea-4dd2-87bc-7735b8af795a"
 BATCH_URL = "https://buy.polar.sh/polar_cl_DIV8bQHOvUqSGLvGPOceLOSWaSGxXDe0iQPm54gL2Cl"
 BATCH_PRODUCT = "4c35ff8c-8fc9-451b-9861-815c5448e733"
 BATCH_DAYS = 30
+# ponytail (11-14): a reader with 1,000+ Telugu scans asked how to pay for the rest of his library.
+# Tesseract misreads faded old print (bake-off 0.87); Gemini Flash-Lite reads it at 0.97 for ~$0.0015 a
+# page, so the Library pass re-reads only the pages Tesseract was unsure of, up to a page budget per key
+LIBRARY_URL = "https://buy.polar.sh/polar_cl_q3VCOcOJTr6AVmzofpCh8HNq5HTx2BM7a0nBU1y7hT8"  # $25 once, 90 days
+LIBRARY_PRODUCT = "a90d0daf-0e76-4129-a94b-7f6eaa71a021"
+LIBRARY_DAYS = 90
+LIBRARY_SHARP = 8000  # pages; ~$12 of model spend at most on a $25 pass
+SHARP_CONF = 90  # ponytail: same cut as scripts/manual_convert.py --gdrive: novels average 86-93, magazines 53-75
+SHARP_MODEL = os.environ.get("SHARP_MODEL", "google/gemini-3.1-flash-lite")
+SHARP_THREADS = 6
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
 # ponytail: 11-10 price test. Half the books over the free cap are 165-412 pages and the rival's
 # smallest pack is $3.75, so books up to 400 pages are offered at $3 instead of $5.
@@ -267,7 +278,7 @@ def freebook_use(token: str, digest: str):
         pass
 
 
-def issue_key(checkout_id: str, days: int = 0) -> str:
+def issue_key(checkout_id: str, days: int = 0, sharp: int = 0) -> str:
     """Mint a key for a paid checkout, once per checkout id.
 
     ponytail: no accounts, no db, no polar api call. the key is a random string in a file on the
@@ -284,15 +295,106 @@ def issue_key(checkout_id: str, days: int = 0) -> str:
     try:
         with SHELF_KEYS.open("a") as fh:
             until = (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat() if days else ""
-            fh.write(f"{checkout_id} {key}" + (f" until={until}" if until else "") + "\n")
+            fh.write(f"{checkout_id} {key}" + (f" until={until}" if until else "")
+                     + (f" sharp={sharp}" if sharp else "") + "\n")
     except OSError:
         pass
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "key_issued": checkout_id,
                       "ua": ""}), flush=True)
     # ponytail: only a fresh key is mailed, so a refresh of /thanks never sends a second mail.
     # a thread, so a slow polar or resend never holds up the buyer's success page
-    threading.Thread(target=_mail_key, args=(checkout_id, key, days), daemon=True).start()
+    threading.Thread(target=_mail_key, args=(checkout_id, key, days, sharp), daemon=True).start()
     return key
+
+
+SHARP_USED = Path(os.environ.get("LOG_DIR", ".")) / "sharp-used.txt"  # "KEY PAGES" per book
+_SHARP_LOCK = threading.Lock()
+
+
+def sharp_left(key: str) -> int:
+    """Pages of AI re-reading this key still has (0 for keys without the Library pass)."""
+    if not key:
+        return 0
+    try:
+        lines = SHELF_KEYS.read_text().splitlines()
+    except OSError:
+        return 0
+    total = 0
+    for ln in lines:
+        parts = ln.split()
+        if len(parts) >= 2 and parts[1] == key:
+            total = next((int(p[6:]) for p in parts[2:] if re.fullmatch(r"sharp=\d+", p)), 0)
+    if not total:
+        return 0
+    try:
+        used = sum(int(b) for a, b in (ln.split() for ln in SHARP_USED.read_text().splitlines() if ln.strip())
+                   if a == key)
+    except (OSError, ValueError):
+        used = 0
+    return max(0, total - used)
+
+
+LANG_NAMES = {"te": "Telugu", "hi": "Hindi", "en": "English", "pt": "Portuguese", "es": "Spanish"}
+
+
+def _sharp_page(img: bytes, lang: str) -> str | None:
+    """One page image read by the vision model; None on any failure (the Tesseract text stays)."""
+    import base64
+    prompt = (f"Transcribe every piece of text on this scanned page exactly as printed, mostly "
+              f"{LANG_NAMES.get(lang, 'English')}. Follow reading order: columns left to right, each column "
+              "top to bottom. Keep spelling exactly as printed; do not correct, modernize, translate, "
+              "summarize or add anything. Write [?] for a word you cannot read. Separate paragraphs with "
+              "a blank line. Output only the text.")
+    body = {"model": SHARP_MODEL, "temperature": 0, "reasoning": {"enabled": False},
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode()}}]}]}
+    for _ in range(2):
+        try:
+            r = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions", json.dumps(body).encode(),
+                                       {"Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json"})
+            with urllib.request.urlopen(r, timeout=180) as resp:
+                j = json.load(resp)
+            text = (j["choices"][0]["message"]["content"] or "").strip()
+            if text:
+                return text
+        except Exception as e:
+            print(f"sharp: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    return None
+
+
+def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None) -> int:
+    """Swap Tesseract text for the vision model's on the pages Tesseract was unsure of, in place.
+
+    ponytail: same page pick as scripts/manual_convert.py --gdrive, capped by the key's page budget.
+    Returns the number of pages swapped (only those count against the budget)."""
+    read = read or _sharp_page
+    if not (OPENROUTER_KEY or read is not _sharp_page):
+        return 0
+    left = sharp_left(key)
+    todo = [i for i, (t, _) in enumerate(layout) if confs.get(i, 100) < SHARP_CONF
+            and (len(t.split()) >= 20 or confs.get(i) == 0)][:left]
+    if not todo:
+        return 0
+    imgs = {}
+    for i in todo:  # pymupdf is not thread-safe: render here, call the model in threads
+        p = doc[i]
+        dpi = min(200, int(2000 * 72 / max(p.rect.width, p.rect.height)))
+        imgs[i] = p.get_pixmap(dpi=dpi).tobytes("jpg", jpg_quality=88)
+    with ThreadPoolExecutor(SHARP_THREADS) as ex:
+        got = dict(zip(todo, ex.map(lambda i: read(imgs.pop(i), lang), todo)))
+    ok = 0
+    for i, text in got.items():
+        n = len(layout[i][0].split())
+        if text and len(text.split()) >= (0.5 * n if n >= 20 else 40):
+            layout[i] = (text, layout[i][1])
+            ok += 1
+    if ok:
+        with _SHARP_LOCK, SHARP_USED.open("a") as fh:
+            fh.write(f"{key} {ok}\n")
+    print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "sharp": ok, "asked": len(todo),
+                      "pages": len(layout)}), flush=True)
+    return ok
 
 
 def _order_email(checkout_id: str) -> str:
@@ -310,21 +412,24 @@ def _order_email(checkout_id: str) -> str:
     return ((items[0].get("customer") or {}).get("email") or "") if items else ""
 
 
-def _mail_key(checkout_id: str, key: str, days: int = 0):
+def _mail_key(checkout_id: str, key: str, days: int = 0, sharp: int = 0):
     """Mail a fresh Shelf or Batch key to the buyer, so losing the tab or the browser never loses it."""
     to = _order_email(checkout_id)
     if not (RESEND_KEY and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}", to)):
         event("key_mail_failed", None, checkout=checkout_id[:8], err="no resend key or no email")
         return
-    plan = f"Batch pass ({days} days, it does not renew)" if days else "Shelf"
-    body = (f"Thanks for buying pdf2epub {plan}. Your key:\n\n{key}\n\n"
+    name = "Library pass" if sharp else ("Batch pass" if days else "Shelf")
+    plan = f"{name} ({days} days, it does not renew)" if days else "Shelf"
+    extra = (f"Scans get the sharper AI reading on the pages regular OCR finds hard to read, for up to "
+             f"{sharp:,} pages.\n\n") if sharp else ""
+    body = (f"Thanks for buying pdf2epub {plan}. Your key:\n\n{key}\n\n" + extra +
             f"Open this link to convert with the paid limits (books up to 2,000 pages, 1GB, scans included):\n\n"
             f"https://epub.ftak.net/?k={key}\n\n"
             "No account, no password. The browser you open it in remembers the key. "
             "Keep this email: on a new device, open the link again.\n\n"
             "A book that comes out wrong? Reply to this email with the title and I will look at it.\n\n"
             "Krishav, pdf2epub")
-    ok, err = _send_mail(to, f"Your pdf2epub {'Batch pass' if days else 'Shelf'} key", body)
+    ok, err = _send_mail(to, f"Your pdf2epub {name} key", body)
     if ok:
         event("key_mailed", None, checkout=checkout_id[:8], sender=ok)
     else:
@@ -1849,11 +1954,16 @@ def thanks(request: Request):
         key = issue_key(cid)
     elif paid_checkout(cid, BATCH_PRODUCT):
         key, batch = issue_key(cid, BATCH_DAYS), True
+    elif LIBRARY_PRODUCT and paid_checkout(cid, LIBRARY_PRODUCT):
+        key, batch = issue_key(cid, LIBRARY_DAYS, LIBRARY_SHARP), True
+    lib = bool(key) and sharp_left(key) > 0
+    days = LIBRARY_DAYS if lib else BATCH_DAYS
+    pname = "Library pass" if lib else ("Batch pass" if batch else "Shelf")
     key_html = ""
     if key:
-        key_html = (f'<div class="card"><p><b>Your {"Batch pass" if batch else "Shelf"} key</b></p>'
+        key_html = (f'<div class="card"><p><b>Your {pname} key</b></p>'
             f'<p>Put this on the end of the converter link and your uploads get the paid limits '
-            f'(2,000 pages per file, 1GB){f" for the next {BATCH_DAYS} days. It does not renew" if batch else ""}. '
+            f'(2,000 pages per file, 1GB){f" for the next {days} days. It does not renew" if batch else ""}. '
             f'This browser remembers it too:</p>'
             f'<p><code>https://epub.ftak.net/?k={key}</code></p>'
             f'<p>No account, no password. I also emailed it to the address you paid with, so it is '
@@ -1876,7 +1986,7 @@ b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,m
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>You're in.</h1>
-<p>{"The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month"}: no monthly limit,
+<p>{f"The Library pass is {LIBRARY_DAYS} days of Shelf plus the sharper AI reading for faded scans, paid once" if lib else ("The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month")}: no monthly limit,
 any number of books, each up to 2,000 pages, scans included.</p>
 {key_html}
 <div class="card">
@@ -2004,6 +2114,17 @@ async def freebook(request: Request, email: str = Form(""), pages: int = Form(0)
     return {"ok": True, "token": token}
 
 
+LIBRARY_CARD = f"""<div class="card">
+<p><b>A library of old scans? Library pass, $25 once</b></p>
+<ul>
+<li><b>{LIBRARY_DAYS} days</b> of the Shelf limits: any number of books, up to 2,000 pages each.</li>
+<li><b>Sharper reading for faded print.</b> Regular OCR misreads old, faded or unusual type. Pages it is unsure of get a second reading by an AI vision model, up to {LIBRARY_SHARP:,} pages. On our test of faded Telugu pages, that took accuracy from 87% to 97%.</li>
+<li>Telugu, Hindi, English, Portuguese and Spanish scans. No renewal.</li>
+</ul>
+<a class="btn" href="/go/library?why=shelfpage" data-go>Library pass - $25 once</a>
+</div>"""
+
+
 @app.get("/shelf", response_class=HTMLResponse)
 def shelf(request: Request):
     # ponytail: the paid tier needs a linkable page, otherwise only the founder can point people at it
@@ -2045,6 +2166,7 @@ hit the free page cap. Shelf is for that reader.</p>
 <a class="btn" style="background:transparent;color:var(--txt);border:1px solid var(--line)" href="/go/batch?why=shelfpage" data-go>Or $10 once - 30 days, no renewal</a>
 <p style="margin:12px 0 0;font-size:14px">One shelf to convert, not a habit? The one-time pass gives the same limits for 30 days and then simply ends. Not happy? Email me within 30 days of a payment and I refund it in full. Cancel any time.</p>
 </div>
+{LIBRARY_CARD if LIBRARY_URL and OPENROUTER_KEY else ""}
 <p><b>What you get when you subscribe:</b> a private key. Put it on the end of
 the converter link, like <code>epub.ftak.net/?k=YOURKEY</code>, and your uploads go to the paid
 limits. No account, no password, nothing to set up.</p>
@@ -2176,7 +2298,8 @@ async def beacon(request: Request):
 @app.get("/go/{offer}")
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
-    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "shelf": SHELF_URL, "batch": BATCH_URL}.get(offer)
+    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
+           "library": LIBRARY_URL if OPENROUTER_KEY else ""}.get(offer)  # no model key = no AI reading to sell
     if not url:
         raise HTTPException(404, "no such offer")
     if not is_bot(ua_of(request)):
@@ -3132,8 +3255,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 doc.select(range(FREE_OCR_PAGES))  # ponytail: the free taste of a long scan, then the wall
             if npages <= (min(PAID_OCR_MAX_PAGES, max_pages) if paid else FREE_OCR_PAGES) or cut:
                 tlang, elang = ocr_lang(doc)
-                pics = {}
-                pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics) or []
+                pics, confs = {}, {}
+                pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics, confs=confs) or []
+                if key and pages and sharp_left(key):
+                    sharp_pages(doc, pages, confs, elang, key)
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):
                     figs = _scan_figures(doc, pages, pics)
