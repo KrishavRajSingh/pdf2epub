@@ -2121,6 +2121,12 @@ LIBRARY_CARD = f"""<div class="card">
 <li><b>Sharper reading for faded print.</b> Regular OCR misreads old, faded or unusual type. Pages it is unsure of get a second reading by an AI vision model, up to {LIBRARY_SHARP:,} pages. On our test of faded Telugu pages, that took accuracy from 87% to 97%.</li>
 <li>Telugu, Hindi, English, Portuguese and Spanish scans. No renewal.</li>
 </ul>
+<blockquote style="margin:14px 0 4px;padding:2px 0 2px 14px;border-left:3px solid var(--acc);color:var(--txt);font-family:var(--serif);font-size:17px;line-height:1.5">
+"They look awesome. I never expected these weird formatted books could be converted to EPUB. Now I can read them on my phone and Kindle with font adjustments."</blockquote>
+<p style="margin:0 0 6px;font-size:14px">A reader with a library of old Telugu books</p>
+<blockquote style="margin:14px 0 4px;padding:2px 0 2px 14px;border-left:3px solid var(--acc);color:var(--txt);font-family:var(--serif);font-size:17px;line-height:1.5">
+"They look awesome. I never expected these weird formatted books could be converted to EPUB. Now I can read them on my phone and Kindle with font adjustments."</blockquote>
+<p style="margin:0 0 6px;font-size:14px">A reader with a library of old Telugu books</p>
 <a class="btn" href="/go/library?why=shelfpage" data-go>Library pass - $25 once</a>
 </div>"""
 
