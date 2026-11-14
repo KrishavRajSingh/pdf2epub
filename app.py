@@ -1445,6 +1445,7 @@ __ALT__
 
 <div class="links">
   <a href="/scan">Scan a physical book with your phone</a>
+  <a href="https://ftak.net/translate-pdf">Translate a PDF into another language</a>
   <a href="/shelf">Shelf: $10/mo, no monthly limit</a>
   <a href="/guides/scanned-pdf-to-epub">Scanned PDF to EPUB</a>
   <a href="/guides/send-pdf-to-kindle">PDF to Kindle, Kobo, Boox</a>
