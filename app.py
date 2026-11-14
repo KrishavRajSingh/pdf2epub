@@ -2327,7 +2327,8 @@ async def beacon(request: Request):
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
     url = {"onebook": ONETIME_URL, "short": SHORT_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
-           "library": LIBRARY_URL if OPENROUTER_KEY else ""}.get(offer)  # no model key = no AI reading to sell
+           "library": LIBRARY_URL if OPENROUTER_KEY else "",
+           "translate": translate.TRANSLATE_URL}.get(offer)  # no model key = no AI reading to sell
     if not url:
         raise HTTPException(404, "no such offer")
     if not is_bot(ua_of(request)):
@@ -3456,6 +3457,9 @@ async def http_err(request: Request, exc: HTTPException):
         return err_page(str(exc.detail), exc.status_code)
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+import translate  # noqa: E402  ponytail: ftak.net/translate-pdf backend, kept out of this file
+app.include_router(translate.router)
 
 if __name__ == "__main__":
     import uvicorn
