@@ -1492,27 +1492,39 @@ function freeOffer(n){return fbUsed()?'':'<div style="margin:12px 0 6px;padding:
  +'style="max-width:300px;margin-top:8px;background:#fff;border:1px solid #d3ccbe;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="fbbtn" style="'+GHOST+'">Convert it free</button></div>'}
+// ponytail (11-16): a reader who hits the wall with a 2nd book in one visit is a multi-book reader (the only
+// buyers who come back: Shelf, Batch). 11-15 two of them left with no email (3 books in 4 min, 1,070 + 568 p).
+// From the 2nd walled file on, the free-book email box and the $10/30-day pass go on top of the pitch.
+function wallFiles(){try{return JSON.parse(sessionStorage.getItem('walls')||'[]')}catch(e){return window._walls||[]}}
+function multi(){const w=wallFiles(),nm=window.capName||'book';
+ if(w.indexOf(nm)<0){w.push(nm);window._walls=w;try{sessionStorage.setItem('walls',JSON.stringify(w))}catch(e){}
+  if(w.length>=2)ev('multi_wall',{why:String(w.length)})}
+ return w.length>=2?w.length:0}
+function multiBox(n,k){return '<div style="margin:0 0 12px;padding:12px 14px;border:2px solid #6b4ce6;border-radius:6px">'
+ +'<b>Converting several books?</b> This is your '+(k===2?'second':k===3?'third':k+'th')+' over the free limit today.<br>'
+ +'<a style="'+BTN+'" href="/go/batch?why=multi&v='+V+'">$10 for 30 days, every book, no renewal</a>'
+ +freeOffer(n)+'</div>'}
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
-function pitchPages(n){return seen()+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
+function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
- +freeOffer(n)
+ +(k?'':freeOffer(n))
  +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Still $5. Leave your email and we raise the limit for your book.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
-function pitchOcr(n){return seen()+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
+function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
  +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot. Nothing stored. Not happy? Full refund.</span>'+freeOffer(n)}
+ +'on the spot. Nothing stored. Not happy? Full refund.</span>'+(k?'':freeOffer(n))}
 document.addEventListener('click',async(e)=>{
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id==='fbbtn'){const em=document.getElementById('fbmail');
@@ -2317,7 +2329,7 @@ def privacy():
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
-BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
+BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
            "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick"}  # ponytail: want_* = fake doors
 
 
