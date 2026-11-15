@@ -186,5 +186,16 @@
   "paragraphs": 3,
   "imgs": 0,
   "words": 792
+ },
+ "paper": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "A Paper About Golems",
+   "References"
+  ],
+  "paragraphs": 23,
+  "imgs": 0,
+  "words": 864
  }
 }

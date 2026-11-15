@@ -2537,11 +2537,13 @@ def _join(lines):
     for ln in lines:
         if not out:
             out = ln
+        elif out.endswith("​"):  # publishers break long URLs at a zero-width space
+            out = out[:-1] + ln
         elif out.endswith("-"):
             out = out[:-1] + ln
         else:
             out += " " + ln
-    return re.sub(r"\s+", " ", out).strip()
+    return re.sub(r"\s+", " ", out.replace("​", "")).strip()
 
 
 SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
@@ -2998,6 +3000,8 @@ def _junk_pages(doc) -> set:
 
 
 IA_NOTICE = re.compile(r"digitized by the internet archive", re.I)
+OFFPRINT = re.compile(r"e-?\s*offprint is for personal use only", re.I)
+REFS_HEAD = re.compile(r"(references|bibliography|works cited|literature cited|sources)", re.I)
 
 
 def _blocks(doc):
@@ -3012,7 +3016,13 @@ def _blocks(doc):
     ocr = _ocr_layer(doc)
     ligmap = _lig_map(doc)
     junk = _junk_pages(doc) if ocr else set()
+    # ponytail: a publisher's e-offprint (Springer) opens with a cover and a copyright notice
+    # page before the article repeats its own title; they came out as two junk chapters.
+    skip = max((k for k in range(min(3, len(doc))) if OFFPRINT.search(doc[k].get_text("text"))), default=-1)
+    in_refs, ref = False, None  # inside a reference list: [page, y, size, lines] of the open entry
     for i, page in enumerate(doc):
+        if i <= skip:
+            continue
         if ocr and (i in junk or (i == 0 and len(page.get_text("text").split()) < 40)):
             if IA_NOTICE.search(page.get_text("text")):
                 continue  # the archive's own "Digitized by" page, not the book
@@ -3029,6 +3039,7 @@ def _blocks(doc):
                 _fix_line(line, ligmap)
         fig = _figure_rect(page, raw, body)
         fig_page = _page_rect(page, fig) if fig else None
+        xs = [ln["bbox"][0] for b in raw if b.get("type") == 0 for ln in b.get("lines", [])]
         cap, cap_page = "", None
         if fig:
             # Put a "Map 4.1 ..." caption under its picture. PDF block order is not y-sorted,
@@ -3066,11 +3077,38 @@ def _blocks(doc):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if txt:
                     rows.append((txt, max(s["size"] for s in line["spans"]), line["bbox"]))
+            if not rows:
+                continue
+            edge = b["bbox"][3] < 60 or b["bbox"][1] > page.rect.height - 60  # running head/foot
+            if in_refs and not ocr and not edge:
+                if max(r[1] for r in rows) >= body * 1.12:
+                    in_refs = False  # the next section's heading ends the list
+                elif not re.match(r"\d{1,3}\s", rows[0][0]):  # "12 A note" is a footnote, not an entry
+                    # ponytail: a reference list's PDF blocks cut entries anywhere (reddit 11-16,
+                    # Springer paper): one block ended mid-entry, the next held two. Entries hang:
+                    # first line at the column edge, the rest indented. Split on that instead.
+                    for txt, size, lb in rows:
+                        left = min((x for x in xs if lb[0] - 30 <= x <= lb[0]), default=lb[0])
+                        if ref is None or lb[0] - left < 4:
+                            if ref:
+                                yield ref[0], ref[1], round(ref[2], 1), _join(ref[3])
+                            ref = [i, lb[1], size, [txt]]
+                        else:
+                            ref[2] = max(ref[2], size)
+                            ref[3].append(txt)
+                    continue
+            if ref and not edge:
+                yield ref[0], ref[1], round(ref[2], 1), _join(ref[3])
+                ref = None
             for y0, size, lines in _paragraphs(rows, b["bbox"], ocr):
                 yield i, y0, round(size, 1), _join(lines)
+            if REFS_HEAD.fullmatch(" ".join(r[0] for r in rows)):
+                in_refs = True
         if fig and not fig_done:
             pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
             yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
+    if ref:
+        yield ref[0], ref[1], round(ref[2], 1), _join(ref[3])
 
 def _structure(blocks, doc):
     """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
@@ -3078,8 +3116,14 @@ def _structure(blocks, doc):
     Footnote blocks (smaller type at the bottom of a page, starting with a marker) are moved
     to the end of the chapter they belong to, under a "Notes" block. Kept as ("fn", text).
     """
-    long = [sz for _, _, sz, t in blocks if sz > 0 and len(t) > 40]
-    body = Counter(long).most_common(1)[0][0] if long else Counter(sz for _, _, sz, _ in blocks).most_common(1)[0][0]
+    # ponytail: weigh sizes by characters, not blocks. A paper's reference list and footnotes
+    # are many short small-type blocks; counted per block they outvote the body, the body
+    # size became 8.5 and every short 10pt quote line turned into a heading (reddit 11-16).
+    long = Counter()
+    for _, _, sz, t in blocks:
+        if sz > 0 and len(t) > 40:
+            long[sz] += len(t)
+    body = long.most_common(1)[0][0] if long else Counter(sz for _, _, sz, _ in blocks).most_common(1)[0][0]
     h1_cut = body * 1.3
     h2_cut = body * 1.12
     # ponytail: small-font blocks at page bottom that open with a note marker. captions and
@@ -3095,7 +3139,11 @@ def _structure(blocks, doc):
     # ponytail: publisher page furniture changes per page (DOI, download date), so the repeated
     # header/footer counter never catches it; "Downloaded from <url>" is the common watermark.
     # Cambridge puts the "terms of use" line first in the same block, so match it anywhere.
-    boiler = re.compile(r"downloaded from\s+https?:/{1,2}|^https?://doi\.org/", re.I)
+    boiler = re.compile(r"downloaded from\s+https?:/{1,2}|^https?://doi\.org/|^Vol\.:\(0123456789\)$|"
+                        r"^Publisher[’']s Note Springer Nature remains neutral|"
+                        r"^jurisdictional claims in published maps and institutional affiliations", re.I)
+    fn_more = re.compile(r"^Footnote (\d{1,3}) \(continued\)\s*")
+    last_fn_page = -1
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -3156,9 +3204,29 @@ def _structure(blocks, doc):
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
         # / superscript-marker check if that shows up in real books.
-        if sz < fn_cut and fn_mark.match(t) and y > doc[pno].rect.height * 0.55 \
-           and body_pages[pno] >= 3 and re.search(r"[a-z]{3}", t):
+        foot = sz < fn_cut and y > doc[pno].rect.height * 0.55 and body_pages[pno] >= 3
+        if foot and fn_more.match(t):
+            # ponytail: Springer carries a long note onto the next page under "Footnote 1
+            # (continued)"; it sat mid-paragraph in the text (reddit 11-16). Join it to its note.
+            n, rest = fn_more.match(t).group(1), fn_more.sub("", t)
+            for notes in (cur_notes, *reversed(chapters)):
+                k = next((j for j in range(len(notes) - 1, -1, -1)
+                          if (notes[j][1].startswith(n + " ") and notes[j][0] == "fn" if isinstance(notes[j], tuple)
+                              else notes[j].startswith(n + " "))), None)
+                if k is not None:
+                    if isinstance(notes[k], tuple):
+                        notes[k] = ("fn", notes[k][1] + " " + rest)
+                    else:
+                        notes[k] += " " + rest
+                    break
+            else:
+                cur_notes.append(n + " " + rest)
+            last_fn_page = pno
+        elif foot and fn_mark.match(t) and re.search(r"[a-z]{3}", t):
             cur_notes.append(t)
+            last_fn_page = pno
+        elif foot and cur_notes and pno == last_fn_page and len(t) < 400:
+            cur_notes[-1] += " " + t  # an unmarked small line under a note: its address, its rest
         elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
             flush()
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
@@ -3183,6 +3251,26 @@ def _structure(blocks, doc):
         else:
             cur.append(("p", t))
     flush()
+    # a few words above the title ("OPEN FORUM", a journal's section label) were a chapter of
+    # their own; put them under the title instead
+    if len(chapters) > 1 and all(k == "p" for k, _ in chapters[0]) \
+            and sum(len(t) for _, t in chapters[0]) < 60 and chapters[1][0][0] in ("h1", "h2"):
+        label = chapters.pop(0)
+        chapters[0][1:1] = label
+    # ponytail: a section that starts mid-page takes the notes printed at that page's foot,
+    # even when their markers sit in the section before (notes 22-23 landed under References,
+    # reddit 11-16). Move a note back when only the previous chapter carries its marker.
+    for k in range(1, len(chapters)):
+        def says(ch, sup):
+            return any(sup in t for kind, t in ch if kind != "fn" and isinstance(t, str))
+        keep, back = [], []
+        for item in chapters[k]:
+            m = re.match(r"(\d{1,3}) ", item[1]) if item[0] == "fn" else None
+            sup = m.group(1).translate(SUP) if m else ""
+            (back if sup and not says(chapters[k], sup) and says(chapters[k - 1], sup) else keep).append(item)
+        if back:
+            chapters[k] = keep
+            chapters[k - 1].extend(back)
     return chapters
 
 

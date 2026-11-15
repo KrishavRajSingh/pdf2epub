@@ -338,6 +338,41 @@ def make_accented_text():
     return d
 
 
+def make_paper():
+    """Journal offprint (reddit 11-16, Springer AI & Society): offprint cover + notice pages,
+    10pt body, short 10pt verse lines, 8.5pt footnotes with one carried over as "Footnote 1
+    (continued)", and an 8.5pt reference list with hanging indents. The small blocks outnumber
+    the body blocks, which made every verse line a heading."""
+    d = _doc()
+    d.new_page().insert_text((72, 200), "A Paper About Golems", fontsize=24)
+    d.new_page().insert_textbox(pymupdf.Rect(72, 72, 520, 300),
+        "Your article is protected by copyright. This e-offprint is for personal use only.", fontsize=11)
+    for k in range(3):
+        pg = d.new_page()
+        if k == 0:
+            pg.insert_text((72, 90), "A Paper About Golems", fontsize=16)
+        pg.insert_textbox(pymupdf.Rect(72, 110, 520, 300), PROSE * 4, fontsize=10)
+        for j, line in enumerate(("I like to think", "of a cybernetic meadow", "where mammals and computers")):
+            pg.insert_text((100, 320 + j * 14), line, fontsize=10)
+        pg.insert_textbox(pymupdf.Rect(72, 370, 520, 520), PROSE * 3, fontsize=10)
+        y = 560
+        if k == 1:
+            pg.insert_text((72, y), "Footnote 1 (continued) and the golem story goes on here.", fontsize=8.5)
+            y += 16
+        for n in range(3):
+            pg.insert_text((72, y), f"{k * 3 + n + 1} A note about golems and machines, number {k * 3 + n + 1}.",
+                           fontsize=8.5)
+            y += 16
+    pg = d.new_page()
+    pg.insert_text((72, 80), "References", fontsize=12)
+    y = 100
+    for n in range(14):
+        pg.insert_text((72, y), f"Author{chr(65 + n)} X (2019) A long title of a book about thinking", fontsize=8.5)
+        pg.insert_text((90, y + 11), "machines. Some Press, Cambridge", fontsize=8.5)
+        y += 24
+    return d
+
+
 # name -> (maker, rules). path / path_in: which pipeline. has / hasnt: phrases. imgs: minimum
 # pictures kept. known: problems we know about and accept for now (error prefixes); they print
 # as KNOWN instead of failing. When one goes away, the run says so: drop it from known.
@@ -380,6 +415,11 @@ CASES = {
     "hindi_old_font": (make_hindi_old_font, {"path": "ocr", "has": ["किसान"], "hasnt": ["dk;Z"], "lang": "hi"}),
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
     "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),
+    # 11-16: verse lines became chapters, footnotes sat in the text, references ran together
+    "paper": (make_paper, {"path": "text", "ch_max": 2, "hasnt": ["e-offprint", "Footnote 1 (continued)"],
+                           "has": ["I like to think"],
+                           "para": ["AuthorA X (2019) A long title of a book about thinking machines. Some Press, Cambridge"],
+                           "fn": ["1 A note about golems and machines, number 1. and the golem story goes on here."]}),
 }
 
 
@@ -442,9 +482,13 @@ def main():
     fails, new = [], {}
     for name, (make, rules) in CASES.items():
         doc = pymupdf.open(stream=make().tobytes(), filetype="pdf")
-        s, text = summary(*convert(doc))
+        path, chapters = convert(doc)
+        s, text = summary(path, chapters)
         new[name] = s
         errs = check(name, rules, s, text)
+        items = [it for ch in chapters for it in ch]
+        for kind, key in (("p", "para"), ("fn", "fn")):  # whole paragraphs / notes, not phrases
+            errs += [f"no {kind} block {p!r}" for p in rules.get(key, []) if (kind, p) not in items]
         if "lang" in rules and (got := ocr_lang(doc)[1] if s["path"] == "ocr" else doc_lang(doc)) != rules["lang"]:
             errs.append(f"epub language {got}, want {rules['lang']}")
         known = [e for e in errs if any(e.startswith(k) for k in rules.get("known", []))]
