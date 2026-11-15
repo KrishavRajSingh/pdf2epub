@@ -1369,7 +1369,7 @@ __ALT__
   <div class="card convert">
     <h2>Convert a PDF</h2>
     <div id="drop" class="drop"><b>Drop a PDF here</b><span>or click to choose one</span></div>
-    <input id="file" type="file" accept=".pdf" hidden>
+    <input id="file" type="file" accept=".pdf,.djvu,.djv" hidden>
     <div class="row">
       <input id="title" placeholder="Title (optional)" maxlength="120">
       <input id="author" placeholder="Author (optional)" maxlength="120">
@@ -1541,8 +1541,22 @@ document.addEventListener('click',async(e)=>{
 drop.onclick=()=>fi.click();
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0])ev('pick')});
-fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name}});
+drop.addEventListener('drop',x=>{fi.files=x.dataTransfer.files;if(fi.files[0]){ev('pick');djvuDoor()}});
+fi.addEventListener('change',()=>{if(fi.files[0]){ev('pick');drop.querySelector('b').textContent=fi.files[0].name;djvuDoor()}});
+// ponytail (11-16): djvu fake door. google trends has "djvu to epub" +350% (scanned books, same readers as our OCR
+// payers). nothing is uploaded: a djvu pick asks for an email, and 5+ picks/emails in 14 days decide if it gets built
+const isDjvu=f=>!!f&&/\.djvu?$/i.test(f.name||'');
+function djvuDoor(){const f=fi.files[0];if(!isDjvu(f))return false;
+ ev('djvu_pick');msg.className='';
+ msg.innerHTML='<b>'+esc(f.name)+'</b> is a DjVu file. We don\\'t convert DjVu yet, and we\\'re deciding whether to build it now.'
+  +'<br>Leave your email and we convert this book to EPUB for free when DjVu is ready.'
+  +'<form id="djf" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><input id="dje" type="email" required placeholder="you@email.com" style="flex:1;min-width:180px">'
+  +'<button type="submit">Notify me</button></form>';
+ document.getElementById('djf').onsubmit=async e=>{e.preventDefault();const fd=new FormData();
+  fd.append('email',document.getElementById('dje').value);fd.append('reason','want:djvu');
+  try{await fetch('/lead'+location.search,{method:'POST',body:fd})}catch(x){}
+  ev('want_email',{why:'djvu'});msg.className='ok';msg.textContent='Thanks. We\\'ll email you when DjVu works, and this book converts free.'};
+ return true}
 // ponytail (11-10): a Shelf reader with 1,000 Telugu novels asked for this. With a Shelf key, pick many
 // PDFs or a whole folder: they convert one by one on the normal job path and each EPUB downloads as it finishes
 let BATCH=[];
@@ -1588,6 +1602,7 @@ let PN='__FREEOCR__';
 async function convert(preview){
  const f=fi.files[0];
  if(!f){msg.className='err';msg.textContent='Choose a PDF first.';return}
+ if(djvuDoor())return;
  msg.className='';msg.textContent=preview?'Reading the first '+PN+' pages...':'Converting...';go.disabled=true;
  ev('submit',preview?{why:'preview'}:{});
  const fd=new FormData();fd.append('f',f);
@@ -2303,7 +2318,7 @@ def privacy():
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "audio_click", "want_email"}  # ponytail: want_* = fake doors
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick"}  # ponytail: want_* = fake doors
 
 
 @app.post("/e")
@@ -2467,7 +2482,7 @@ def stats(response: Response):
     fail_by_err: dict[str, int] = {}
     recent_fails: list[dict] = []
     starts = 0
-    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0}
+    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0}
     try:
         for line in LOG.read_text().splitlines():
             try:

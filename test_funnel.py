@@ -430,11 +430,19 @@ def main():
         assert 'id="next" hidden' in page and 'data-want="translate"' in page and 'data-want="desktop"' in page and 'data-want="audio"' in page, path
         assert word in page, (path, word)
     mac = {"user-agent": "Mozilla/5.0 (Macintosh) Safari/605", "content-type": "application/json"}
-    for n in ("want_view", "want_view", "translate_click", "desktop_click", "audio_click", "want_email"):
+    for n in ("want_view", "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick"):
         client.post("/e", content=json.dumps({"n": n, "v": "wantvisitor1", "why": "desktop"}), headers=mac)
     client.post("/lead", data={"email": "door@e.com", "reason": "want:desktop"}, headers={"user-agent": mac["user-agent"]})
     st = client.get("/stats").json()
-    assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "audio_click": 1, "want_email": 1}, st["wants"]
+    assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "audio_click": 1, "want_email": 1,
+                           "djvu_pick": 1}, st["wants"]
+    # djvu fake door (11-16, Google Trends "djvu to epub" +350%): the picker takes .djvu, the page asks for an email
+    # instead of uploading it, and the server still refuses a djvu that gets posted anyway
+    for path in ("/", "/pt/", "/es/"):
+        page = client.get(path).text
+        assert 'accept=".pdf,.djvu,.djv"' in page and "djvuDoor" in page and "want:djvu" in page, path
+    r = client.post("/convert", files={"f": ("book.djvu", b"AT&TFORM\x00\x00", "image/vnd.djvu")})
+    assert r.status_code == 400, r.status_code
     assert not any(k.startswith("lead") for k in st["fail_by_err"]), st["fail_by_err"]
 
     # preview before paying (11-07): over the limit converts the free part first, then pitches $5
