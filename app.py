@@ -1222,30 +1222,50 @@ PAGE_CSS = """
 --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);
--webkit-font-smoothing:antialiased}
+body{margin:0;color:var(--txt);font-family:var(--sans);-webkit-font-smoothing:antialiased;
+background:linear-gradient(var(--line),var(--line)) calc(50% - 490px) 0/1px 100% no-repeat,
+linear-gradient(var(--line),var(--line)) calc(50% + 490px) 0/1px 100% no-repeat,var(--bg)}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
 ::selection{background:#e4dcff;color:var(--txt)}
 code,.mono{font-family:var(--mono)}
 .wrap{max-width:940px;margin:0 auto;padding:0 20px 72px}
 a{color:var(--acc2)}
-header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;
-padding:24px 0 14px;border-bottom:1px solid var(--line)}
-.mark{display:flex;align-items:baseline;gap:9px;font-family:var(--serif);font-weight:500;
+header.top{position:sticky;top:12px;z-index:20;display:flex;align-items:center;gap:6px;
+max-width:640px;margin:14px auto 0;padding:7px 7px 7px 18px;border:1px solid var(--line);border-radius:99px;
+background:rgba(255,253,248,.84);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+box-shadow:0 10px 30px -18px rgba(40,30,90,.35)}
+.navl{display:flex;gap:2px;margin-left:auto}
+.navl a{white-space:nowrap;color:var(--dim);text-decoration:none;font-size:13.5px;padding:7px 10px;border-radius:99px}
+.navl a:hover{color:var(--txt);background:var(--well)}
+.navgo{background:var(--txt);color:var(--panel);text-decoration:none;font-size:13.5px;font-weight:600;
+padding:9px 16px;border-radius:99px;white-space:nowrap}
+.navgo:hover{background:var(--acc2)}
+.navl a:focus-visible,.navgo:focus-visible,.mark:focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
+.mark{color:var(--txt);text-decoration:none;display:flex;align-items:baseline;gap:9px;font-family:var(--serif);font-weight:500;
 letter-spacing:-.2px;font-size:19px}
 .mark .dot{width:8px;height:8px;border-radius:50%;background:var(--acc);align-self:center}
 .mark .to{color:var(--faint);font-weight:400;font-size:13px;letter-spacing:0}
 .pill{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
 border-radius:99px;padding:5px 11px}
 .pill b{color:var(--ok);font-weight:500}
-h1{font-family:var(--serif);font-size:clamp(30px,4.6vw,42px);line-height:1.1;
-letter-spacing:-.02em;margin:30px 0 0;font-weight:400}
+.hero{text-align:center;padding:44px 0 0}
+h1{font-family:var(--serif);font-size:clamp(40px,7vw,66px);line-height:1.04;
+letter-spacing:-.035em;margin:0 auto;font-weight:400;text-wrap:balance}
 h1 .em{color:var(--acc)}
-.lede{color:var(--dim);font-size:clamp(15px,1.8vw,16.5px);line-height:1.6;margin:14px 0 0;max-width:54ch}
-.facts{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}
+.lede{color:var(--dim);font-size:clamp(15.5px,1.9vw,18px);line-height:1.6;margin:16px auto 0;max-width:46ch}
+.facts{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:20px 0 0}
 .fact{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);
 border-radius:4px;padding:6px 10px}
 .fact b{color:var(--txt);font-weight:500}
-.grid2{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:16px;margin-top:26px}
+.stage{margin-top:30px;padding:20px;border-radius:20px;border:1px solid var(--line);
+background:radial-gradient(70% 90% at 0% 0%,#ddd2ff 0%,rgba(221,210,255,0) 70%),
+radial-gradient(60% 80% at 100% 100%,#f7d6bd 0%,rgba(247,214,189,0) 70%),
+linear-gradient(160deg,#ece5fa,#f5ede4)}
+.stage .card{border-color:rgba(27,25,22,.08);border-radius:10px;
+box-shadow:0 1px 2px rgba(27,25,22,.05),0 24px 48px -28px rgba(50,30,130,.45)}
+.reads{text-align:center;font-size:12px;color:var(--faint);margin:18px 0 0;letter-spacing:.02em}
+.reads i{display:inline-block;width:3px;height:3px;border-radius:50%;background:var(--line2);vertical-align:middle;margin:0 10px}
+.grid2{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
 .card.convert{display:flex;flex-direction:column}
 .card h2{font-family:var(--serif);font-size:14.5px;font-weight:500;margin:0 0 14px;letter-spacing:0}
@@ -1284,8 +1304,25 @@ padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .proof .rows .v{color:var(--txt);font-family:var(--mono);font-size:12px;text-align:right}
 h2{font-family:var(--serif);font-size:19px;font-weight:500;letter-spacing:-.2px;margin:42px 0 14px}
 .fixes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.fix{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:13px 14px}
-.fix b{display:block;font-size:13.5px;line-height:1.35;font-weight:600}
+.fix{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.fx{padding:14px 16px 16px}
+.fix b{display:block;font-family:var(--serif);font-size:17px;line-height:1.25;font-weight:500}
+.fix p{margin:6px 0 0;font-size:13.5px;line-height:1.55;color:var(--dim)}
+.viz{height:118px;display:flex;align-items:center;justify-content:center;gap:14px;border-bottom:1px solid var(--line)}
+.v-para{background:linear-gradient(160deg,#e6defd,#f3eefc)}
+.v-toc{background:linear-gradient(160deg,#f8e2d1,#fbf0e6)}
+.v-scan{background:linear-gradient(160deg,#dcebe2,#eef5f0)}
+.viz .pg{width:58px;height:78px;background:var(--panel);border-radius:3px;padding:10px 8px;display:flex;flex-direction:column;gap:5px;
+box-shadow:0 1px 2px rgba(27,25,22,.08),0 10px 20px -12px rgba(27,25,22,.35)}
+.viz .pg i{display:block;height:3px;border-radius:2px;background:#d3ccbe}
+.v-para .pg:first-child i:nth-child(odd){width:62%}.v-para .pg:first-child i:nth-child(even){width:80%}
+.v-para .book1 i{background:var(--acc);opacity:.55}.v-para .book1 i:first-child{margin-left:9px}
+.v-toc .pg{width:70px}.v-toc .pg i{position:relative;margin-left:9px;width:calc(100% - 9px)}
+.v-toc .pg i::before{content:"";position:absolute;left:-9px;top:-1px;width:5px;height:5px;border-radius:50%;background:#d98a52}
+.v-toc .pg i:nth-child(2){width:60%}.v-toc .pg i:nth-child(4){width:72%}
+.v-scan .scan{transform:rotate(-4deg);background:repeating-linear-gradient(180deg,#b9b4a8 0 2px,transparent 2px 7px),
+linear-gradient(135deg,#e9e4d8,#cfc9bb);filter:blur(.4px)}
+.v-scan .pg:last-child i{background:#1f7a4d;opacity:.5}
 .fix .tag{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
 text-transform:uppercase;color:var(--acc);margin-bottom:6px}
 .links{display:flex;flex-wrap:wrap;gap:9px;margin-top:34px}
@@ -1340,7 +1377,9 @@ background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2
 @media(max-width:720px){.grid2{grid-template-columns:minmax(0,1fr)}.fixes{grid-template-columns:1fr}
 .said,.prices{grid-template-columns:1fr}.said .feat{border-left:0;padding:0}
 h1{letter-spacing:-.015em}}
-@media(max-width:560px){header.top{padding:18px 0 12px}.pill{display:none}.card{padding:16px}}
+@media(max-width:1020px){body{background:var(--bg)}}
+@media(max-width:560px){header.top{padding:6px 6px 6px 14px;margin-top:10px}.navl{display:none}.navgo{margin-left:auto}
+.hero{padding-top:30px}.facts .fact:first-child,.facts .fact:nth-child(4){display:none}.stage{padding:10px;border-radius:14px;margin-top:32px}.pill{display:none}.card{padding:16px}}
 """
 
 PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -1354,20 +1393,25 @@ __ALT__
 <script type="application/ld+json">__FAQLD__</script>
 <style>__CSS__</style>__CFB__</head><body><div class="wrap">
 <header class="top">
-  <div class="mark"><span class="dot"></span>pdf2epub<span class="to mono">/ epub.ftak.net</span></div>
-  <div class="pill mono">files not stored &middot; <b>no account</b></div>
+  <a class="mark" href="#top"><span class="dot"></span>pdf2epub</a>
+  <nav class="navl"><a href="#prices">Prices</a><a href="#faq">Questions</a><a href="/guides">Guides</a></nav>
+  <a class="navgo" href="#drop" id="navgo">Convert a PDF</a>
 </header>
 
+<section class="hero" id="top">
 <h1>Your PDF, as a <span class="em">real book</span>.</h1>
 <p class="lede">Real chapters, real paragraphs. Free, no signup, nothing kept.</p>
 <div class="facts mono">
+  <span class="fact">files not stored &middot; <b>no account</b></span>
   <span class="fact"><b>1GB</b> / 150 pages</span>
   <span class="fact">Scans: OCR free for <b>__FREEOCR__ pages</b></span>
   <span class="fact">EPUB3, Kindle, Kobo, Apple Books</span>
   <span class="fact" id="st" hidden></span>
 </div>
 
-<div class="grid2">
+</section>
+
+<div class="stage"><div class="grid2">
   <div class="card convert">
     <h2>Convert a PDF</h2>
     <div id="drop" class="drop"><b>Drop a PDF here</b><span>or click to choose one</span></div>
@@ -1407,13 +1451,20 @@ __ALT__
     <div class="pane-t" style="margin-top:12px"><span>The same page in the EPUB</span><span class="v">__EPARAS__ paragraphs, __TOCN__ chapters</span></div>
     <div class="book"><h3>__HEAD1__</h3>__BOOKPARAS__</div>
   </div>
-</div>
+</div></div>
+<p class="reads mono" aria-label="Opens on">Kindle <i></i> Kobo <i></i> Apple Books <i></i> Boox <i></i> KOReader</p>
 
 <h2>What it repairs</h2>
 <div class="fixes">
-  <div class="fix"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b></div>
-  <div class="fix"><span class="tag">chapters</span><b>Headings become chapters</b></div>
-  <div class="fix"><span class="tag">scans</span><b>Scans get OCR</b></div>
+  <div class="fix"><div class="viz v-para" aria-hidden="true"><div class="pg"><i></i><i></i><i></i><i></i></div><div class="pg book1"><i></i><i></i><i></i></div></div>
+    <div class="fx"><span class="tag">paragraphs</span><b>One paragraph per paragraph</b>
+    <p>Lines the PDF broke at the page edge join back into whole paragraphs.</p></div></div>
+  <div class="fix"><div class="viz v-toc" aria-hidden="true"><div class="pg"><i></i><i></i><i></i><i></i><i></i></div></div>
+    <div class="fx"><span class="tag">chapters</span><b>Headings become chapters</b>
+    <p>Your reader gets a table of contents you can tap to jump between chapters.</p></div></div>
+  <div class="fix"><div class="viz v-scan" aria-hidden="true"><div class="pg scan"></div><div class="pg"><i></i><i></i><i></i><i></i></div></div>
+    <div class="fx"><span class="tag">scans</span><b>Scans get OCR</b>
+    <p>Photographed pages are read into real text you can search and resize.</p></div></div>
 </div>
 
 <h2>From readers</h2>
@@ -1423,7 +1474,7 @@ __ALT__
   <p class="feat">Featured in the <b>deepculture</b> newsletter, issue #243. One of its readers converted 68 books in 32 minutes.</p>
 </div>
 
-<h2>Prices</h2>
+<h2 id="prices">Prices</h2>
 <div class="prices">
   <div class="price"><h3>Free</h3><div class="amt">$0</div>
     <p>One PDF at a time, up to 150 pages and 1GB. Scans: the first __FREEOCR__ pages.</p>
@@ -1438,7 +1489,7 @@ __ALT__
 </div>
 <p class="refund" style="font-size:14px;color:#5b564d;margin-top:10px">Not happy with the book? Full refund within 30 days, no questions asked.</p>
 
-<h2>Questions</h2>
+<h2 id="faq">Questions</h2>
 <div class="faq">__FAQ__</div>
 
 <div class="end">
@@ -1682,6 +1733,7 @@ wf&&(wf.onsubmit=async e=>{e.preventDefault();const fd=new FormData();
  fd.append('email',document.getElementById('wante').value);fd.append('reason','want:'+WANT);
  try{await fetch('/lead'+location.search,{method:'POST',body:fd})}catch(x){}
  ev('want_email',{why:WANT});wf.hidden=true;document.getElementById('wantok').hidden=false});
+document.getElementById('navgo').onclick=x=>{x.preventDefault();ev('nav_cta');drop.scrollIntoView({behavior:'smooth',block:'center'});fi.click()};
 document.getElementById('again').onclick=()=>{ev('again');drop.scrollIntoView({behavior:'smooth',block:'center'});fi.click()};
 </script></body></html>"""
 PAGE_HEAD = PAGE_HEAD.replace("__CFB__", CF_BEACON)
