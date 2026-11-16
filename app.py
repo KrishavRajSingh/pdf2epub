@@ -2835,7 +2835,10 @@ def _junk_share(text: str) -> float:
     s = [c for c in text if not c.isspace()]
     if not s:
         return 0.0
-    junk = sum(1 for c in s if (ord(c) > 0x7F and unicodedata.category(c)[0] in "SPC") or c in "~^=`<>#|\\")
+    # ponytail: ASCII control codes count too. A PDF24 OCR layer extracted as "\x02\x05\x01˖": 38%
+    # control codes, 0.12 without them, and the text path made an EPUB of junk (The Stranger, 11-16)
+    junk = sum(1 for c in s if (ord(c) > 0x7F and unicodedata.category(c)[0] in "SPC") or c in "~^=`<>#|\\"
+               or ord(c) < 0x20 or c == "\x7f")
     return junk / len(s)
 
 

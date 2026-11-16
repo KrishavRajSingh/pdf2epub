@@ -296,6 +296,19 @@ def make_ascii_old_font():
     return d
 
 
+def make_control_code_layer():
+    """English scan whose OCR layer (PDF24 Tools - OCR) extracts as ASCII control codes:
+    "\x02\x05\x01˖ \x16\x01\x04\x14\x05˖". The non-ASCII junk check scored it 0.12 and the text
+    path built an EPUB of junk (The Stranger, mailed 11-16)."""
+    d, png = _doc(), _page_png(PROSE * 14)
+    junk = "\x02\x05\x01 \x16\x01\x04\x14\x05 \x06\x06\x03\x07 \x07\x10 \x0c\x13 \x05\x01\x12 \x04\x0e "
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), junk * 40, fontsize=11, render_mode=3)
+    return d
+
+
 def make_broken_unicode_telugu():
     """Unicode Telugu made in Word: the page shows the right text, the text layer has vowel signs
     in the wrong order ("చేస్ానానడు"), so the text path copied broken words (11-10)."""
@@ -411,6 +424,7 @@ CASES = {
     "magazine_scan": (make_magazine_scan, {"path": "ocr", "has": ["clocks were striking"], "imgs": 3}),
     "scan_margins": (make_scan_margins, {"path": "ocr", "has": ["clocks were striking"]}),
     "ascii_old_font": (make_ascii_old_font, {"path": "ocr", "has": ["గ్రామంలో"], "hasnt": ["NSRV"], "lang": "te"}),
+    "control_code_layer": (make_control_code_layer, {"path": "ocr", "has": ["clocks were striking"], "lang": "en"}),
     "broken_unicode_telugu": (make_broken_unicode_telugu, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"], "lang": "te"}),
     "hindi_old_font": (make_hindi_old_font, {"path": "ocr", "has": ["किसान"], "hasnt": ["dk;Z"], "lang": "hi"}),
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
