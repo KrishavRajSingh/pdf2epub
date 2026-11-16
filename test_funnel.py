@@ -429,6 +429,7 @@ def main():
         page = client.get(path).text
         assert 'id="next" hidden' in page and 'data-want="translate"' in page and 'data-want="desktop"' in page and 'data-want="audio"' in page and 'data-want="kindle"' in page, path
         assert word in page, (path, word)
+        assert page.count("static.cloudflareinsights.com/beacon.min.js") == 1, path  # 11-16: CF visitor counter, once
     mac = {"user-agent": "Mozilla/5.0 (Macintosh) Safari/605", "content-type": "application/json"}
     for n in ("want_view", "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click"):
         client.post("/e", content=json.dumps({"n": n, "v": "wantvisitor1", "why": "desktop"}), headers=mac)
