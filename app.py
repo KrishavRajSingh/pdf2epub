@@ -119,6 +119,8 @@ SHELF_KEYS = Path(os.environ.get("LOG_DIR", ".")) / "shelf-keys.txt"  # one key 
 PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified ids, so refresh is free
 USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
 FREEBOOK = Path(os.environ.get("LOG_DIR", ".")) / "freebook.txt"  # token email ip date [digest], one free whole book per email
+# ponytail (11-16): Cloudflare Web Analytics, same visitor counter as QRigin/DOMolition; the funnel stays on our log
+CF_BEACON = '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon=\'{"token": "33b7cc180a8c4904b7cef84cbfbbc46b"}\'></script>'
 FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
 SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of most books
 SHELF_MAX_MB = 1000
@@ -1350,7 +1352,7 @@ PAGE_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta property="og:description" content="No signup, no watermark, nothing stored. Scans read with OCR.">
 __ALT__
 <script type="application/ld+json">__FAQLD__</script>
-<style>__CSS__</style></head><body><div class="wrap">
+<style>__CSS__</style>__CFB__</head><body><div class="wrap">
 <header class="top">
   <div class="mark"><span class="dot"></span>pdf2epub<span class="to mono">/ epub.ftak.net</span></div>
   <div class="pill mono">files not stored &middot; <b>no account</b></div>
@@ -1682,6 +1684,7 @@ wf&&(wf.onsubmit=async e=>{e.preventDefault();const fd=new FormData();
  ev('want_email',{why:WANT});wf.hidden=true;document.getElementById('wantok').hidden=false});
 document.getElementById('again').onclick=()=>{ev('again');drop.scrollIntoView({behavior:'smooth',block:'center'});fi.click()};
 </script></body></html>"""
+PAGE_HEAD = PAGE_HEAD.replace("__CFB__", CF_BEACON)
 
 
 def _proof() -> dict:
@@ -1793,7 +1796,7 @@ input[type=text]{width:100%;background:#f4f0e7;border:1px solid var(--line);colo
 .pick:hover{border-color:var(--acc)}.pick b{display:block;font-size:15px;margin-bottom:4px}.pick span{color:var(--mut);font-size:12.5px}
 #msg{margin-top:12px;font-size:14px;min-height:20px;color:var(--mut)}#msg.err{color:#a3301f}#msg.ok{color:#1f7a4d}
 .note{color:var(--mut);font-size:13px;margin-top:18px}a{color:#553bc4}
-</style></head><body><div class="wrap">
+</style>__CFB__</head><body><div class="wrap">
 <h1>Scan a book to EPUB</h1>
 <p class="lead">Photograph the pages of a physical book. The text gets read with OCR, map and
 figure pages stay as images, and you get an EPUB for a Kindle, Kobo or phone. Nothing is stored.</p>
@@ -1826,6 +1829,7 @@ go.onclick=async()=>{
   if(/^413/.test(e.message))msg.innerHTML=PITCH}
  go.disabled=false};
 </script></body></html>"""
+SCAN_PAGE = SCAN_PAGE.replace("__CFB__", CF_BEACON)
 
 
 @app.get("/scan", response_class=HTMLResponse)
@@ -1941,7 +1945,7 @@ a{{color:#553bc4}}.cta{{display:inline-block;background:var(--acc);color:#fff;bo
 .box{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px;margin-top:26px}}
 .foot{{color:var(--mut);font-size:13px;margin-top:34px}}
 .mark{{display:inline-block;font-family:var(--serif);font-weight:500;font-size:19px;text-decoration:none;color:var(--txt);margin-bottom:26px}}.mark .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--acc);margin-right:9px}}
-</style></head><body><div class="wrap">
+</style>{CF_BEACON}</head><body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>{html.escape(h1 or title)}</h1>
 {body}
