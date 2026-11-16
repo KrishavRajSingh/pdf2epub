@@ -120,7 +120,7 @@ PAID = Path(os.environ.get("LOG_DIR", ".")) / "paid-checkouts.txt"  # verified i
 USED = Path(os.environ.get("LOG_DIR", ".")) / "used-checkouts.txt"  # one-book id + file hash, one book per payment
 FREEBOOK = Path(os.environ.get("LOG_DIR", ".")) / "freebook.txt"  # token email ip date [digest], one free whole book per email
 # ponytail (11-16): Cloudflare Web Analytics, same visitor counter as QRigin/DOMolition; the funnel stays on our log
-CF_BEACON = '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon=\'{"token": "33b7cc180a8c4904b7cef84cbfbbc46b"}\'></script>'
+CF_BEACON = '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon=\'{"token": "33b7cc180a8c4904b7cef84cbfbbc46b"}\'></script>'  # ggignore: public beacon id, served in every page's HTML, not a credential
 FUNNEL_KEY = os.environ.get("FUNNEL_KEY", "")  # ponytail: /funnel shows money numbers, so it needs ?k=
 SHELF_MAX_PAGES = 2000  # ponytail: the free tier stops at 150, a preview of most books
 SHELF_MAX_MB = 1000
