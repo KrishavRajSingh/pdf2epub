@@ -436,6 +436,12 @@ def main():
     st = client.get("/stats").json()
     assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "audio_click": 1, "want_email": 1,
                            "djvu_pick": 1, "kindle_click": 1}, st["wants"]
+    # weekly (11-16): Monday-start IST weeks; this week's human visits and conversions show up, bots don't
+    wkly = st["weekly"]
+    assert wkly and all(set(v) == {"visits_human", "conversions_human", "cap_rejects", "checkouts", "leads"}
+                        for v in wkly.values()), wkly
+    this = max(wkly)
+    assert wkly[this]["visits_human"] >= 1 and sum(v["visits_human"] for v in wkly.values()) <= st["visits_human"], wkly
     # djvu fake door (11-16, Google Trends "djvu to epub" +350%): the picker takes .djvu, the page asks for an email
     # instead of uploading it, and the server still refuses a djvu that gets posted anyway
     for path in ("/", "/pt/", "/es/"):

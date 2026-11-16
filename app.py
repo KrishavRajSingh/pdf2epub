@@ -2495,6 +2495,17 @@ def stats(response: Response):
     fail_by_err: dict[str, int] = {}
     recent_fails: list[dict] = []
     starts = 0
+    weekly: dict[str, dict[str, int]] = {}  # ponytail (11-16): user wanted week-vs-week, not all-time totals
+
+    def wk(r) -> dict[str, int]:
+        # Monday-start week in IST (the user's clock); bad or missing t lands in "?"
+        try:
+            d = (datetime.fromisoformat(r.get("t", "")) + timedelta(hours=5, minutes=30)).date()
+            k = (d - timedelta(days=d.weekday())).isoformat()
+        except (ValueError, TypeError):
+            k = "?"
+        return weekly.setdefault(k, {"visits_human": 0, "conversions_human": 0, "cap_rejects": 0,
+                                     "checkouts": 0, "leads": 0})
     wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0, "kindle_click": 0}
     try:
         for line in LOG.read_text().splitlines():
@@ -2519,6 +2530,9 @@ def stats(response: Response):
                     visits_bot += 1
                 else:
                     visits_human += 1
+                    wk(r)["visits_human"] += 1
+                if r.get("checkout_id"):
+                    wk(r)["checkouts"] += 1
                 short = ua.split(")")[-1].strip()[:48] if ua else "(no user agent)"
                 uas[short] = uas.get(short, 0) + 1
                 continue
@@ -2537,6 +2551,10 @@ def stats(response: Response):
                                      "kb": r.get("in", 0), "src": (r.get("ref") or "direct").split("|")[0] or "direct"})
             leads += 1 if c.startswith("lead") else 0
             cap_rejects += 1 if c in ("too many pages", "too big") else 0
+            if c.startswith("lead"):
+                wk(r)["leads"] += 1
+            if c in ("too many pages", "too big") and not is_bot(ua):
+                wk(r)["cap_rejects"] += 1
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
                 key = (r.get("ref") or "direct").split("|")[0] or "direct"
                 ok_by_ref[key] = ok_by_ref.get(key, 0) + 1
@@ -2544,6 +2562,7 @@ def stats(response: Response):
                     conv_bot += 1
                 else:
                     conv_human += 1
+                    wk(r)["conversions_human"] += 1
     except OSError:
         pass
     top = dict(sorted(refs.items(), key=lambda kv: -kv[1])[:10])
@@ -2557,7 +2576,8 @@ def stats(response: Response):
             "conversions_human": conv_human, "conversions_bot": conv_bot,
             "starts": starts, "wants": wants, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
             "recent_fails": recent_fails[-15:],
-            "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8])}
+            "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8]),
+            "weekly": dict(sorted(kv for kv in weekly.items() if kv[0] != "?")[-12:])}
 
 def _join(lines):
     """Join the wrapped lines of one paragraph; drop the hyphen at a line break."""
