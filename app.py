@@ -2374,9 +2374,15 @@ PARENT = {"pick": "view", "submit": "pick", "converted": "submit", "wall": "subm
           "click": "pitch", "paid": "click", "paid_convert": "paid"}
 
 
-def funnel_data(lines, days: int = 7) -> dict:
-    """People per funnel step, by first-touch source. Joined on the page's random id `v`."""
+def funnel_data(lines, days: int = 7, week: str = "") -> dict:
+    """People per funnel step, by first-touch source. Joined on the page's random id `v`.
+
+    ponytail (11-16): week=YYYY-MM-DD (a Monday, IST) gives that one week, for week-vs-week funnels."""
     since = datetime.now(timezone.utc).timestamp() - days * 86400
+    until = float("inf")
+    if week:
+        start = datetime.fromisoformat(week + "T00:00:00+05:30")
+        since, until = start.timestamp(), (start + timedelta(days=7)).timestamp()
     src: dict[str, str] = {}
     steps: dict[str, set] = {}
     paid_cids, returns = set(), {}
@@ -2388,7 +2394,7 @@ def funnel_data(lines, days: int = 7) -> dict:
             t = datetime.fromisoformat(r["t"]).timestamp()
         except (ValueError, KeyError, TypeError):
             continue
-        if t < since:
+        if t < since or t >= until:
             continue
         v, ev, err = r.get("v") or "", r.get("ev"), r.get("err") or ""
         human = not is_bot(r.get("ua") or "")
@@ -2427,7 +2433,7 @@ def funnel_data(lines, days: int = 7) -> dict:
     for name in ["all"] + [k for k, _ in sources.most_common(12)]:
         who = set(src) if name == "all" else {v for v, sv in src.items() if sv == name}
         rows.append({"source": name, **{k: len(steps.get(k, set()) & who) for k, _ in STEPS}})
-    return {"days": days, "rows": rows, "errors": dict(errs.most_common(12)),
+    return {"days": days, "week": week or None, "rows": rows, "errors": dict(errs.most_common(12)),
             "server": {k: server[k] for k in ("visit", "converted", "wall", "click", "paid", "paid_convert")}}
 
 
@@ -2439,13 +2445,16 @@ def funnel(request: Request):
         days = max(1, min(90, int(request.query_params.get("days") or 7)))
     except ValueError:
         days = 7
+    week = request.query_params.get("week") or ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week):
+        week = ""
     lines = []
     for f in (LOG.with_suffix(".log.1"), LOG):
         try:
             lines += f.read_text().splitlines()
         except OSError:
             pass
-    d = funnel_data(lines, days)
+    d = funnel_data(lines, days, week)
     if request.query_params.get("format") == "json":
         return d
     head = "".join(f"<th>{html.escape(lbl)}</th>" for _, lbl in STEPS)

@@ -496,3 +496,21 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_funnel_week():
+    # 11-16: week=<Monday> keeps only that IST week, so funnels can be compared week to week
+    import json as _j
+    from app import funnel_data
+    ua = "Mozilla/5.0 (Macintosh) Safari/605"
+    mk = lambda t, v, ev: _j.dumps({"t": t, "v": v, "ev": ev, "ua": ua, "src": "x"})
+    lines = [mk("2026-11-09T10:00:00+00:00", "a", "view"), mk("2026-11-09T10:01:00+00:00", "a", "pick"),
+             mk("2026-11-15T18:29:00+00:00", "b", "view"),   # Sun 23:59 IST: still week of 11-09
+             mk("2026-11-15T18:31:00+00:00", "c", "view")]   # Mon 00:01 IST: next week
+    w1 = funnel_data(lines, 7, "2026-11-09")["rows"][0]
+    w2 = funnel_data(lines, 7, "2026-11-16")["rows"][0]
+    assert (w1["view"], w1["pick"], w2["view"]) == (2, 1, 1), (w1, w2)
+
+
+if __name__ == "__main__":
+    test_funnel_week()
