@@ -2571,6 +2571,7 @@ def stats(response: Response):
             k = "?"
         return weekly.setdefault(k, {"visits_human": 0, "conversions_human": 0, "cap_rejects": 0,
                                      "checkouts": 0, "leads": 0})
+    suspect = {}  # books whose structure looks broken (_suspect), by reason
     wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0, "kindle_click": 0}
     try:
         for line in LOG.read_text().splitlines():
@@ -2580,6 +2581,8 @@ def stats(response: Response):
                 continue
             if r.get("ev"):
                 starts += r["ev"] == "start"
+                if r["ev"] == "suspect" and not is_bot(r.get("ua") or ""):
+                    suspect[r.get("why") or "?"] = suspect.get(r.get("why") or "?", 0) + 1
                 if r["ev"] in wants and not is_bot(r.get("ua") or ""):
                     wants[r["ev"]] += 1  # ponytail: starts minus outcomes = workers killed mid-book
                 continue  # ponytail: funnel steps live in /funnel, they are not visits or conversions
@@ -2639,7 +2642,7 @@ def stats(response: Response):
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
-            "starts": starts, "wants": wants, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
+            "starts": starts, "wants": wants, "suspect": suspect, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
             "recent_fails": recent_fails[-15:],
             "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8]),
             "weekly": dict(sorted(kv for kv in weekly.items() if kv[0] != "?")[-12:])}
@@ -3266,6 +3269,23 @@ def _blocks(doc):
     if ref:
         yield ref[0], ref[1], round(ref[2], 1), _join(ref[3])
 
+def _suspect(chapters, pages: int) -> str:
+    """Why this book's structure looks broken, or "" when it looks fine.
+
+    ponytail: two r/ebooks readers (11-14 memoir, 207 chapters; 11-18 novel, 954 chapters)
+    reported books that a glance would call broken. Most readers never write, so log the
+    obvious cases and count them on /stats; if many come from real readers, an AI pass for
+    those books only is worth paying for. A log line only, nothing changes for the reader.
+    """
+    n = len(chapters)
+    if n > max(40, pages / 4):
+        return "chapters"
+    words = sum(len(t.split()) for ch in chapters for k, t in ch if k == "p" and isinstance(t, str))
+    if n > 20 and words / n < 150:
+        return "tiny-chapters"
+    return ""
+
+
 def _structure(blocks, doc):
     """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
 
@@ -3598,6 +3618,9 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                                 f"{SHELF_MAIL} and we will raise the limit for your file"
                 if big else "scanned PDF — OCR found no readable text (photo of handwriting?)")
         chapters = _structure(blocks, doc)
+        why = _suspect(chapters, len(doc))
+        if why:
+            event("suspect", request, why=why, pages=len(doc), ch=len(chapters), ocr_layer=_ocr_layer(doc))
         if cut_pages:
             chapters.append([("h1", "The rest of this book"),
                 ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
