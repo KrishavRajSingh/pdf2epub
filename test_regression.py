@@ -380,6 +380,8 @@ def make_paper():
             pg.insert_text((72, y), f"{k * 3 + n + 1} A note about golems and machines, number {k * 3 + n + 1}.",
                            fontsize=8.5)
             y += 16
+    for _ in range(3):  # text set high on the page, like the Springer paper (starts at y=54)
+        d.new_page().insert_textbox(pymupdf.Rect(72, 46, 520, 700), PROSE * 9, fontsize=10)
     pg = d.new_page()
     pg.insert_text((72, 80), "References", fontsize=12)
     y = 100
@@ -387,6 +389,11 @@ def make_paper():
         pg.insert_text((72, y), f"Author{chr(65 + n)} X (2019) A long title of a book about thinking", fontsize=8.5)
         pg.insert_text((90, y + 11), "machines. Some Press, Cambridge", fontsize=8.5)
         y += 24
+    # 11-18: a short entry first on the next page was cut as a "running head" (y < 60, has digits)
+    pg = d.new_page()
+    pg.insert_text((300, 30), "AI & SOCIETY (2020) 35:1009", fontsize=8.5)
+    pg.insert_text((72, 62), "Lancaster BL (1997) The golem as a transpersonal image 1(3):5", fontsize=8.5)
+    pg.insert_text((72, 86), "Latour B (1987) Science in action. Harvard University Press", fontsize=8.5)
     return d
 
 
@@ -434,9 +441,10 @@ CASES = {
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
     "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),
     # 11-16: verse lines became chapters, footnotes sat in the text, references ran together
-    "paper": (make_paper, {"path": "text", "ch_max": 3, "hasnt": ["e-offprint", "Footnote 1 (continued)", "touched upon, not and the golem"],
+    "paper": (make_paper, {"path": "text", "ch_max": 3, "hasnt": ["e-offprint", "Footnote 1 (continued)", "touched upon, not and the golem", "AI & SOCIETY"],
                            "has": ["I like to think"],
-                           "para": ["AuthorA X (2019) A long title of a book about thinking machines. Some Press, Cambridge"],
+                           "para": ["AuthorA X (2019) A long title of a book about thinking machines. Some Press, Cambridge",
+                                    "Lancaster BL (1997) The golem as a transpersonal image 1(3):5"],
                            "fn": ["1 A note about golems and machines, number 1. and the golem story goes on here."]}),
 }
 

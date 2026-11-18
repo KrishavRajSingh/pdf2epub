@@ -3271,6 +3271,14 @@ def _structure(blocks, doc):
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
     tops = Counter(t for p, y, sz, t in blocks if y < 60)
+    # ponytail: a running head sits above the text block. A fixed 60pt cut also took the first
+    # line of a page set in small type: a reference at y=55 vanished (reddit 11-18 proofread,
+    # the text starts at 54 there). Cut just above where body text starts on most pages.
+    page_top = {}
+    for p, y, sz, t in blocks:
+        if sz > 0 and abs(sz - body) < 0.3 and len(t) > 40:
+            page_top[p] = min(y, page_top.get(p, y))
+    head_cut = min(60, sorted(page_top.values())[(len(page_top) - 1) // 2] - 6) if page_top else 60
     bots = Counter(t for p, y, sz, t in blocks if y > ph - 60)
     n = len(doc)
     # ponytail: c >= 2, or a one-page PDF loses its title as a 'repeated' header (reddit 11-06)
@@ -3322,7 +3330,7 @@ def _structure(blocks, doc):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
         # ponytail: a running head carries its page number, so the text differs on every page
         # and the repeated-header counter misses it; it sits at the top edge in smaller type.
-        if y < 60 and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
+        if y < head_cut and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
             continue
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off

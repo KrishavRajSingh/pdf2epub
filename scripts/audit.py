@@ -7,6 +7,7 @@ Each output block is traced back to the PDF blocks it was built from. Flags:
           the prose, the 11-18 "two sections wrongly merged" report) or the reverse
   NOTE?   a page-foot small-type block that starts with a note marker but is not in Notes
   HEAD?   a heading set in body size with no heading word (a quote line or column-top fragment)
+  GONE    a printed line whose words never reach the book in order (a dropped entry, 11-18)
   LOST    PDF words (4+ letters) that never reach the EPUB, beyond running heads and hyphen parts
 Exit 1 when anything is flagged, so a lead's file can be checked before the reply goes out.
 """
@@ -57,6 +58,27 @@ def audit(path: str) -> list[str]:
         if b[3] in heads and abs(b[2] - body) < 0.3 and not re.match(
                 r"(chapter|part|\d+(\.\d+)*\s|references|bibliography|notes|appendix|abstract)", b[3], re.I):
             flags.append(f"HEAD? body-size heading: {b[3][:90]}")
+    # every printed line must reach the book, in its words and their order. Drop the first and
+    # last word (hyphen splits at line ends), skip lines repeated on 3+ pages (running heads).
+    # letters only: note markers print as "1" in the PDF and "¹" in the book
+    seq = lambda s: " ".join(w.lower() for w in re.findall(r"[^\W\d_]+", re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹\u200b]", "", s)))
+    book = seq(" ".join(t for _, t in items))
+    seen = Counter()
+    lines = []
+    cover = max((k for k in range(min(3, len(doc))) if app.OFFPRINT.search(doc[k].get_text("text"))), default=-1)
+    for pg in doc:
+        if pg.number <= cover:
+            continue  # publisher offprint cover + notice pages are dropped on purpose
+        for b in pg.get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                t = "".join(s["text"] for s in ln["spans"]).strip()
+                if len(t) >= 25 and not re.match(r"https?://doi\.org/|Publisher’s Note|jurisdictional claims", t):
+                    lines.append(t)
+                    seen[t] += 1
+    gone = [t for t in lines if seen[t] < 3 and len(seq(t).split()) >= 5
+            and " ".join(seq(t).split()[1:-1]) not in book]
+    for t in gone[:15]:
+        flags.append(f"GONE printed line not in the book: {t[:90]}")
     W = lambda s: Counter(w.lower() for w in re.findall(r"[A-Za-z]{4,}", s))
     src_w, out_w = W(" ".join(b[3] for b in text)), W(" ".join(t for _, t in items))
     lost = sum(max(0, src_w[w] - out_w[w]) for w in src_w)
