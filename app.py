@@ -3259,7 +3259,14 @@ def _structure(blocks, doc):
                         r"^Publisher[’']s Note Springer Nature remains neutral|"
                         r"^jurisdictional claims in published maps and institutional affiliations", re.I)
     fn_more = re.compile(r"^Footnote (\d{1,3}) \(continued\)\s*")
-    last_fn_page = -1
+    last_fn_page, open_note = -1, None  # open_note: (list, index) of the note the next small block extends
+
+    def _note_add(loc, text):
+        notes, k = loc
+        if isinstance(notes[k], tuple):
+            notes[k] = ("fn", notes[k][1] + " " + text)
+        else:
+            notes[k] += " " + text
 
     # strip repeated header/footer: same text on >50% pages at top/bottom edge
     ph = doc[0].rect.height
@@ -3323,26 +3330,30 @@ def _structure(blocks, doc):
         foot = sz < fn_cut and y > doc[pno].rect.height * 0.55 and body_pages[pno] >= 3
         if foot and fn_more.match(t):
             # ponytail: Springer carries a long note onto the next page under "Footnote 1
-            # (continued)"; it sat mid-paragraph in the text (reddit 11-16). Join it to its note.
+            # (continued)", the label and the text as separate blocks. The text starts lowercase,
+            # so it was glued to the body paragraph above it (reddit 11-16/11-18). Find the note,
+            # keep it open, and the small blocks under the label on this page go into it.
             n, rest = fn_more.match(t).group(1), fn_more.sub("", t)
+            open_note = None
             for notes in (cur_notes, *reversed(chapters)):
                 k = next((j for j in range(len(notes) - 1, -1, -1)
                           if (notes[j][1].startswith(n + " ") and notes[j][0] == "fn" if isinstance(notes[j], tuple)
                               else notes[j].startswith(n + " "))), None)
                 if k is not None:
-                    if isinstance(notes[k], tuple):
-                        notes[k] = ("fn", notes[k][1] + " " + rest)
-                    else:
-                        notes[k] += " " + rest
+                    open_note = (notes, k)
                     break
-            else:
-                cur_notes.append(n + " " + rest)
+            if open_note is None:
+                cur_notes.append(n)
+                open_note = (cur_notes, len(cur_notes) - 1)
+            if rest:
+                _note_add(open_note, rest)
             last_fn_page = pno
         elif foot and fn_mark.match(t) and re.search(r"[a-z]{3}", t):
             cur_notes.append(t)
+            open_note = (cur_notes, len(cur_notes) - 1)
             last_fn_page = pno
-        elif foot and cur_notes and pno == last_fn_page and len(t) < 400:
-            cur_notes[-1] += " " + t  # an unmarked small line under a note: its address, its rest
+        elif foot and open_note and pno == last_fn_page and open_note[1] < len(open_note[0]):
+            _note_add(open_note, t)  # an unmarked small block under a note: its address, its rest
         elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
             flush()
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))

@@ -197,13 +197,14 @@
  },
  "paper": {
   "path": "text",
-  "chapters": 2,
+  "chapters": 3,
   "headings": [
    "A Paper About Golems",
+   "2 The Sorcerer's Apprentice",
    "References"
   ],
-  "paragraphs": 23,
+  "paragraphs": 24,
   "imgs": 0,
-  "words": 864
+  "words": 876
  }
 }

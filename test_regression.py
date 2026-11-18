@@ -364,14 +364,18 @@ def make_paper():
         pg = d.new_page()
         if k == 0:
             pg.insert_text((72, 90), "A Paper About Golems", fontsize=16)
+        if k == 1:  # a section starts before note 1 carries on, so note 1 sits in the last chapter
+            pg.insert_text((72, 90), "2 The Sorcerer's Apprentice", fontsize=12)
         pg.insert_textbox(pymupdf.Rect(72, 110, 520, 300), PROSE * 4, fontsize=10)
         for j, line in enumerate(("I like to think", "of a cybernetic meadow", "where mammals and computers")):
             pg.insert_text((100, 320 + j * 14), line, fontsize=10)
         pg.insert_textbox(pymupdf.Rect(72, 370, 520, 520), PROSE * 3, fontsize=10)
         y = 560
-        if k == 1:
-            pg.insert_text((72, y), "Footnote 1 (continued) and the golem story goes on here.", fontsize=8.5)
-            y += 16
+        if k == 1:  # 11-18: label and text are separate blocks, and the prose above ends mid-sentence
+            pg.insert_text((72, 535), "and the machines were explicitly touched upon, not", fontsize=10)
+            pg.insert_text((72, y), "Footnote 1 (continued)", fontsize=8.5)
+            pg.insert_text((72, y + 22), "and the golem story goes on here.", fontsize=8.5)
+            y += 44
         for n in range(3):
             pg.insert_text((72, y), f"{k * 3 + n + 1} A note about golems and machines, number {k * 3 + n + 1}.",
                            fontsize=8.5)
@@ -430,7 +434,7 @@ CASES = {
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
     "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),
     # 11-16: verse lines became chapters, footnotes sat in the text, references ran together
-    "paper": (make_paper, {"path": "text", "ch_max": 2, "hasnt": ["e-offprint", "Footnote 1 (continued)"],
+    "paper": (make_paper, {"path": "text", "ch_max": 3, "hasnt": ["e-offprint", "Footnote 1 (continued)", "touched upon, not and the golem"],
                            "has": ["I like to think"],
                            "para": ["AuthorA X (2019) A long title of a book about thinking machines. Some Press, Cambridge"],
                            "fn": ["1 A note about golems and machines, number 1. and the golem story goes on here."]}),
