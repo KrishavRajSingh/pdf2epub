@@ -92,6 +92,37 @@ def make_ia_memoir():
     return d
 
 
+def make_ia_word_lines():
+    """Internet Archive scan whose OCR layer (LuraDocument, reddit 11-18 novel) stores a justified
+    line as one "line" per word and guesses a size per word (4-11pt). Each word was a line and
+    any line with one big word a heading: 954 chapters. Chapter titles are one word in capitals
+    under a bare number, so they appear once and failed the recurring-words junk check."""
+    import random
+    rnd = random.Random(7)
+    d, png = _doc(), _page_png(PROSE * 6)
+    words = (PROSE * 30).split()
+    heads = {0: "JACKKNIFED", 10: "APPLEJACK", 20: "CRACKERJACK"}
+    k = 0
+    for i in range(30):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        y = 80
+        if i in heads:
+            pg.insert_text((290, y), str(len([h for h in heads if h <= i])), fontsize=9, render_mode=3)
+            pg.insert_text((200, y + 30), heads[i], fontsize=12, render_mode=3)
+            y += 70
+        for line in range(40):
+            x = 90 if line % 8 == 0 else 72  # paragraph first lines indented
+            while x < 480:
+                w = words[k % len(words)]
+                k += 1
+                size = rnd.uniform(9.5, 11.5) if line % 8 == 0 else rnd.uniform(5.5, 8.5)
+                pg.insert_text((x, y), w, fontsize=size, render_mode=3)
+                x += len(w) * 5 + 14
+            y += 16
+    return d
+
+
 def make_scan(prose=PROSE * 14):
     """Plain scan, no text at all. Full pages of prose, as in a real book."""
     d, png = _doc(), _page_png(prose)
@@ -410,6 +441,10 @@ CASES = {
     "ia_memoir": (make_ia_memoir, {"path": "text", "has": ["Chapter 1 - Childhood", "Chapter 3 - The Trial",
                                                         "many sparrows"],
                                    "hasnt": ["hewW", "Chapter | -"], "ch_max": 4, "imgs": 1}),
+    # 11-18: one OCR "line" per word with a random size each: every paragraph start was a chapter
+    "ia_word_lines": (make_ia_word_lines, {"path": "text", "has": ["JACKKNIFED", "CRACKERJACK",
+                                                                "the clocks were striking thirteen"],
+                                           "ch_max": 4, "h_min": 3}),
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
     "scan_quotes": (make_scan_quotes, {"path": "ocr", "has": ["Stop there", "clocks were striking"],

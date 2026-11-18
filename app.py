@@ -3120,6 +3120,46 @@ OFFPRINT = re.compile(r"e-?\s*offprint is for personal use only", re.I)
 REFS_HEAD = re.compile(r"(references|bibliography|works cited|literature cited|sources)", re.I)
 
 
+def _ocr_rows(b):
+    """An OCR block's lines as visual rows: [(text, size, bbox), ...].
+
+    ponytail: an Internet Archive (LuraDocument) layer stores a justified line as one "line"
+    per word or two, and guesses a size per word (4.2 to 11.4pt on one page of body text).
+    Read as-is, every word was its own line and any line holding one 11pt word became a
+    heading: 954 chapters for a novel (reddit 11-18). Words on the same baseline are one row
+    again, sized by the size most of its letters have.
+    """
+    rows = []  # [x1, y0, y1, [spans], bbox]
+    for line in b.get("lines", []):
+        spans = [s for s in line["spans"] if s["text"]]
+        if not "".join(s["text"] for s in spans).strip():
+            continue
+        x0, y0, x1, y1 = line["bbox"]
+        r = rows[-1] if rows else None
+        if r and r[1] <= (y0 + y1) / 2 <= r[2] and x0 >= r[0] - 2:
+            if not r[3][-1]["text"].endswith(" ") and not spans[0]["text"].startswith(" "):
+                r[3].append({"text": " ", "size": spans[0]["size"], "flags": 0})
+            r[3].extend(spans)
+            r[0] = max(r[0], x1)
+            r[4] = (min(r[4][0], x0), min(r[4][1], y0), max(r[4][2], x1), max(r[4][3], y1))
+        else:
+            rows.append([x1, y0, y1, list(spans), tuple(line["bbox"])])
+    out = []
+    for _, _, _, spans, bbox in rows:
+        txt = re.sub(r"\s{2,}", " ", "".join(_span_text(s) for s in spans)).strip()
+        weights = sorted((s["size"], len(s["text"].strip())) for s in spans if s["text"].strip())
+        if not txt or not weights:
+            continue
+        half, acc, size = sum(w for _, w in weights) / 2, 0, weights[-1][0]
+        for sz, w in weights:
+            acc += w
+            if acc >= half:
+                size = sz
+                break
+        out.append((txt, size, bbox))
+    return out
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -3188,8 +3228,8 @@ def _blocks(doc):
                     continue  # labels and caption are baked into the figure or its figcaption
             if b.get("type") != 0:
                 continue
-            rows = []
-            for line in b.get("lines", []):
+            rows = _ocr_rows(b) if ocr else []
+            for line in [] if ocr else b.get("lines", []):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if txt:
                     rows.append((txt, max(s["size"] for s in line["spans"]), line["bbox"]))
@@ -3293,20 +3333,44 @@ def _structure(blocks, doc):
                 and (ch_title.match(t) or head_word.match(t)))
     known = Counter(w.lower() for _, _, sz, t in blocks if sz > 0 for w in WORD3.findall(t))
 
+    def caps_title(t):
+        """A short line in capitals, mostly letters: "JACKKNIFED", "JACK BE NIMBLE. JACK BE QUICK".
+        Such a title is in the book once, so the junk check (words must recur) can't apply to
+        it; junk is rarely mostly letters in capitals, and "HELLOJACKHELLOJACK" (a run-together
+        screen message) has a word too long for a title."""
+        letters = [c for c in t if c.isalpha()]
+        ws = WORD3.findall(t)
+        # the novel's screen messages are capitals too, but run on as sentences
+        breaks = len(re.findall(r"\w[.!?]\s", t))
+        if t[:1].islower() or breaks > 1 or (breaks and len(t.split()) > 6):
+            return False
+        return (bool(ws) and len(letters) >= 4 and len(t.split()) <= 12
+                and sum(c.isupper() for c in letters) >= 0.7 * len(letters)
+                and len(letters) >= 0.7 * len(t.replace(" ", "")) and max(len(w) for w in ws) <= 15
+                and not SENT_END.search(t))
+
     def size_head(t):
         """A line set big by an OCR layer, is it a heading? Bible verses and quoted letters
         set large end in a full stop; OCR junk ("; oe ¢ pee ee") has no real words."""
         if not ocr:
             return True
+        if caps_title(t):
+            return True
         ws = WORD3.findall(t)
+        # ponytail: a paragraph's first line, a little bigger by OCR noise, is a full line of
+        # mixed-case prose ("From the fourth floor of the mathematics"), opens with a quote or
+        # holds a sentence break. Headings are short or set in capitals (reddit 11-18 novel).
+        prose = len(t) >= 35 or t[:1] in "\"“‘'" or re.search(r"\w[.!?][\"”’]?\s+[A-Z\"“]", t)
         return (len(t.split()) <= 12 and not SENT_END.search(t) and not t[:1].islower()
-                and bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws))
+                and not prose and bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws))
 
-    def continues(t):
+    def continues(t, sz):
         # OCR layers size each line differently, so a mid-paragraph line can look like a heading
         # by font size alone; an open sentence before it or a lowercase start says otherwise.
         if not cur or cur[-1][0] != "p":
             return False
+        if ocr and sz >= h2_cut and caps_title(t):
+            return False  # a chapter title after a page that ends mid-sentence
         prev = cur[-1][1]
         if list_item.match(t) or SENT_END.search(prev):
             return False
@@ -3365,7 +3429,7 @@ def _structure(blocks, doc):
         elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
             flush()
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
-        elif continues(t):
+        elif continues(t, sz):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
             # an OCR text layer that cut the paragraph into blocks) is the same paragraph.
             prev = cur[-1][1]

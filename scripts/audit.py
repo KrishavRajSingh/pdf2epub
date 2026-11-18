@@ -31,9 +31,13 @@ def audit(path: str) -> list[str]:
         sizes[sz] += len(t)
     body = sizes.most_common(1)[0][0]
 
+    # an OCR text layer guesses sizes (body text 6.5-7.2pt in one 11-18 scan), so "smaller type"
+    # means nothing there and every paragraph line under the mode read as a footnote
+    ocr = app._ocr_layer(doc)
+
     def foot(b):
         p, y, sz, _ = b
-        return sz < body * 0.95 and y > doc[p].rect.height * 0.55
+        return not ocr and sz < body * 0.95 and y > doc[p].rect.height * 0.55
 
     flags = []
     items = [it for ch in chapters for it in ch if isinstance(it[1], str)]

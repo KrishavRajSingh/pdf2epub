@@ -30,6 +30,18 @@
   "imgs": 1,
   "words": 3874
  },
+ "ia_word_lines": {
+  "path": "text",
+  "chapters": 3,
+  "headings": [
+   "JACKKNIFED",
+   "APPLEJACK",
+   "CRACKERJACK"
+  ],
+  "paragraphs": 173,
+  "imgs": 0,
+  "words": 12864
+ },
  "scan": {
   "path": "ocr",
   "chapters": 1,
