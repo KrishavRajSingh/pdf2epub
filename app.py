@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import unicodedata
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
@@ -105,6 +106,11 @@ SHARP_CONF = 90  # ponytail: same cut as scripts/manual_convert.py --gdrive: nov
 SHARP_MODEL = os.environ.get("SHARP_MODEL", "google/gemini-3.1-flash-lite")
 SHARP_THREADS = 6
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+# Google Drive OCR, free: an OCR-only Google account's refresh token (drive.file scope) on a desktop OAuth client
+DRIVE_CLIENT_ID = os.environ.get("DRIVE_CLIENT_ID", "")
+DRIVE_CLIENT_SECRET = os.environ.get("DRIVE_CLIENT_SECRET", "")
+DRIVE_REFRESH = os.environ.get("DRIVE_REFRESH_TOKEN", "")
+DRIVE_THREADS = 6
 ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
 # ponytail: 11-10 price test. Half the books over the free cap are 165-412 pages and the rival's
 # smallest pack is $3.75, so books up to 400 pages are offered at $3 instead of $5.
@@ -411,6 +417,93 @@ def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None) 
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "sharp": ok, "asked": len(todo),
                       "pages": len(layout)}), flush=True)
     return ok
+
+
+_DRIVE_TOKEN = {"v": "", "exp": 0.0}
+_DRIVE_LOCK = threading.Lock()
+
+
+def _drive_token() -> str:
+    with _DRIVE_LOCK:
+        if time.time() < _DRIVE_TOKEN["exp"]:
+            return _DRIVE_TOKEN["v"]
+        body = urllib.parse.urlencode({"client_id": DRIVE_CLIENT_ID, "client_secret": DRIVE_CLIENT_SECRET,
+                                       "refresh_token": DRIVE_REFRESH, "grant_type": "refresh_token"}).encode()
+        with urllib.request.urlopen("https://oauth2.googleapis.com/token", body, timeout=30) as r:
+            j = json.load(r)
+        _DRIVE_TOKEN.update(v=j["access_token"], exp=time.time() + int(j.get("expires_in", 3600)) - 300)
+        return _DRIVE_TOKEN["v"]
+
+
+def _drive_clean(text: str) -> str:
+    # ponytail: the export starts with a BOM and a "____" rule where the image sat; each line is a paragraph
+    lines = [l.strip().lstrip("﻿") for l in text.splitlines()]
+    return "\n\n".join(l for l in lines if l and not re.fullmatch(r"_+", l))
+
+
+def _drive_page(img: bytes, lang: str) -> str | None:
+    """One page image read by Google Drive's OCR (upload as a Google Doc, export text, delete);
+    None on any failure. Same calls as scripts/gdrive_ocr.py, over plain HTTP."""
+    api = "https://www.googleapis.com"
+    for _ in range(2):
+        fid = None
+        try:
+            tok = _drive_token()
+            b = "pdf2epub" + uuid.uuid4().hex
+            meta = json.dumps({"name": "pdf2epub-ocr-" + b[-10:], "mimeType": "application/vnd.google-apps.document"})
+            body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n"
+                    f"--{b}\r\nContent-Type: image/jpeg\r\n\r\n").encode() + img + f"\r\n--{b}--\r\n".encode()
+            req = urllib.request.Request(f"{api}/upload/drive/v3/files?uploadType=multipart&fields=id&ocrLanguage={lang}",
+                                         body, {"Authorization": "Bearer " + tok,
+                                                "Content-Type": f"multipart/related; boundary={b}"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                fid = json.load(r)["id"]
+            req = urllib.request.Request(f"{api}/drive/v3/files/{fid}/export?mimeType=text/plain",
+                                         headers={"Authorization": "Bearer " + tok})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return _drive_clean(r.read().decode("utf-8", "replace"))
+        except Exception as e:
+            print(f"drive: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        finally:
+            if fid:
+                try:
+                    urllib.request.urlopen(urllib.request.Request(f"{api}/drive/v3/files/{fid}", method="DELETE",
+                                           headers={"Authorization": "Bearer " + _drive_token()}), timeout=30)
+                except Exception:
+                    pass
+    return None
+
+
+def reread_pages(doc, layout: list, confs: dict, lang: str, key: str, drive=None, read=None) -> int:
+    """Paid keys: unsure OCR pages go to Drive's free OCR first, then pages Drive missed go to the
+    AI re-read while the key has Library pages left. In place; returns pages swapped.
+
+    ponytail: ysvsr's 1,000 AI pages ran out after 8 books and the rest came out as raw Tesseract
+    (11-18). Drive scored 0.95 vs Tesseract 0.87 on hard Telugu pages and costs nothing."""
+    drive = drive or (_drive_page if DRIVE_REFRESH else None)
+    done = 0
+    if drive:
+        todo = [i for i, (t, _) in enumerate(layout) if confs.get(i, 100) < SHARP_CONF
+                and (len(t.split()) >= 20 or confs.get(i) == 0)]
+        imgs = {}
+        for i in todo:  # pymupdf is not thread-safe: render here, upload in threads
+            p = doc[i]
+            dpi = min(200, int(2000 * 72 / max(p.rect.width, p.rect.height)))
+            imgs[i] = p.get_pixmap(dpi=dpi).tobytes("jpg", jpg_quality=88)
+        with ThreadPoolExecutor(DRIVE_THREADS) as ex:
+            got = dict(zip(todo, ex.map(lambda i: drive(imgs.pop(i), lang), todo)))
+        confs = dict(confs)
+        for i, text in got.items():
+            n = len(layout[i][0].split())
+            if text and len(text.split()) >= (0.5 * n if n >= 20 else 40):
+                layout[i] = (text, layout[i][1])
+                confs[i] = 100.0  # read: the AI pass skips it
+                done += 1
+        print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "drive": done, "asked": len(todo),
+                          "pages": len(layout)}), flush=True)
+    if sharp_left(key):
+        done += sharp_pages(doc, layout, confs, lang, key, read)
+    return done
 
 
 def _order_email(checkout_id: str) -> str:
@@ -3647,8 +3740,8 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 tlang, elang = ocr_lang(doc)
                 pics, confs = {}, {}
                 pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics, confs=confs) or []
-                if key and pages and sharp_left(key):
-                    sharp_pages(doc, pages, confs, elang, key)
+                if key and pages:
+                    reread_pages(doc, pages, confs, elang, key)
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):
                     figs = _scan_figures(doc, pages, pics)
