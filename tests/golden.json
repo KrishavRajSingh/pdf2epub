@@ -18,6 +18,14 @@
   "imgs": 0,
   "words": 450
  },
+ "ia_two_layer": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 8,
+  "imgs": 2,
+  "words": 500
+ },
  "ia_photos_heads": {
   "path": "text",
   "chapters": 1,

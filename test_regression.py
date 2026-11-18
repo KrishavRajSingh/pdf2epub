@@ -97,6 +97,37 @@ def make_ia_photos_heads():
     return d
 
 
+def make_ia_two_layer():
+    """reddit 11-18 (Spiritual-Willow2778, Ageless Spine): Internet Archive pages are a low-res
+    picture layer (paper, photos, drawings) under a masked layer holding only the letters. Thin
+    light anatomy drawings and people cut out on white have little dark ink; found on the picture
+    layer they are kept, and the letters on top never pass for a picture."""
+    d = _doc()
+    for k in range(4):
+        bg = pymupdf.open().new_page()
+        bg.draw_rect(bg.rect, fill=(0.93, 0.92, 0.9), color=None)
+        if k in (1, 2):  # a thin light-red line drawing between paragraphs
+            for j in range(12):
+                bg.draw_line((250 + j * 8, 320), (300 + (j % 3) * 20, 560), color=(0.85, 0.55, 0.5), width=1.2)
+            bg.draw_circle((300, 300), 22, color=(0.85, 0.55, 0.5), width=1.2)
+        fg = pymupdf.open().new_page()
+        fg.insert_textbox(pymupdf.Rect(72, 72, 520, 260), PROSE * 3, fontsize=12)
+        fg.insert_textbox(pymupdf.Rect(72, 600, 520, 780), PROSE * 2, fontsize=12)
+        ink = fg.get_pixmap(dpi=150, colorspace=pymupdf.csGRAY)
+        alpha = pymupdf.Pixmap(pymupdf.csGRAY, ink.irect, False)
+        alpha.set_rect(alpha.irect, (0,))
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=bg.get_pixmap(dpi=50).tobytes("jpg"))
+        black = pymupdf.Pixmap(pymupdf.csGRAY, ink.irect, False)
+        black.set_rect(black.irect, (0,))
+        mask = pymupdf.Pixmap(ink.tobytes("png"))
+        mask.invert_irect()
+        pg.insert_image(pg.rect, stream=black.tobytes("png"), mask=mask.tobytes("png"))
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 260), PROSE * 3, fontsize=12, render_mode=3)
+        pg.insert_textbox(pymupdf.Rect(72, 600, 520, 780), PROSE * 2, fontsize=12, render_mode=3)
+    return d
+
+
 def make_ia_memoir():
     """Internet Archive scan like Marcela's Divine Challenge (11-14): chapter lines in body type
     ("Chapter | - Childhood", OCR read the 1 as |), Bible verses set big, and a handwritten
@@ -485,6 +516,7 @@ CASES = {
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
                            "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
+    "ia_two_layer": (make_ia_two_layer, {"path": "text", "has": ["clocks were striking"], "imgs": 2}),
     "ia_photos_heads": (make_ia_photos_heads, {"path": "text", "has": ["SLOW WATERS", "clocks were striking"],
                                                "hasnt": ["THE RIVER BOOK", "SL0W", "gf ,."], "imgs": 2,
                                                "ch_max": 2}),

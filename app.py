@@ -3010,78 +3010,144 @@ def _wordy_line(t: str, known: Counter) -> bool:
     return bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws)
 
 
-def _texture_is_text(big, r, f: float, dark: int) -> bool:
-    """Printed lines leave blank pixel rows between them; a photo has almost none."""
-    g = big.crop((int(r.x0 * f), int(r.y0 * f), int(r.x1 * f), int(r.y1 * f)))
-    w, s = g.width, g.tobytes()
-    blank = sum(1 for y in range(g.height) if sum(v < dark for v in s[y * w:(y + 1) * w]) < 0.01 * w)
+def _text_cover(raw, r) -> float:
+    """Share of a region covered by OCR line boxes (any text, junk included)."""
+    area = r.width * r.height or 1
+    return sum((pymupdf.Rect(ln["bbox"]) & r).get_area() for b in raw for ln in b.get("lines", [])
+               if "".join(s["text"] for s in ln["spans"]).strip()) / area
+
+
+def _lined(g, dark: int) -> bool:
+    """Printed lines leave blank pixel rows between them; a picture has almost none."""
+    w, px = g.width, g.tobytes()
+    blank = sum(1 for y in range(g.height) if sum(v < dark for v in px[y * w:(y + 1) * w]) < 0.01 * w)
     return blank >= 0.2 * g.height
 
 
-def _scan_photos(page, raw, known: Counter) -> list:
-    """Photo regions on a page scan that carries an OCR layer, as page rects.
-
-    ponytail: an OCR-layer page is one page-sized image, so _figure_rect skips it and every photo
-    in the book was dropped: a 260-page posture book with ~180 photos came out with 15, the cover
-    and junk pages (reddit 11-18, Spiritual-Willow2778; convert2epub drops them too). White out
-    the lines OCR read as real words, then whatever large ink area is left, that is not lines of
-    print, is a picture.
-    """
-    from PIL import Image, ImageDraw
-    sc, big_sc = 0.5, 1.0
-    # one render: decoding the page scan is most of the cost, so the grid comes from the same one
-    pm = page.get_pixmap(matrix=pymupdf.Matrix(big_sc, big_sc), colorspace=pymupdf.csGRAY)
-    big = Image.frombytes("L", (pm.width, pm.height), pm.samples)
-    im = big.resize((max(1, round(pm.width * sc / big_sc)), max(1, round(pm.height * sc / big_sc))), Image.BOX)
-    # paper tone: old books scan yellow or grey, so "dark" is relative to the page's own paper
-    hist, acc = big.histogram(), 0
-    total = big.width * big.height
-    for paper, n in enumerate(hist):
+def _pctl(hist, q):
+    total, acc = sum(hist), 0
+    for v, n in enumerate(hist):
         acc += n
-        if acc >= 0.9 * total:
-            break
-    ink_cut, text_cut = int(paper * 0.8), int(paper * 0.65)
-    dr = ImageDraw.Draw(im)
+        if acc >= q * total:
+            return v
+    return 255
+
+
+def _scan_background(page):
+    """The picture layer of a two-layer page scan, as a PIL RGB image, else None.
+
+    Internet Archive and LuraDocument scans store a page as a low-res background (paper, photos,
+    drawings, tints) under a masked high-res layer that carries only the letters. Pictures found
+    on the background alone are not confused with print, and it decodes 5x faster than the page.
+    """
+    from PIL import Image
+    area = page.rect.get_area()
+    full = []  # (xref, smask) of images covering the page; get_image_info would decode them all
+    for it in page.get_images(full=True):
+        try:
+            if (page.get_image_bbox(it) & page.rect).get_area() >= 0.95 * area:
+                full.append((it[0], it[1]))
+        except Exception:
+            continue
+    bg = [x for x, m in full if not m]
+    if len(full) < 2 or len(bg) != 1 or not any(m for _, m in full):
+        return None
+    try:
+        pix = pymupdf.Pixmap(page.parent, bg[0])
+        if pix.alpha:
+            pix = pymupdf.Pixmap(pix, 0)
+        if pix.n != 3:
+            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    except Exception:
+        return None
+
+
+def _scan_photos(page, raw, known: Counter) -> list:
+    """Picture regions on a page scan that carries an OCR layer, as page rects.
+
+    ponytail: an OCR-layer page is one page-sized image, so _figure_rect skips it and every picture
+    in the book was dropped: a 260-page posture book came out with 15, the cover and junk pages
+    (reddit 11-18, Spiritual-Willow2778; convert2epub drops them too). Mark what is not paper (dark,
+    or more colourful than the paper), white out the lines OCR read as real words, join what is
+    left into regions; a region mostly covered by OCR lines is print, the rest are pictures. Colour
+    matters: thin light anatomy drawings and people cut out on white have little dark ink.
+    """
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
+    rgb = _scan_background(page)
+    layered = rgb is not None
+    if rgb is None:
+        pm = page.get_pixmap(matrix=pymupdf.Matrix(1, 1), colorspace=pymupdf.csRGB, alpha=False)
+        rgb = Image.frombytes("RGB", (pm.width, pm.height), pm.samples)
+    f = rgb.width / page.rect.width  # image pixels per point
+    lum, sat = rgb.convert("L"), rgb.convert("HSV").split()[1]
+    paper, paper_sat = _pctl(lum.histogram(), 0.9), _pctl(sat.histogram(), 0.5)
+    lum_cut, sat_cut = int(paper * 0.88), min(250, paper_sat + 35)
+    mask = ImageChops.lighter(lum.point(lambda v: 255 if v < lum_cut else 0),
+                              sat.point(lambda v: 255 if v > sat_cut else 0))
+    dr = ImageDraw.Draw(mask)
     for b in raw:
         for ln in b.get("lines", []):
             if _wordy_line("".join(s["text"] for s in ln["spans"]), known):
                 x0, y0, x1, y1 = ln["bbox"]
-                dr.rectangle([x0 * sc - 1, y0 * sc - 1, x1 * sc + 1, y1 * sc + 1], fill=255)
-    C = PHOTO_CELL
-    W, H = im.width // C, im.height // C
+                dr.rectangle([x0 * f - 2, y0 * f - 2, x1 * f + 2, y1 * f + 2], fill=0)
+    C = max(4, round(8 * f))  # about 8pt
+    W, H = mask.width // C, mask.height // C
     if not W or not H:
         return []
-    # share of dark pixels per cell: threshold, then a box resize averages each cell
-    cell = im.crop((0, 0, W * C, H * C)).point(lambda v: 255 if v < ink_cut else 0).resize((W, H), Image.BOX)
-    px = cell.tobytes()
-    ink = [[px[cy * W + cx] >= 255 * 0.3 for cx in range(W)] for cy in range(H)]
-    fill = [[ink[y][x] or sum(ink[yy][xx] for yy in range(max(0, y - 1), min(H, y + 2))
-                              for xx in range(max(0, x - 1), min(W, x + 2))) >= 5
-             for x in range(W)] for y in range(H)]
-    seen = [[False] * W for _ in range(H)]
-    out = []
-    for y in range(H):
-        for x in range(W):
-            if not fill[y][x] or seen[y][x]:
+    # share of marked pixels per cell, then grow so a figure's parts join up
+    cells = mask.crop((0, 0, W * C, H * C)).resize((W, H), Image.BOX).point(lambda v: 255 if v >= 255 * 0.04 else 0)
+    px = cells.tobytes()
+
+    def comps(grow, inside=None):
+        gx = cells.filter(ImageFilter.MaxFilter(grow)).tobytes() if grow > 1 else px
+        seen = bytearray(W * H)
+        for start in (inside if inside is not None else range(W * H)):
+            if not gx[start] or seen[start]:
                 continue
-            stack, cells = [(y, x)], []
-            seen[y][x] = True
+            stack, comp = [start], []
+            seen[start] = 1
             while stack:
-                cy, cx = stack.pop()
-                cells.append((cy, cx))
-                for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
-                    if 0 <= ny < H and 0 <= nx < W and fill[ny][nx] and not seen[ny][nx]:
-                        seen[ny][nx] = True
-                        stack.append((ny, nx))
-            ys, xs = [c[0] for c in cells], [c[1] for c in cells]
-            bw, bh = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
-            # most of the page is the page itself: a dark scan, a gutter shadow, a cover
-            if bw < W * 0.12 or bh < H * 0.08 or len(cells) < 0.5 * bw * bh or bw * bh > 0.7 * W * H:
-                continue
-            f = C / sc
-            r = pymupdf.Rect(min(xs) * f, min(ys) * f, (max(xs) + 1) * f, (max(ys) + 1) * f) & page.rect
-            if not _texture_is_text(big, r, big_sc, text_cut):
-                out.append(r)
+                k = stack.pop()
+                comp.append(k)
+                y, x = divmod(k, W)
+                for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                    n = ny * W + nx
+                    if 0 <= ny < H and 0 <= nx < W and gx[n] and not seen[n] and (inside is None or n in inside):
+                        seen[n] = 1
+                        stack.append(n)
+            core = [k for k in comp if px[k]]  # bbox from the real marks, not the growth
+            if core:
+                yield comp, core
+
+    out = []
+    todo = [(comp, core, 5) for comp, core in comps(5)]
+    while todo:
+        comp, core, grow = todo.pop()
+        ys, xs = [k // W for k in core], [k % W for k in core]
+        bw, bh = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+        # tiny marks; a tall narrow figure (a skeleton side view) still counts
+        if bh < H * 0.08 or bw < W * (0.05 if bh >= H * 0.25 else 0.12) or len(core) < 0.15 * bw * bh:
+            continue
+        if (min(xs) <= 1 or max(xs) >= W - 2) and bw < W * 0.25:
+            continue  # a gutter shadow or the page edge of the scan
+        if (min(ys) <= 1 or max(ys) >= H - 2) and bh >= H * 0.8:
+            continue  # light falling across an old page, top to bottom; printed pictures sit in the margins
+        r = pymupdf.Rect(min(xs) * C / f, min(ys) * C / f, (max(xs) + 1) * C / f, (max(ys) + 1) * C / f) & page.rect
+        cover = _text_cover(raw, r)
+        if cover >= (0.1 if bw * bh > 0.7 * W * H else 0.3):
+            if grow > 1 and bw * bh > 0.3 * W * H:  # pictures joined to a text panel: split with less growth
+                todo += [(c, k, grow - 2) for c, k in comps(grow - 2, set(comp))]
+            continue  # print: a page of text (dark scan) or a tinted box of it
+        # a tinted panel behind text is one flat tone filling its box; a picture spreads from
+        # light to dark, and a line drawing in one ink colour leaves most of its box empty
+        box = (int(r.x0 * f), int(r.y0 * f), int(r.x1 * f), int(r.y1 * f))
+        if ImageStat.Stat(lum.crop(box), mask.crop(box)).stddev[0] < 12 \
+                and ImageStat.Stat(mask.crop(box)).mean[0] > 255 * 0.5:
+            continue
+        if not layered and _lined(lum.crop(box), lum_cut):
+            continue  # printed lines the OCR layer does not sit on: blank rows between them
+        out.append(r)
     return sorted(out, key=lambda r: (r.y0, r.x0))
 
 
