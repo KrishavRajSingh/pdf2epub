@@ -3002,6 +3002,89 @@ def _figure_rect(page, blocks, body):
     return u & page.mediabox
 
 
+PHOTO_CELL = 4  # px at 36 dpi, about one printed line tall
+
+
+def _wordy_line(t: str, known: Counter) -> bool:
+    ws = WORD3.findall(t)
+    return bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws)
+
+
+def _texture_is_text(big, r, f: float, dark: int) -> bool:
+    """Printed lines leave blank pixel rows between them; a photo has almost none."""
+    g = big.crop((int(r.x0 * f), int(r.y0 * f), int(r.x1 * f), int(r.y1 * f)))
+    w, s = g.width, g.tobytes()
+    blank = sum(1 for y in range(g.height) if sum(v < dark for v in s[y * w:(y + 1) * w]) < 0.01 * w)
+    return blank >= 0.2 * g.height
+
+
+def _scan_photos(page, raw, known: Counter) -> list:
+    """Photo regions on a page scan that carries an OCR layer, as page rects.
+
+    ponytail: an OCR-layer page is one page-sized image, so _figure_rect skips it and every photo
+    in the book was dropped: a 260-page posture book with ~180 photos came out with 15, the cover
+    and junk pages (reddit 11-18, Spiritual-Willow2778; convert2epub drops them too). White out
+    the lines OCR read as real words, then whatever large ink area is left, that is not lines of
+    print, is a picture.
+    """
+    from PIL import Image, ImageDraw
+    sc, big_sc = 0.5, 1.0
+    # one render: decoding the page scan is most of the cost, so the grid comes from the same one
+    pm = page.get_pixmap(matrix=pymupdf.Matrix(big_sc, big_sc), colorspace=pymupdf.csGRAY)
+    big = Image.frombytes("L", (pm.width, pm.height), pm.samples)
+    im = big.resize((max(1, round(pm.width * sc / big_sc)), max(1, round(pm.height * sc / big_sc))), Image.BOX)
+    # paper tone: old books scan yellow or grey, so "dark" is relative to the page's own paper
+    hist, acc = big.histogram(), 0
+    total = big.width * big.height
+    for paper, n in enumerate(hist):
+        acc += n
+        if acc >= 0.9 * total:
+            break
+    ink_cut, text_cut = int(paper * 0.8), int(paper * 0.65)
+    dr = ImageDraw.Draw(im)
+    for b in raw:
+        for ln in b.get("lines", []):
+            if _wordy_line("".join(s["text"] for s in ln["spans"]), known):
+                x0, y0, x1, y1 = ln["bbox"]
+                dr.rectangle([x0 * sc - 1, y0 * sc - 1, x1 * sc + 1, y1 * sc + 1], fill=255)
+    C = PHOTO_CELL
+    W, H = im.width // C, im.height // C
+    if not W or not H:
+        return []
+    # share of dark pixels per cell: threshold, then a box resize averages each cell
+    cell = im.crop((0, 0, W * C, H * C)).point(lambda v: 255 if v < ink_cut else 0).resize((W, H), Image.BOX)
+    px = cell.tobytes()
+    ink = [[px[cy * W + cx] >= 255 * 0.3 for cx in range(W)] for cy in range(H)]
+    fill = [[ink[y][x] or sum(ink[yy][xx] for yy in range(max(0, y - 1), min(H, y + 2))
+                              for xx in range(max(0, x - 1), min(W, x + 2))) >= 5
+             for x in range(W)] for y in range(H)]
+    seen = [[False] * W for _ in range(H)]
+    out = []
+    for y in range(H):
+        for x in range(W):
+            if not fill[y][x] or seen[y][x]:
+                continue
+            stack, cells = [(y, x)], []
+            seen[y][x] = True
+            while stack:
+                cy, cx = stack.pop()
+                cells.append((cy, cx))
+                for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                    if 0 <= ny < H and 0 <= nx < W and fill[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        stack.append((ny, nx))
+            ys, xs = [c[0] for c in cells], [c[1] for c in cells]
+            bw, bh = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+            # most of the page is the page itself: a dark scan, a gutter shadow, a cover
+            if bw < W * 0.12 or bh < H * 0.08 or len(cells) < 0.5 * bw * bh or bw * bh > 0.7 * W * H:
+                continue
+            f = C / sc
+            r = pymupdf.Rect(min(xs) * f, min(ys) * f, (max(xs) + 1) * f, (max(ys) + 1) * f) & page.rect
+            if not _texture_is_text(big, r, big_sc, text_cut):
+                out.append(r)
+    return sorted(out, key=lambda r: (r.y0, r.x0))
+
+
 SENT_END = re.compile(r"[.!?:…][\"”’')\]]*$")
 PAGE_NO = re.compile(r"[\[(]?[\d\s.\-–—]+[\])]?")
 # a line set big by a noisy OCR layer is not a heading if it stops mid-phrase
@@ -3321,6 +3404,7 @@ def _blocks(doc):
     ocr = _ocr_layer(doc)
     ligmap = _lig_map(doc)
     junk = _junk_pages(doc) if ocr else set()
+    known = Counter(w.lower() for pg in doc for w in WORD3.findall(pg.get_text("text"))) if ocr else None
     # ponytail: a publisher's e-offprint (Springer) opens with a cover and a copyright notice
     # page before the article repeats its own title; they came out as two junk chapters.
     skip = max((k for k in range(min(3, len(doc))) if OFFPRINT.search(doc[k].get_text("text"))), default=-1)
@@ -3363,8 +3447,18 @@ def _blocks(doc):
                 if CAPTION_RE.match(txt):
                     cap, cap_page = txt, cr_page
                     break
+        photos = _scan_photos(page, raw, known) if ocr and not fig and not page.rotation else []
+        photo_rects = list(photos)
         fig_done = False
         for b in raw:
+            while photos and photos[0].y0 <= b["bbox"][1]:
+                ph = photos.pop(0)
+                yield i, ph.y0, -1.0, (_fig_bytes(page.get_pixmap(dpi=SCAN_FIG_DPI, clip=ph)), "")
+            if photo_rects and b.get("type") == 0 and any(
+                    p.contains(pymupdf.Point((b["bbox"][0] + b["bbox"][2]) / 2, (b["bbox"][1] + b["bbox"][3]) / 2))
+                    for p in photo_rects) and not _wordy_line(
+                    " ".join(s["text"] for ln in b.get("lines", []) for s in ln["spans"]), known):
+                continue  # OCR read the photo itself as letters
             if fig and not fig_done and b["bbox"][1] > fig.y1:
                 pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
                 yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
@@ -3412,6 +3506,8 @@ def _blocks(doc):
         if fig and not fig_done:
             pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
             yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
+        for ph in photos:
+            yield i, ph.y0, -1.0, (_fig_bytes(page.get_pixmap(dpi=SCAN_FIG_DPI, clip=ph)), "")
     if ref:
         yield ref[0], ref[1], round(ref[2], 1), _join(ref[3])
 
@@ -3489,6 +3585,11 @@ def _structure(blocks, doc):
     n = len(doc)
     # ponytail: c >= 2, or a one-page PDF loses its title as a 'repeated' header (reddit 11-06)
     banned = {t for t, c in list(tops.items()) + list(bots.items()) if c >= 2 and c > n * 0.5}
+    # ponytail: most books alternate running heads, the book title on left pages and the chapter
+    # title on right ones, so neither is on half the pages; an OCR scan kept "SLOWLY BECOMING" /
+    # "OF WATER AND THE SPIRIT" as headings on every page (reddit 11-18). A short line at the top
+    # edge on 3+ pages is a running head there; the chapter's own title sits lower and stays.
+    top_heads = {t for t, c in tops.items() if c >= 3 and len(t) < 80}
 
     chapters, cur, cur_notes = [], [], []
     ocr = _ocr_layer(doc)
@@ -3555,6 +3656,8 @@ def _structure(blocks, doc):
     for pno, y, sz, t in blocks:
         if sz < 0:
             cur.append(("img", t))
+            continue
+        if y < 60 and t in top_heads and not re.match(r"(chapter|part|book)\b", t, re.I):
             continue
         if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
@@ -3636,6 +3739,17 @@ def _structure(blocks, doc):
         if back:
             chapters[k] = keep
             chapters[k - 1].extend(back)
+    # ponytail: a chapter title set in a decorative face OCRs to junk ("LIF6 BeCINSXT KJXNSI")
+    # while the same title as a plain running head reads clean ("LIFE BEGINS AT NANSI"). Running
+    # heads are dropped above, but they still spell the title, so a heading close to one takes it.
+    if ocr and top_heads:
+        from difflib import SequenceMatcher
+        for ch in chapters:
+            for k, (kind, t) in enumerate(ch):
+                if kind in ("h1", "h2") and isinstance(t, str) and t not in top_heads and len(t) >= 8:
+                    best = max(top_heads, key=lambda h: SequenceMatcher(None, t.upper(), h.upper()).ratio())
+                    if SequenceMatcher(None, t.upper(), best.upper()).ratio() >= 0.6:
+                        ch[k] = (kind, best)
     return chapters
 
 

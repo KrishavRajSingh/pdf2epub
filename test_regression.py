@@ -63,6 +63,40 @@ def make_ia_layer():
     return d
 
 
+def make_ia_photos_heads():
+    """reddit 11-18 (Spiritual-Willow2778): Internet Archive scans of a photo book and a memoir.
+    Photos printed in the page image were all dropped (the page is one big image); running heads
+    alternate book title / chapter title, so neither was on half the pages and both came out as
+    headings on every page; the chapter title in a display face OCRed to junk."""
+    d = _doc()
+    for k in range(8):
+        src = pymupdf.open().new_page()
+        src.insert_text((230, 40), "SLOW WATERS" if k % 2 else "THE RIVER BOOK", fontsize=10)
+        top = 90
+        if k == 0:
+            src.insert_text((200, 120), "SLOW WATERS", fontsize=22)
+            top = 160
+        if k in (2, 5):  # a photo between paragraphs
+            src.draw_rect(pymupdf.Rect(150, 300, 450, 520), fill=(0.55, 0.35, 0.25))
+            src.draw_circle((300, 410), 70, fill=(0.15, 0.3, 0.5))
+            src.insert_textbox(pymupdf.Rect(72, top, 520, 290), PROSE * 3, fontsize=12)
+            src.insert_textbox(pymupdf.Rect(72, 540, 520, 760), PROSE * 3, fontsize=12)
+        else:
+            src.insert_textbox(pymupdf.Rect(72, top, 520, 760), PROSE * 9, fontsize=12)
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+        pg.insert_text((230, 40), "SLOW WATERS" if k % 2 else "THE RIVER BOOK", fontsize=10, render_mode=3)
+        if k == 0:
+            pg.insert_text((200, 120), "SL0W VVATFRS", fontsize=22, render_mode=3)
+        if k in (2, 5):
+            pg.insert_textbox(pymupdf.Rect(72, top, 520, 290), PROSE * 3, fontsize=12, render_mode=3)
+            pg.insert_textbox(pymupdf.Rect(72, 540, 520, 760), PROSE * 3, fontsize=12, render_mode=3)
+            pg.insert_text((200, 400), "~ gf ,.\\ ;", fontsize=9, render_mode=3)  # OCR read the photo
+        else:
+            pg.insert_textbox(pymupdf.Rect(72, top, 520, 760), PROSE * 9, fontsize=12, render_mode=3)
+    return d
+
+
 def make_ia_memoir():
     """Internet Archive scan like Marcela's Divine Challenge (11-14): chapter lines in body type
     ("Chapter | - Childhood", OCR read the 1 as |), Bible verses set big, and a handwritten
@@ -451,6 +485,9 @@ CASES = {
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
                            "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
+    "ia_photos_heads": (make_ia_photos_heads, {"path": "text", "has": ["SLOW WATERS", "clocks were striking"],
+                                               "hasnt": ["THE RIVER BOOK", "SL0W", "gf ,."], "imgs": 2,
+                                               "ch_max": 2}),
     # ch_max: verses and letter lines set big must not each start a chapter (Marcela 11-14)
     "ia_memoir": (make_ia_memoir, {"path": "text", "has": ["Chapter 1 - Childhood", "Chapter 3 - The Trial",
                                                         "many sparrows"],

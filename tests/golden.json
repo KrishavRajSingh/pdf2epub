@@ -18,6 +18,16 @@
   "imgs": 0,
   "words": 450
  },
+ "ia_photos_heads": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [
+   "SLOW WATERS"
+  ],
+  "paragraphs": 10,
+  "imgs": 2,
+  "words": 1652
+ },
  "ia_memoir": {
   "path": "text",
   "chapters": 4,
