@@ -777,6 +777,42 @@ def _blurred(png: bytes):
         return None
 
 
+def _english_paras(native: str, mixed: str) -> str:
+    """Swap in the lang+eng reading of only the paragraphs that it reads as English.
+
+    ponytail: a Telugu novel quoting a letter in English (AgniPravesam p.32, ysvsr 11-18) came out
+    "0% (౧౭ ౧౭౫౧, 2౧ 260౮2006"; English read the whole page worse, so nothing was swapped. Same
+    layout pass, so the paragraphs line up; if they don't, keep the native text."""
+    a, b = native.split("\n\n"), mixed.split("\n\n")
+    if len(a) != len(b):
+        return native
+    out = []
+    for x, y in zip(a, b):
+        letters = [ch for ch in y if ch.isalpha()]
+        toks = re.findall(r"[a-z]+", y.lower())
+        junk = len(re.findall("[०-९౦-౯0-9]", x)) >= 3
+        eng = (len(toks) >= 5 and sum(ch.isascii() for ch in letters) >= 0.8 * len(letters)
+               and sum(t in _ANY_STOP for t in toks) >= 0.1 * len(toks))
+        out.append(y if junk and eng else x)
+    return "\n\n".join(out)
+
+
+def _halves(png: bytes):
+    """Left and right halves of a page image, as PNGs; None on any failure."""
+    try:
+        from PIL import Image
+        im = Image.open(BytesIO(png))
+        w, h = im.size
+        out = []
+        for box in ((0, 0, w // 2, h), (w // 2, 0, w, h)):
+            b = BytesIO()
+            im.crop(box).save(b, "PNG")
+            out.append(b.getvalue())
+        return out
+    except Exception:
+        return None
+
+
 def _ocr_dpi(page):
     """OCR_DPI, lowered for pages printed huge: a 300dpi scan saved at 72dpi is a 33-inch page,
     and 200dpi of that is a 6700px image where Tesseract finds a sixth of the words (11-11)."""
@@ -805,6 +841,17 @@ def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
     Telugu model alone gives "111౮1 & 4018010" (11-10). Only those pages pay for the second pass;
     tel+eng on every page garbled some Telugu words."""
     text, cov, c, pics = _tess(png, page_w, page_h, lang, conf=True)
+    if page_w > 1.1 * page_h and (not text.strip() or c < 70):
+        # ponytail: a book scanned open, two pages a shot. Tesseract's layout pass said "Empty page!!"
+        # on whole spreads and they were dropped (AgniPravesam: 4 of 133, ysvsr 11-18); each half reads
+        halves = _halves(png)
+        if halves:
+            rs = [_tess_mixed(h, page_w // 2, page_h, lang) for h in halves]
+            n = [len(r[0].split()) for r in rs]
+            hc = sum(r[3] * k for r, k in zip(rs, n)) / sum(n) if sum(n) else 0.0
+            if sum(n) and (not text.strip() or hc > c):
+                hp = [(x0 / 2 + s, y0, x1 / 2 + s, y1) for r, s in zip(rs, (0.0, 0.5)) for x0, y0, x1, y1 in r[2]]
+                return "\n\n".join(r[0] for r in rs if r[0].strip()), (rs[0][1] + rs[1][1]) / 2, hp, hc
     if any((x1 - x0) * (y1 - y0) >= 0.4 for x0, y0, x1, y1 in pics):
         # ponytail: paper texture and halftone on a tinted magazine page made Tesseract read three
         # text columns as one picture (Vijayachitra 1986: 64 words of 600, 11-11); a light blur gives 501
@@ -819,6 +866,8 @@ def _tess_mixed(png: bytes, page_w: int, page_h: int, lang: str = "eng"):
         # native-digit junk, and there lang+eng sprinkled "SHY", "OSH" through the Telugu (11-10)
         if _tess(png, page_w, page_h, "eng", conf=True)[2] > c:
             text, cov = _tess(png, page_w, page_h, lang + "+eng")
+        else:
+            text = _english_paras(text, _tess(png, page_w, page_h, lang + "+eng")[0])
     if "tel" in lang:
         text = "\n".join(_fix_vattu(l) for l in text.split("\n"))
     return text, cov, pics, c
@@ -2967,6 +3016,10 @@ def _garbled(doc) -> bool:
     text = "".join(doc[i].get_text() for i in idx)
     if len(text) < 300:
         return False
+    # ponytail: a font with no Unicode map extracts as spaces with a stray letter: Loya Nunchi
+    # Sikharaniki (Gautami via iText, 11-18) is 2% non-space; real text is ~80%
+    if sum(not c.isspace() for c in text) < 0.2 * len(text):
+        return True
     return (_junk_share(text) > 0.2 or _legacy_font_share(doc, idx) > 0.5 or _no_language(text)
             or _broken_indic(doc, text))
 

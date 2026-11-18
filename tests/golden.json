@@ -183,6 +183,14 @@
   "imgs": 0,
   "words": 285
  },
+ "blank_layer_telugu": {
+  "path": "ocr",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 285
+ },
  "hindi_old_font": {
   "path": "ocr",
   "chapters": 1,

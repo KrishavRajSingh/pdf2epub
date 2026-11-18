@@ -357,6 +357,20 @@ def make_broken_unicode_telugu():
     return d
 
 
+def make_blank_layer_telugu():
+    """Telugu in a font whose glyphs have no Unicode map (Gautami via iText, Loya Nunchi
+    Sikharaniki, 11-18): the page shows Telugu, the text layer is 98% spaces with a stray
+    అ, ి or త, and the text path built an EPUB of lone letters."""
+    d, png = _doc(), _tel_png(TEL * 5)
+    stray = ("        అ      ి     " + " " * 40 + "\n" + " " * 55 + "త  \n") * 30
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_textbox(pymupdf.Rect(30, 30, 580, 820), stray, fontfile=TEL_FONTS + "/Telugu MN.ttc",
+                          fontname="tel", fontsize=8, render_mode=3)
+    return d
+
+
 def make_magazine_scan():
     """Magazine scan: text above a coloured illustration. The pictures were dropped and only the
     text kept (Chandamama, 11-10); Tesseract's word-free blocks are now cropped as figures."""
@@ -472,6 +486,7 @@ CASES = {
     "ascii_old_font": (make_ascii_old_font, {"path": "ocr", "has": ["గ్రామంలో"], "hasnt": ["NSRV"], "lang": "te"}),
     "control_code_layer": (make_control_code_layer, {"path": "ocr", "has": ["clocks were striking"], "lang": "en"}),
     "broken_unicode_telugu": (make_broken_unicode_telugu, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"], "lang": "te"}),
+    "blank_layer_telugu": (make_blank_layer_telugu, {"path": "ocr", "has": ["గ్రామంలో ఒక రైతు"], "lang": "te"}),
     "hindi_old_font": (make_hindi_old_font, {"path": "ocr", "has": ["किसान"], "hasnt": ["dk;Z"], "lang": "hi"}),
     "portuguese_scan": (make_portuguese_scan, {"path": "ocr", "has": ["não está em casa", "canção"], "lang": "pt"}),
     "spanish_text": (make_spanish_text, {"path": "text", "has": ["El niño no está"], "lang": "es"}),
