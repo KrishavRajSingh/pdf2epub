@@ -3656,14 +3656,29 @@ def _structure(blocks, doc):
     # "OF WATER AND THE SPIRIT" as headings on every page (reddit 11-18). A short line at the top
     # edge on 3+ pages is a running head there; the chapter's own title sits lower and stays.
     top_heads = {t for t, c in tops.items() if c >= 3 and len(t) < 80}
+    # ponytail: an OCR layer misreads the page number in a running head ("60 Treasures of the
+    # Kingdom", "go Treasures...", "The Trumpet Sounds ap"), so no two match; the ones set big
+    # by OCR noise became headings (reddit 11-19). Same words once the short end tokens go.
+    def top_key(t):
+        ws = t.split()
+        junk = lambda w: bool(re.search(r"\d", w)) or len(w) <= 2 or not re.search(r"[A-Za-z]{2}", w)
+        while ws and junk(ws[0]) and len(ws) > 1:
+            ws.pop(0)
+        while ws and junk(ws[-1]):
+            ws.pop()
+        return " ".join(ws).lower()
+    top_keys = Counter(top_key(t) for p, y, sz, t in blocks if y < 60 and sz > 0 and len(t) < 80)
 
     chapters, cur, cur_notes = [], [], []
     ocr = _ocr_layer(doc)
     list_item = re.compile(r"^(?:[-–•·*▪◦]|\d{1,3}[.)]|#)\s")
     # "Chapter 1 — Childhood" in body type; OCR reads the 1 as | or l ("Chapter | - Childhood")
     ch_title = re.compile(r"^(chapter|part)\s+(\d{1,3}|[ivxlc]{1,7}|\|)\s*[—–:.\-]+\s*\S.{0,80}$", re.I)
+    # ponytail: count chapter lines only. An anthology scan's Introduction / Preface / Prologue
+    # made 4 "named" lines, so its story titles never split and 30 stories ran on in 5 chapters
+    # (reddit 11-19, "the short stories do not start on a fresh page")
     named = sum(1 for _, _, sz, t in blocks if sz > 0 and len(t) < 120
-                and (ch_title.match(t) or head_word.match(t)))
+                and (ch_title.match(t) or (head_word.match(t) and re.match(r"(chapter|part|book)\b", t, re.I))))
     known = Counter(w.lower() for _, _, sz, t in blocks if sz > 0 for w in WORD3.findall(t))
 
     def caps_title(t):
@@ -3680,7 +3695,7 @@ def _structure(blocks, doc):
         return (bool(ws) and len(letters) >= 4 and len(t.split()) <= 12
                 and sum(c.isupper() for c in letters) >= 0.7 * len(letters)
                 and len(letters) >= 0.7 * len(t.replace(" ", "")) and max(len(w) for w in ws) <= 15
-                and not SENT_END.search(t))
+                and not SENT_END.search(t.rstrip("!") if not breaks else t))  # "A SPOILED PRIEST!" (OCR)
 
     def size_head(t):
         """A line set big by an OCR layer, is it a heading? Bible verses and quoted letters
@@ -3723,7 +3738,12 @@ def _structure(blocks, doc):
         if sz < 0:
             cur.append(("img", t))
             continue
+        if ocr:  # ponytail: a scan's ornament before a title OCRs to "/ ", "» ", "¥ " (reddit 11-19)
+            t = re.sub(r"^[/»¥]\s+(?=\S)", "", t)
         if y < 60 and t in top_heads and not re.match(r"(chapter|part|book)\b", t, re.I):
+            continue
+        if ocr and y < 60 and len(t) < 80 and len(top_key(t).split()) >= 2 and top_keys[top_key(t)] >= 3 \
+                and not re.match(r"(chapter|part|book)\b", top_key(t)):
             continue
         if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config

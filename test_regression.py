@@ -188,6 +188,32 @@ def make_ia_word_lines():
     return d
 
 
+def make_ia_anthology():
+    """Anthology scan with an OCR layer (reddit 11-19, 552 pages, 30 stories in 5 chapters).
+    Introduction / Preface / Prologue counted as "Chapter N" lines, so the scan split on those
+    only and story titles never started a chapter. The running head's page number OCRs as junk
+    ("go The Long Road", "4612 The Long Road") so it never repeats; set big it became a heading. A title
+    ends in an OCR "!" or starts with an ornament read as "¥ "."""
+    d, png = _doc(), _page_png(PROSE * 6)
+    lines = [PROSE[i:i + 60] for i in range(0, len(PROSE) - 60, 60)] * 4
+    heads = {0: "INTRODUCTION", 1: "PREFACE", 2: "PROLOGUE", 3: "THE TRUMPET SOUNDS",
+             7: "A SPOILED PRIEST!", 11: "¥ BLACK ROCK"}
+    nums = ["go", "4612", "1p", "Za", "58", "60"]
+    for i in range(15):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_text((200, 22), f"{nums[i % len(nums)]} The Long Road Home",
+                       fontsize=12 if i % 3 == 0 else 9.8, render_mode=3)
+        y = 90
+        if i in heads:
+            pg.insert_text((180, y), heads[i], fontsize=14, render_mode=3)
+            y += 50
+        for k, ln in enumerate(lines[:36]):
+            pg.insert_text((72, y), ln, fontsize=10, render_mode=3)
+            y += 18 if k % 6 != 5 else 26
+    return d
+
+
 def make_scan(prose=PROSE * 14):
     """Plain scan, no text at all. Full pages of prose, as in a real book."""
     d, png = _doc(), _page_png(prose)
@@ -528,6 +554,10 @@ CASES = {
     "ia_word_lines": (make_ia_word_lines, {"path": "text", "has": ["JACKKNIFED", "CRACKERJACK",
                                                                 "the clocks were striking thirteen"],
                                            "ch_max": 4, "h_min": 3}),
+    # 11-19: an anthology's stories each start a chapter, running heads with junk page numbers gone
+    "ia_anthology": (make_ia_anthology, {"path": "text", "has": ["THE TRUMPET SOUNDS", "A SPOILED PRIEST",
+                                                              "BLACK ROCK"],
+                                         "hasnt": ["The Long Road Home", "¥"], "ch_min": 6}),
     # p_max: a scan must not come out one paragraph per printed line (10-23..11-05 bug)
     "scan": (make_scan, {"path": "ocr", "has": ["clocks were striking"], "p_max": 9}),
     "scan_quotes": (make_scan_quotes, {"path": "ocr", "has": ["Stop there", "clocks were striking"],
@@ -605,6 +635,8 @@ def check(name, rules, s, text):
         errs.append(f"{s['paragraphs']} paragraphs, want at most {rules['p_max']} (one per printed line?)")
     if s["chapters"] > rules.get("ch_max", 10**9):
         errs.append(f"{s['chapters']} chapters, want at most {rules['ch_max']}: {s['headings']}")
+    if s["chapters"] < rules.get("ch_min", 0):
+        errs.append(f"{s['chapters']} chapters, want at least {rules['ch_min']}: {s['headings']}")
     if len(s["headings"]) < rules.get("h_min", 0):
         errs.append(f"headings {s['headings']}")
     return errs

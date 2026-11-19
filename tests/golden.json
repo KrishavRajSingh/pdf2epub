@@ -60,6 +60,21 @@
   "imgs": 0,
   "words": 12864
  },
+ "ia_anthology": {
+  "path": "text",
+  "chapters": 6,
+  "headings": [
+   "INTRODUCTION",
+   "PREFACE",
+   "PROLOGUE",
+   "THE TRUMPET SOUNDS",
+   "A SPOILED PRIEST!",
+   "BLACK ROCK"
+  ],
+  "paragraphs": 6,
+  "imgs": 0,
+  "words": 1331
+ },
  "scan": {
   "path": "ocr",
   "chapters": 1,
