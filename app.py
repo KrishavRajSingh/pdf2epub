@@ -164,15 +164,30 @@ def shelf_key(request: Request) -> str:
     except OSError:
         return ""
     today = datetime.now(timezone.utc).date().isoformat()
+    want = _key_fold(k)
     for ln in lines:
         # ponytail: "CHECKOUT KEY" for shelf, "CHECKOUT KEY until=YYYY-MM-DD" for a batch pass
         parts = ln.split()
-        if len(parts) >= 2 and parts[1] == k:
+        if len(parts) >= 2 and _key_fold(parts[1]) == want:
+            k = parts[1]  # ponytail: the stored spelling, so the Library budget is counted on one key
             until = next((p[6:] for p in parts[2:] if p.startswith("until=")), "")
             if until:
                 return k if today <= until else ""
             return k if shelf_active(parts[0]) else ""
     return ""
+
+
+_KEY_FOLD = str.maketrans("1IO", "ll0")
+
+
+def _key_fold(k: str) -> str:
+    """A key with its lookalike letters folded: 1/I/l all read as l, O as 0.
+
+    ponytail: a Batch buyer typed his key into a second Mac twice (11-11, 11-19) with a 1 for
+    the l, and every book there fell back to the free preview while the page said "Paid key active".
+    keys are 20 random chars, so folding a few lookalikes cannot make two buyers' keys collide.
+    """
+    return k.translate(_KEY_FOLD)
 
 
 SHELF_GRACE_DAYS = 34  # ponytail: a month plus 3 days, so a renewal that lands a day late never locks anyone out

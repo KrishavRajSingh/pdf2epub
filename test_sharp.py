@@ -49,6 +49,14 @@ def main():
     from starlette.requests import Request
     r = Request({"type": "http", "query_string": b"k=KEYLIB2", "headers": []})
     assert pdf2epub.shelf_key(r) == "KEYLIB2"
+
+    # ysvsr 11-19: a retyped key with 1 for l (or O for 0) still unlocks, as the stored key
+    pdf2epub.SHELF_KEYS.write_text("cid1 -9Y6qQlTDI53NFKPWpia until=2099-01-01\n")
+    for typed in ("-9Y6qQ1TDI53NFKPWpia", "-9Y6qQITDI53NFKPWpia", "-9Y6qQlTDI53NFKPWpia"):
+        r = Request({"type": "http", "query_string": ("k=" + typed).encode(), "headers": []})
+        assert pdf2epub.shelf_key(r) == "-9Y6qQlTDI53NFKPWpia", typed
+    r = Request({"type": "http", "query_string": b"k=-9Y6qQlTDI53NFKPWpib", "headers": []})
+    assert pdf2epub.shelf_key(r) == "", "a different key is still refused"
     print("ok")
 
 
