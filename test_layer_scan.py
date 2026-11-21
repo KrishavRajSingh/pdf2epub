@@ -161,9 +161,31 @@ def untitled_front_name():
     print("ok — untitled front matter is named after the book")
 
 
+def scan_cover_page():
+    """A scan's first page is the cover: a picture, not OCR words read off the artwork."""
+    import io, zipfile
+    d = pymupdf.open()
+    for _ in range(20):
+        d.new_page().draw_rect(pymupdf.Rect(50, 50, 300, 400), fill=(0.3, 0.3, 0.3))
+    texts = ["Unpayable\n\ndence, the the once deve\n\nDenise Ferreira", "real text " * 30]
+    figs = {0: [b"x"]}
+    cover = pdf2epub.scan_cover(d, texts, figs)
+    assert cover and cover[:2] == b"\xff\xd8" and texts[0] == "" and 0 not in figs
+    z = zipfile.ZipFile(io.BytesIO(pdf2epub.build_epub([[("h1", "One"), ("p", "x")]], "Book", "", cover=cover)))
+    assert any(n.endswith("cover.jpg") for n in z.namelist()), z.namelist()
+    prose = ["word " * 60]
+    assert pdf2epub.scan_cover(d, prose) is None and prose[0].startswith("word"), "prose page kept"
+    short = pymupdf.open()
+    short.new_page()
+    form = ["Membership Application\n\nJane Doe"]
+    assert pdf2epub.scan_cover(short, form) is None and form[0], "one-page form keeps its text"
+    print("ok — scan cover: first page is the cover picture")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
     chapter_running_head()
     contents_page_chapters()
     untitled_front_name()
+    scan_cover_page()

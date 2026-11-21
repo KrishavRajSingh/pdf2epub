@@ -1181,6 +1181,29 @@ def _scan_figures(doc, pages, pics: dict | None = None):
         figs[i] = _fig_bytes(doc[i].get_pixmap(dpi=SCAN_FIG_DPI))
     return figs
 
+def scan_cover(doc, texts: list, figs: dict | None = None) -> bytes | None:
+    """The first page of a scan as the EPUB cover, its OCR text dropped (texts/figs edited in place).
+
+    ponytail: a cover is lettering over a picture; OCR read the picture as words, so the book opened
+    on "Unpayable dence, the the once deve political me ral" (Jon, 11-21). Kept as text when the
+    page holds real prose (a scan that starts mid-book)."""
+    if not texts or len(doc) < 20 or any(len(p.split()) >= 40 for p in _page_paras(texts[0])):
+        return None  # ponytail: a one-page form or a short scan is all content, no cover
+    texts[0] = ""
+    if figs is not None:
+        figs.pop(0, None)
+    try:
+        return _jpeg(doc[0].get_pixmap(dpi=SCAN_FIG_DPI))
+    except Exception:
+        return None
+
+
+def _jpeg(pm) -> bytes:
+    if pm.n - pm.alpha != 3:
+        pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
+    return pm.tobytes("jpg", jpg_quality=85)
+
+
 def _wordy(text: str) -> bool:
     """OCR text that reads as words, not map-label junk. A low-ink page (a one-page form, a short
     last page) is kept as a picture and its text too; reddit 11-06 got a picture and no words."""
@@ -1537,9 +1560,11 @@ def _lint_later(pdf: bytes, epub_bytes: bytes, ref: str, pages: int):
     threading.Thread(target=run, daemon=True).start()
 
 
-def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
+def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes | None = None) -> bytes:
     book = epub.EpubBook()
     book.set_title(_clean(title)[:120])
+    if cover:
+        book.set_cover("cover.jpg", cover, create_page=False)  # the library and Kindle home show it
     if author:
         book.add_author(_clean(author)[:120])
     book.set_language(lang)  # ponytail: a Kindle picks the font and hyphenation by this
@@ -4733,12 +4758,13 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             texts = [t for t, _ in pages or []]
             if pages and ocr_ok(texts):
                 figs = _scan_figures(doc, pages, {})
+                cover = scan_cover(doc, texts, figs)
                 chapters = ocr_chapters(texts, figs, pdf_toc(doc))
                 if cut:
                     chapters.append([("h1", "The rest of this book"),
                         ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
                               "The whole book is $5 at epub.ftak.net, converted on the spot.")])
-                data = build_epub(chapters, safe_title, author[:120], elang)
+                data = build_epub(chapters, safe_title, author[:120], elang, cover)
                 doc.close()
                 return done(data, len(texts), "layer-preview" if cut else "layer")
             npages = len(doc)  # Drive failed: the old layer, as before (cut to the free part if cut)
@@ -4765,12 +4791,13 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):
                     figs = _scan_figures(doc, pages, pics)
+                    cover = scan_cover(doc, texts, figs)
                     chapters = ocr_chapters(texts, figs, pdf_toc(doc))
                     if cut:
                         chapters.append([("h1", "The rest of this book"),
                             ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
                                   "The whole book is $5 at epub.ftak.net, converted on the spot.")])
-                    data = build_epub(chapters, safe_title, author[:120], elang)
+                    data = build_epub(chapters, safe_title, author[:120], elang, cover)
                     doc.close()
                     return done(data, len(texts), "ocr-preview" if cut else ("ocr+fig" if figs else "ocr"))
             # ponytail: calibre still last resort (image-only epub beats error)
