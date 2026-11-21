@@ -1,0 +1,100 @@
+"""Scans with someone else's OCR layer are read again (davehasl19, The Feasting Dead, 11-21):
+blue pen ink painted out, Drive OCR for every reader, AI on inked pages for paid keys, the old
+layer kept when Drive fails. And the scan chapter finder on Drive's output: page number and
+running head as two paragraphs, drop caps on their own line, a page number "11" read as "II",
+a title page split in lines, a ghost of handwriting in CAPS mid-page.
+
+Run: python3 test_layer_scan.py
+"""
+import os, sys, tempfile
+from pathlib import Path
+
+os.environ["LOG_DIR"] = tempfile.mkdtemp()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pymupdf
+import app as pdf2epub
+
+LINE = "the quiet house stood on the hill and nobody went near it after dark"
+
+
+def _layer_doc(n=4, ink=(1,)):
+    """Pages of black print with an invisible junk OCR layer; pages in `ink` get a blue pen note."""
+    d = pymupdf.open()
+    for i in range(n):
+        art = pymupdf.open()  # the printed page, flattened to a picture like a scan
+        ap = art.new_page(width=320, height=520)
+        for k in range(12):
+            ap.insert_text((30, 60 + k * 30), LINE[:44], fontsize=10)
+        if i in ink:
+            ap.draw_line((30, 64), (200, 64), color=(0.1, 0.2, 0.9), width=1.5)
+            ap.insert_text((260, 100), "what are", fontsize=12, color=(0.1, 0.2, 0.9))
+        png = ap.get_pixmap(dpi=150).tobytes("png")
+        pg = d.new_page(width=320, height=520)
+        pg.insert_image(pg.rect, stream=png)
+        for k in range(12):
+            pg.insert_text((30, 60 + k * 30), "strained O* on aXe 073) " + LINE[:20], fontsize=10, render_mode=3)
+    return d
+
+
+def reread():
+    d = _layer_doc()
+    assert pdf2epub._ocr_layer(d), "fixture must look like an OCR-layer scan"
+    img, inked = pdf2epub._strip_pen(d[1])
+    assert inked and img[:2] == b"\xff\xd8", "blue ink not found on the annotated page"
+    assert not pdf2epub._strip_pen(d[0])[1], "a clean page counted as inked"
+    pix = pymupdf.Pixmap(img)
+    blue = sum(1 for k in range(0, len(pix.samples), pix.n) if pix.samples[k] < 128)
+    assert blue > 0, "print painted out with the ink"
+
+    asked = []
+    clean = " ".join([LINE] * 3)
+
+    def drive(img, lang):
+        asked.append(lang)
+        return clean
+
+    pages = pdf2epub.layer_scan_pages(d, "en", "", drive=drive)
+    assert [t for t, _ in pages] == [clean] * 4 and asked == ["en"] * 4, "free reader not read by Drive"
+
+    # paid key: the inked page alone goes to the AI reader, and only it is charged
+    pdf2epub.SHELF_KEYS.write_text("cid KEYLIB until=2099-01-01 sharp=5\n")
+    pages = pdf2epub.layer_scan_pages(d, "en", "KEYLIB", drive=drive, read=lambda img, l: "ai " + clean)
+    assert [t[:3] for t, _ in pages] == ["the", "ai ", "the", "the"], [t[:12] for t, _ in pages]
+    assert pdf2epub.sharp_left("KEYLIB") == 4
+
+    # Drive down on most pages: None, the caller keeps the old layer
+    assert pdf2epub.layer_scan_pages(d, "en", "", drive=lambda i, l: None) is None
+    assert pdf2epub.layer_scan_pages(d, "en", "", drive=None) is None or not pdf2epub.DRIVE_REFRESH
+    print("ok — layer scans read again, ink out, AI on inked pages, old layer on failure")
+
+
+def chapters():
+    body = ("It was an afternoon in October and Denis had been sitting with a book upon "
+            "his knees for an hour or more, looking out at the lawn and the cedar")
+    end = body + ", and"  # a page that ends mid-sentence
+    cont = "then he rose and went in without a word to anyone in the house."
+    pages = [
+        "THE FEASTING\n\nDEAD\n\nJOHN METCALFE\n\nVALANCOURT BOOKS",        # title page in lines
+        f"O\n\nI\n\nUR boy, Denis, had at no time been very strong.\n\n{end}",  # drop cap after numeral
+        f"6\n\nJOHN METCALFE\n\n{cont}\n\n{body}.",                        # folio then head
+        f"THE FEASTING DEAD\n\nII\n\n{body}.\n\nHOW\n\n{body}.",            # "11" read as "II"; ghost CAPS
+        f"8\n\nJOHN METCALFE\n\n{body}.",
+        f"T\n\nII\n\nHEY were black days that followed.\n\n{body}.",        # drop cap before numeral
+        f"THE FEASTING DEAD\n\n9\n\n{body}.",
+        f"Q\n\nIII\n\nUESTION and answer between us tumbled.\n\n{body}.",
+        f"10\n\nJOHN METCALFE\n\n{body}.",
+    ]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    assert heads == ["THE FEASTING DEAD", "I", "II", "III"], heads
+    text = " ".join(t for c in chs for k, t in c if k == "p")
+    for good in ("OUR boy", "THEY were", "QUESTION and", end + " " + cont):
+        assert good in text, good
+    body_text = " ".join(t for c in chs[1:] for k, t in c if k == "p")
+    assert "JOHN METCALFE" not in body_text, "running head kept in the chapters"
+    print("ok — scan chapters: heads, drop caps, folios, title page, ghosts")
+
+
+if __name__ == "__main__":
+    reread()
+    chapters()

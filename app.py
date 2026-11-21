@@ -1297,12 +1297,10 @@ def _drop_caps(paras: list[str]) -> list[str]:
     out, i = [], 0
     while i < len(paras):
         p = paras[i]
-        if re.fullmatch(r"[A-Z]", p):
-            for j in (i + 1, i + 2):
+        if re.fullmatch(r"[A-Z]", p) and not (p in "IVX" and not out and i + 1 < len(paras)
+                                               and re.match(r"[A-Z]{2,}\b", paras[i + 1])):
+            for j in (i + 1, i + 2):  # (a lone I/V/X first on the page before a CAPS word: the numeral)
                 if j < len(paras) and re.match(r"[A-Z]{2,}\b", paras[j]) and not FOLIO.fullmatch(paras[j]):
-                    first = paras[j].split()[0]
-                    if p in "IVX" and i == 0 and len(first) >= 2 and j == i + 1:
-                        break  # the chapter numeral
                     paras = paras[:j] + [p + paras[j]] + paras[j + 1:]
                     p = None
                     break
@@ -1337,7 +1335,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             chapters.append(cur.copy())
             cur.clear()
 
-    head_page = -1
+    head_page, title_done = -1, False
     for i, txt in enumerate(pages):
         if toc and i in toc:
             flush()
@@ -1372,12 +1370,16 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
             # ponytail: a CAPS line counts as a heading near the top of a page only. Mid-page, on a scan
             # with pen notes, it was a ghost of the handwriting ("HOW", The Feasting Dead p17, 11-21)
-            head = HEAD_WORD.match(text) or (latin and _caps_head(text) and placed <= 1) \
+            head = HEAD_WORD.match(text) or (latin and _caps_head(text) and (not placed or cur and cur[-1][0] == "h1")) \
                 or (stories and NUMBERED.match(text))
             placed += 1
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 if cur and head_page == i and all(k == "h1" for k, _ in cur):
-                    cur[-1] = ("h1", cur[-1][1] + " " + text)  # "THE FEASTING" / "DEAD": one title, one entry
+                    if len(cur[-1][1].split()) <= 2 and len(text.split()) <= 2 and len(cur) == 1 and not title_done:
+                        cur[-1] = ("h1", cur[-1][1] + " " + text)  # "THE FEASTING" / "DEAD": one title, one entry
+                        title_done = True
+                    else:
+                        cur.append(("p", text))  # the rest of a title page: author, publisher
                     continue
                 flush()
                 cur.append(("h1", text))
