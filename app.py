@@ -1368,9 +1368,10 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
                 continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
-            # ponytail: a CAPS line counts as a heading near the top of a page only. Mid-page, on a scan
-            # with pen notes, it was a ghost of the handwriting ("HOW", The Feasting Dead p17, 11-21)
-            head = HEAD_WORD.match(text) or (latin and _caps_head(text) and (not placed or cur and cur[-1][0] == "h1")) \
+            # ponytail: a one-word CAPS line mid-page is not a heading: on a scan with pen notes it was a
+            # ghost of the handwriting ("HOW", The Feasting Dead p17, 11-21). "THE LONG WINTER" still is
+            head = HEAD_WORD.match(text) or (latin and _caps_head(text) and (not placed or cur and cur[-1][0] == "h1"
+                                                     or len(text.split()) >= 2)) \
                 or (stories and NUMBERED.match(text))
             placed += 1
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
