@@ -1412,6 +1412,38 @@ def _clean(t: str) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", t or "")
 
 
+LINT_LOG = Path(os.environ.get("LOG_DIR", ".")) / "lint.log"
+
+
+def _lint_later(pdf: bytes, epub_bytes: bytes, ref: str, pages: int):
+    """Check the finished book against its PDF in the background (scripts/epub_lint.py, rules only).
+
+    ponytail: layout defects (lost pictures, glued lists, split headings) were found only by a human
+    paging through the book (Paramattha 11-21). Now every born-digital conversion leaves one line
+    in lint.log: which rules fired, never the text. Files live in a temp dir and are deleted after.
+    """
+    if pages > 600:
+        return  # a big book's check costs more than it tells; the next small one says the same
+
+    def run():
+        try:
+            from scripts.epub_lint import lint
+            with tempfile.TemporaryDirectory() as d:
+                pp, ep = Path(d) / "in.pdf", Path(d) / "out.epub"
+                pp.write_bytes(pdf)
+                ep.write_bytes(epub_bytes)
+                flags = lint(str(pp), str(ep))
+            kinds = Counter(f.split()[0] for f in flags)
+            line = json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ref": ref, "pages": pages,
+                               "flags": dict(kinds), "where": [f.split(":")[0][:40] for f in flags[:8]]})
+            with LINT_LOG.open("a") as fh:
+                fh.write(line + "\n")
+        except Exception as e:  # a checker bug never touches the reader's download
+            print("lint failed:", repr(e)[:200])
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
     book = epub.EpubBook()
     book.set_title(_clean(title)[:120])
@@ -4666,6 +4698,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                       "The whole book is $5 at epub.ftak.net, converted on the spot.")])
 
         data = build_epub(chapters, safe_title, author[:120], doc_lang(doc))
+        _lint_later(raw, data, ref, npages)
         # ponytail: nothing stored, files die with request — matches their privacy pitch for free
         doc.close()
         return done(data, npages, "pages-preview" if cut_pages else "")
