@@ -1216,6 +1216,33 @@ def _edges(paras: list[str]) -> list[int]:
     return sorted(k)
 
 
+def _under_folio(paras: list[str], keys: set) -> int:
+    """Index of a "CHAPTER 1" running head under the page number at the top of the page, else -1."""
+    for j in (1, 2):
+        if j < len(paras) and all(FOLIO.fullmatch(p) for p in paras[:j]) and len(paras[j]) <= 50 \
+                and (m := HEAD_WORD.match(paras[j])) and m.group(1).lower() in keys:
+            return j
+    return -1
+
+
+def _chapter_heads(pages: list[str]) -> set:
+    """Head words ("chapter") whose line sits right under the page number on 3+ pages: there a
+    "CHAPTER 2" under a page number is the running head, whatever its number.
+
+    ponytail: _running_heads skips lines that start with "chapter" so real openers stay, but a
+    book whose left-page head is "22 / CHAPTER 1" then began a chapter on every left page, ~150
+    "CHAPTER 1" entries (Jon, Unpayable Debt, 11-21). A real opener has no page number above it."""
+    seen = Counter()
+    for txt in pages:
+        paras = _drop_caps(_page_paras(txt))[:3]
+        for j in (1, 2):
+            if j < len(paras) and all(FOLIO.fullmatch(p) for p in paras[:j]) \
+                    and HEAD_WORD.match(paras[j]) and len(paras[j]) <= 50:
+                seen[HEAD_WORD.match(paras[j]).group(1).lower()] += 1
+                break
+    return {k for k, c in seen.items() if c >= 3}
+
+
 def _running_heads(pages: list[str]) -> set:
     """Keys of short first/last paragraphs that repeat across pages: "మాయ 77", "24 AUTHOR NAME".
 
@@ -1324,6 +1351,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
     # ponytail: paragraphs = tesseract blank-line blocks, headings by keyword/CAPS — no layout model needed for prose
     chapters, cur = [], []
     heads = _running_heads(pages)
+    chapter_heads = _chapter_heads(pages)
     head_words = _head_words(pages)
     stories = _story_numbers(pages)
     letters = [c for c in "".join(pages[:: max(1, len(pages) // 40)]) if c.isalpha()]
@@ -1352,7 +1380,10 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
         placed = 0  # text paragraphs already taken from this page
         is_head = lambda q: len(q) <= 50 and (_head_key(q) in heads or _head_first(q) in heads
                                               or _mostly_head_words(q, head_words))
+        top = _under_folio(paras, chapter_heads)
         for j, para in enumerate(paras):
+            if j <= top:
+                continue  # page number(s) + a "CHAPTER 1" running head
             if j in edges and FOLIO.fullmatch(para) and any(
                     0 <= k < len(paras) and is_head(paras[k]) for k in (j - 1, j + 1)):
                 continue  # the page number beside the running head; "11" reads as "II" and was a chapter

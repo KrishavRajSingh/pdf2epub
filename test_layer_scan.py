@@ -95,6 +95,34 @@ def chapters():
     print("ok — scan chapters: heads, drop caps, folios, title page, ghosts")
 
 
+def chapter_running_head():
+    """Jon (email 11-21, Unpayable Debt, 328 p scan): left pages carry "22 / CHAPTER 1" as the
+    running head. Drive gives it as ["222", "CHAPTER 1", text] (page number read twice or with a
+    stray digit) and a line starting "CHAPTER" was never counted as a head, so every left page
+    began a chapter: ~150 "CHAPTER 1" entries. The real opener has no page number above it."""
+    body = ("the papers would not matter because then and there the law already held that the "
+            "enslaved person was property, whatever any document happened to say about it")
+    pages = [
+        'CHAPTER 1\n\n"Not even by the law here"',                       # opener page, title alone
+        f'"Not even by the law here"\n\n21\n\n{body}.',
+        f"222\n\nCHAPTER 1\n\n{body}.",                                   # folio misread, then head
+        f'"Not even by the law here"\n\n23\n\n{body}.',
+        f"24\n\nCHAPTER 1\n\n{body}.",
+        f"26\n\n26\n\nCHAPTER 1\n\n{body}.",                              # folio read twice
+        f'CHAPTER 2\n\n"a foreign language"\n\n{body}.',                  # opener with text below
+        f'"a foreign language"\n\n29\n\n{body}.',
+        f"30\n\n303\n\nCHAPTER 2\n\n{body}.",
+        f'"a foreign language"\n\n31\n\n{body}.',
+    ]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    assert len(chs) == 2 and all(h.startswith(("CHAPTER 1", "CHAPTER 2")) for h in heads), heads
+    text = " ".join(t for c in chs for k, t in c if k == "p")
+    assert "CHAPTER" not in text and "222" not in text and "303" not in text, text[:300]
+    print("ok — scan chapters: a CHAPTER N running head under the page number")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
+    chapter_running_head()
