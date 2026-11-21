@@ -1546,7 +1546,9 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
     items, toc, fig_no = [], [], 0
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
-        name = next((t for k, t in ch if k in ("h1", "h2", "s2", "s3")), f"ch{i+1}")
+        # an untitled opening part (cover, title page, dedication) is named after the book (11-21: "ch1")
+        name = next((t for k, t in ch if k in ("h1", "h2", "s2", "s3")),
+                    title if i == 0 and title.strip() else f"Part {i+1}")
         c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
         parts, sections = [], []
         for k, t in ch:

@@ -150,8 +150,20 @@ def contents_page_chapters():
     print("ok — scan chapters: the printed contents page decides the chapters")
 
 
+def untitled_front_name():
+    """The front matter before the first chapter has no heading; the menu showed "ch1"."""
+    import io, zipfile, re
+    z = zipfile.ZipFile(io.BytesIO(pdf2epub.build_epub([[("p", "cover")], [("h1", "Future Perfect"), ("p", "x")]],
+                                                       "Unpayable Debt", "")))
+    nav = next(z.read(n).decode() for n in z.namelist() if "nav" in n)
+    names = [re.sub(r"\s+", " ", a).strip() for a in re.findall(r"<a[^>]*>(.*?)</a>", nav, re.S)]
+    assert names == ["Unpayable Debt", "Future Perfect"], names
+    print("ok — untitled front matter is named after the book")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
     chapter_running_head()
     contents_page_chapters()
+    untitled_front_name()
