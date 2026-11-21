@@ -1278,9 +1278,9 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
     items, toc, fig_no = [], [], 0
     for i, ch in enumerate(chapters or [[("p", "empty")]]):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
-        name = next((t for k, t in ch if k in ("h1", "h2")), f"ch{i+1}")
+        name = next((t for k, t in ch if k in ("h1", "h2", "s2", "s3")), f"ch{i+1}")
         c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
-        parts = []
+        parts, sections = [], []
         for k, t in ch:
             if k == "fn":
                 continue
@@ -1305,6 +1305,10 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
                 parts.append(f"<h1>{html.escape(_clean(t))}</h1>")
             elif k == "h2":
                 parts.append(f"<h2>{html.escape(_clean(t))}</h2>")
+            elif k in ("s2", "s3"):  # a section from the PDF's own outline: anchored, listed in the contents
+                sid = f"s{len(sections) + 1}"
+                parts.append(f'<h{k[1]} id="{sid}">{html.escape(_clean(t))}</h{k[1]}>')
+                sections.append((int(k[1]), _clean(t)[:120], sid))
             else:
                 parts.append(f"<p>{html.escape(_clean(t))}</p>")
         notes = [t for k, t in ch if k == "fn"]
@@ -1316,7 +1320,19 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
         c.content = "".join(parts)
         book.add_item(c)
         items.append(c)
-        toc.append(c)
+        if sections:
+            kids = []
+            for lvl, t, sid in sections:
+                link = epub.Link(f"ch{i+1}.xhtml#{sid}", t, f"ch{i+1}-{sid}")
+                if lvl == 3 and kids:
+                    head, sub = kids[-1] if isinstance(kids[-1], tuple) else (kids[-1], [])
+                    kids[-1] = (head if isinstance(head, epub.Section) else
+                                epub.Section(head.title, href=head.href), sub + [link])
+                else:
+                    kids.append(link)
+            toc.append((epub.Section(_clean(name)[:120], href=f"ch{i+1}.xhtml"), kids))
+        else:
+            toc.append(c)
     book.toc = tuple(toc)
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
@@ -3626,6 +3642,13 @@ def _paragraphs(rows, bbox, ocr=False):
                     and trail > bw * 0.15 and abs(lead - trail) < bw * 0.12
                     and not SENT_END.search(txt))
         new_para = ocr and k > 0 and lb[0] - left > max(8, bw * 0.03) and SENT_END.search(rows[k - 1][0])
+        # ponytail: a list or verse set one item per line in one block ("Sadness / Weakness / Confusion",
+        # Paramattha 11-21) ran together as one paragraph. In a born-digital block a line that stops well
+        # short of the block's edge ended its line on purpose; the next one starts a new paragraph unless
+        # it carries on a word or a sentence in lowercase.
+        if not ocr and k > 0 and not new_para:
+            prev = rows[k - 1]
+            new_para = bx1 - prev[2][2] > bw * 0.2 and not prev[0].endswith("-") and not txt[:1].islower()
         if not groups or new_para or (k == 1 and groups[-1][3]):
             groups.append([lb[1], size, [txt], centered])
         else:
@@ -3760,8 +3783,12 @@ def _blocks(doc):
     # page before the article repeats its own title; they came out as two junk chapters.
     skip = max((k for k in range(min(3, len(doc))) if OFFPRINT.search(doc[k].get_text("text"))), default=-1)
     in_refs, ref = False, None  # inside a reference list: [page, y, size, lines] of the open entry
+    # ponytail: a printed contents page ("THE BODY<tab>19") points at page numbers an e-book does not
+    # have; with a bookmark outline the EPUB's own contents replaces it (Paramattha 11-21, 4 pages)
+    toc_pages = {k for k in range(min(15, len(doc))) if doc[k].get_text("text").count("\t") >= 5} \
+        if not ocr and _bookmarks(doc) else set()
     for i, page in enumerate(doc):
-        if i <= skip:
+        if i <= skip or i in toc_pages:
             continue
         if ocr and (i in junk or (i == 0 and len(page.get_text("text").split()) < 40)):
             if IA_NOTICE.search(page.get_text("text")):
@@ -3882,6 +3909,63 @@ def _suspect(chapters, pages: int) -> str:
     return ""
 
 
+def _bm_norm(t: str) -> str:
+    return re.sub(r"[^\w]", "", unicodedata.normalize("NFC", t or "").lower())
+
+
+def _bookmarks(doc) -> dict:
+    """All PDF bookmark levels as {page index: [[level, title, norm, used], ...]}; {} when none.
+
+    ponytail: Pages, Word and InDesign exports carry the author's own outline. Paramattha (11-21)
+    set its 86 sub-headings at 13pt on 12pt body, under the size cut, so they came out as plain
+    paragraphs and the contents listed 12 of 110 entries. The outline says which lines are headings.
+    """
+    try:
+        toc = [(lvl, _clean(t).strip(), p - 1) for lvl, t, p, *_ in doc.get_toc() if t.strip() and p >= 1]
+    except Exception:
+        return {}
+    pages = Counter(p for _, _, p in toc)
+    # a bookmark per page ("1", "2", scan page lists) is navigation, not a heading outline
+    if not toc or len(pages) > max(30, len(doc) * 0.8) or sum(len(_bm_norm(t)) <= 3 for _, t, _ in toc) > len(toc) / 2:
+        return {}
+    out = {}
+    for lvl, t, p in toc:
+        out.setdefault(p, []).append([min(lvl, 3), t, _bm_norm(t), False])
+    return out
+
+
+def _bm_match(bms: dict, page: int, t: str):
+    """The unused bookmark on this page (or the next/previous) that this block's text is, else None."""
+    n = _bm_norm(t)
+    if len(n) < 3:
+        return None
+    for p in (page, page + 1, page - 1):
+        for e in bms.get(p, []):
+            if e[3]:
+                continue
+            if n == e[2] or (e[2].startswith(n) and len(n) >= 0.6 * len(e[2])) \
+                    or (n.startswith(e[2]) and len(e[2]) >= 6 and len(n) <= len(e[2]) + 12):
+                return e
+    return None
+
+
+def _bm_join(blocks, bms: dict):
+    """Join a heading printed on two lines that PDF split into two blocks ("PART I: THE ES-" + "SENCE OF
+    EXISTENCE", "DREAMS, ... BELOW THE" + "THRESHOLD OF CONSCIOUSNESS") when together they are one bookmark."""
+    out = []
+    for b in blocks:
+        if out and b[2] > 0 and out[-1][2] > 0 and b[0] == out[-1][0] and isinstance(b[3], str) \
+                and isinstance(out[-1][3], str) and len(out[-1][3]) < 120 and len(b[3]) < 120:
+            a = out[-1][3]
+            glued = a[:-1] + b[3] if re.search(r"[A-Za-z]-$", a) else a + " " + b[3]
+            alone, both = _bm_match(bms, b[0], a), _bm_match(bms, b[0], glued)
+            if both and (not alone or len(_bm_norm(glued)) <= len(both[2]) + 2 and _bm_norm(a) != alone[2]):
+                out[-1] = (out[-1][0], out[-1][1], max(out[-1][2], b[2]), glued)
+                continue
+        out.append(b)
+    return out
+
+
 def _structure(blocks, doc):
     """blocks -> chapters: [[(kind, text), ...], ...]. shared by /convert and the landing proof.
 
@@ -3966,6 +4050,9 @@ def _structure(blocks, doc):
 
     chapters, cur, cur_notes = [], [], []
     ocr = _ocr_layer(doc)
+    bms = {} if ocr else _bookmarks(doc)
+    if bms:
+        blocks = _bm_join(list(blocks), bms)
     list_item = re.compile(r"^(?:[-–•·*▪◦]|\d{1,3}[.)]|#)\s")
     # "Chapter 1 — Childhood" in body type; OCR reads the 1 as | or l ("Chapter | - Childhood")
     ch_title = re.compile(r"^(chapter|part)\s+(\d{1,3}|[ivxlc]{1,7}|\|)\s*[—–:.\-]+\s*\S.{0,80}$", re.I)
@@ -4046,6 +4133,17 @@ def _structure(blocks, doc):
         # and the repeated-header counter misses it; it sits at the top edge in smaller type.
         if y < head_cut and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
             continue
+        bm = _bm_match(bms, pno, t) if bms and len(t) < 160 else None
+        if bm:
+            # the author's outline: level 1 starts a chapter, levels 2-3 are its sections ("s2", "s3",
+            # headings that also get a contents entry)
+            bm[3] = True
+            if bm[0] == 1:
+                flush()
+                cur.append(("h1", t))
+            else:
+                cur.append((f"s{bm[0]}", t))
+            continue
         # shortcut: marker + small font + bottom half is a heuristic; a numbered list set in
         # smaller type at the foot of a page can be moved into Notes. upgrade to a ruled-off
         # / superscript-marker check if that shows up in real books.
@@ -4100,6 +4198,20 @@ def _structure(blocks, doc):
         else:
             cur.append(("p", t))
     flush()
+    # ponytail: a heading printed on two lines can come out as heading "... THE ES-" plus a caps scrap
+    # "SENCE" in body type (Paramattha 11-21). A heading ending mid-word takes the scrap back.
+    for ch in chapters:
+        k = 0
+        while k + 1 < len(ch):
+            kind, t = ch[k]
+            nk, nt = ch[k + 1]
+            caps_line = kind == "p" and isinstance(t, str) and len(t) < 80 and t.upper() == t
+            if (kind in ("h1", "h2", "s2", "s3") or caps_line) and isinstance(t, str) and re.search(r"[A-Z]-$", t) \
+                    and nk == "p" and isinstance(nt, str) and len(nt) < 60 and nt.upper() == nt:
+                ch[k] = (kind, t[:-1] + nt)
+                del ch[k + 1]
+                continue
+            k += 1
     # a few words above the title ("OPEN FORUM", a journal's section label) were a chapter of
     # their own; put them under the title instead
     if len(chapters) > 1 and all(k == "p" for k, _ in chapters[0]) \

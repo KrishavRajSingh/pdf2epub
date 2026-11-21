@@ -85,3 +85,8 @@ def test_clean_book_passes(pdf, tmp_path):
 def test_each_defect_is_flagged(pdf, tmp_path, kind, change):
     args = {"chapters": GOOD, **change}
     assert kind in kinds(pdf, _epub(tmp_path / f"{kind}.epub", **args))
+
+
+if __name__ == "__main__":
+    sys_exit = pytest.main(["-q", __file__])
+    raise SystemExit(sys_exit)
