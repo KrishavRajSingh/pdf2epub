@@ -1285,7 +1285,7 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
             if k == "fn":
                 continue
             if k == "img":
-                png, cap = t if isinstance(t, tuple) else (t, "")
+                png, cap, em = (t + (0,))[:3] if isinstance(t, tuple) else (t, "", 0)
                 fig_no += 1
                 jpeg = png[:2] == b"\xff\xd8"
                 fn = f"fig{fig_no}.{'jpg' if jpeg else 'png'}"
@@ -1293,9 +1293,14 @@ def build_epub(chapters, title: str, author: str, lang: str = "en") -> bytes:
                                             media_type="image/jpeg" if jpeg else "image/png", content=png))
                 cap_html = (f'<figcaption style="font-size:.9em;margin-top:.4em">'
                             f'{html.escape(_clean(cap))}</figcaption>') if cap else ""
-                parts.append(f'<figure style="text-align:center;margin:1.2em 0">'
-                             f'<img src="{fn}" style="max-width:100%;height:auto" '
-                             f'alt="Figure from the book"/>{cap_html}</figure>')
+                if em:  # a display equation: text-sized, not stretched to the screen
+                    parts.append(f'<div style="text-align:center;margin:.6em 0">'
+                                 f'<img src="{fn}" style="width:{em}em;max-width:100%;height:auto" '
+                                 f'alt="Equation"/></div>')
+                else:
+                    parts.append(f'<figure style="text-align:center;margin:1.2em 0">'
+                                 f'<img src="{fn}" style="max-width:100%;height:auto" '
+                                 f'alt="Figure from the book"/>{cap_html}</figure>')
             elif k == "h1":
                 parts.append(f"<h1>{html.escape(_clean(t))}</h1>")
             elif k == "h2":
@@ -2938,9 +2943,193 @@ def _span_text(s):
     # ponytail: flattening spans loses the superscript flag, so a footnote marker reads as a
     # normal digit glued to the sentence ("argument.12"). unicode keeps it visibly raised.
     t = s["text"]
-    if s["flags"] & 1 and t.strip().isdigit() and len(t.strip()) <= 3:
+    # in a math font a raised or lowered digit is an index (b44, P3,1), not a note marker
+    if s["flags"] & 1 and t.strip().isdigit() and len(t.strip()) <= 3 and not MATH_FONT.search(s.get("font", "")):
         return t.translate(SUP)
     return t
+
+
+# Math in papers. ponytail (11-19 lead, two papers "did not convert well"): a display equation
+# is a 2D layout (fractions, sums, sub- and superscripts) that text can't hold, and old journal
+# PDFs draw their symbols with private "Pi" fonts whose letters mean other glyphs.
+MATH_FONT = re.compile(r"Math|Pi\b|Pi-|Sym|CMMI|CMSY|CMEX|MSAM|MSBM|MTMI|MTSY|MTEX|Euclid|rsfs", re.I)
+# 1990s Elsevier (Acrobat Distiller) Pi fonts: Times letters stand for the math glyphs.
+# Read off a 1999 Wear paper: "zs0" is z=0, "Ž i, j ." is (i, j), "´" is epsilon.
+PI_MAPS = {
+    "SizedSym": str.maketrans({"Ž": "(", ".": ")", "ž": "(", "/": ")", "Ý": "Σ", "Ł": "Π", "H": "∫"}),
+    "ScienceTypeCustomPi-No5T": str.maketrans({"y": "−", "s": "=", "w": "[", "x": "]", "q": "+",
+                                               "r": "/", "g": "∈", "f": "∉", "F": "≤", "G": "≥"}),
+    "ScienceTypeCustomPi-No4T": str.maketrans({")": "*", "f": "∉"}),
+    "ScienceTypeCustomPi-No3T": str.maketrans({"=": "×", "<": "|", "X": "′", "-": "<", ")": ">",
+                                               "/": "≠", ";": "≈", "'": "≡"}),
+    "ScienceTypeCustomPi-No2T": str.maketrans({"§": "←"}),
+    "MathematicalPi-One": str.maketrans({"´": "ε", "a": "α", "b": "β", "d": "δ", "m": "μ", "n": "ν",
+                                         "p": "π", "s": "σ", "t": "τ", ";": "∀"}),
+    "ElsevierSpecialPi": str.maketrans({"Õ": "v"}),
+    "Universal-NewswithCommPi": str.maketrans({"q": "©", "B": "∅"}),
+}
+# LaTeX papers built with a wrong input encoding: UTF-8 quote bytes read as another code page
+MOJIBAKE = (("âĂŹ", "’"), ("âĂĲ", "“"), ("âĂİ", "”"), ("âĂŞ", "–"), ("âĂŤ", "—"), ("âĂŸ", "‘"))
+
+
+def _math_char(ch: str) -> str:
+    # ponytail: STIX/Cambria math italics live at U+1D4xx; some PDF text layers drop the top bit,
+    # so "x" came out as Korean "푥" (U+D465). Put the bit back and take the plain letter.
+    o = ord(ch)
+    if 0xD400 <= o <= 0xD7FF:
+        return unicodedata.normalize("NFKC", chr(o + 0x10000))
+    return unicodedata.normalize("NFKC", ch) if 0x1D400 <= o <= 0x1D7FF else ch
+
+
+def _fix_math_span(sp):
+    f = sp["font"]
+    pi = next((m for k, m in PI_MAPS.items() if f.split("+")[-1].startswith(k)), None)
+    if pi:
+        sp["text"] = sp["text"].translate(pi)
+    elif MATH_FONT.search(f):
+        sp["text"] = "".join(_math_char(c) for c in sp["text"])
+    if "âĂ" in sp["text"]:
+        for a, b in MOJIBAKE:
+            sp["text"] = sp["text"].replace(a, b)
+
+
+def _merge_bands(b):
+    """Lines of one visual line, rebuilt in x order, for blocks that hold math.
+
+    ponytail: a Distiller paper put each big parenthesis and each subscript on a PDF line of its
+    own, so "(i, j)" came out as "Ž / . / i, j" with the brackets a line above the words.
+    """
+    lines = b.get("lines", [])
+    if len(lines) < 2 or not any(MATH_FONT.search(s["font"]) for ln in lines for s in ln["spans"]):
+        return
+    bands = []
+    for ln in sorted(lines, key=lambda l: l["bbox"][1]):
+        x0, y0, x1, y1 = ln["bbox"]
+        h, cy = max(y1 - y0, 0.1), (y0 + y1) / 2
+        for bd in bands:
+            by0, by1 = bd["bbox"][1], bd["bbox"][3]
+            bh = max(by1 - by0, 0.1)
+            if by0 <= cy <= by1 and max(h, bh) / min(h, bh) <= 2.2:
+                bd["parts"].append(ln)
+                bd["bbox"] = [min(bd["bbox"][0], x0), min(by0, y0), max(bd["bbox"][2], x1), max(by1, y1)]
+                break
+        else:
+            bands.append({"parts": [ln], "bbox": [x0, y0, x1, y1]})
+    out = []
+    for bd in bands:
+        spans = sorted((s for ln in bd["parts"] for s in ln["spans"]), key=lambda s: s["bbox"][0])
+        merged, last_x1 = [], None
+        for s in spans:
+            if last_x1 is not None and s["bbox"][0] - last_x1 > s["size"] * 0.2 \
+                    and merged and not merged[-1]["text"].endswith((" ", "(", "[", "{")) \
+                    and not s["text"].startswith((" ", ")", "]", "}", ",", ".", ";", ":")):
+                merged.append({**s, "text": " "})
+            merged.append(s)
+            last_x1 = max(last_x1 or s["bbox"][2], s["bbox"][2])
+        out.append({**bd["parts"][0], "spans": merged, "bbox": tuple(bd["bbox"])})
+    b["lines"] = out
+
+
+def _line_size(line):
+    # a big bracket or sum sign drawn in a math font is not a heading-sized line
+    sizes = [s["size"] for s in line["spans"] if s["text"].strip() and not MATH_FONT.search(s["font"])]
+    return max(sizes or [s["size"] for s in line["spans"]])
+
+
+def _eq_image(page, r, body):
+    """(picture, "", width in em): sized in the book to match the text around it."""
+    clip = (r + (-2, -2, 2, 2)) & page.rect
+    pm = page.get_pixmap(matrix=pymupdf.Matrix(EQ_SCALE, EQ_SCALE), clip=clip)
+    return _fig_bytes(pm), "", round(clip.width / max(body, 1), 1)
+
+
+EQ_NO = re.compile(r"^\(\d{1,3}[a-z]?\)$")
+PROSE_WORD = re.compile(r"[A-Za-z]{3,}")
+MATH_NAMES = {"sin", "cos", "tan", "exp", "log", "sinh", "cosh", "tanh", "max", "min", "lim", "det", "arg"}
+MATH_SYM = set("=≤≥<>∑∫Σ∏√∂∇±×≈+−←∈∉≠≡")
+EQ_SCALE = 3
+
+
+def _equations(raw, page_h):
+    """Display equations on a page: [(rect, {block index, ...}), ...].
+
+    A block is an equation when its text is mostly not words and it draws math (a math font or
+    an "="); touching blocks join it (LaTeX writes one equation as a dozen small blocks), so do
+    a short leftover like a subscript and the "(12)" number at the right margin. A math block
+    that sits on a prose line is inline math and stays text.
+    """
+    info = {}
+    for k, b in enumerate(raw):
+        if b.get("type") != 0 or b["bbox"][1] < 50 or b["bbox"][3] > page_h - 50:
+            continue
+        spans = [s for ln in b.get("lines", []) for s in ln["spans"]]
+        chars = sum(len(s["text"].replace(" ", "")) for s in spans)
+        if not chars:
+            continue
+        prose = sum(len(w) for s in spans if not MATH_FONT.search(s["font"])
+                    for w in PROSE_WORD.findall(s["text"]) if w.lower() not in MATH_NAMES)
+        mathy = sum(len(s["text"].strip()) for s in spans if MATH_FONT.search(s["font"]))
+        text = "".join(s["text"] for s in spans).strip()
+        info[k] = (prose, chars, mathy, text)
+    # a prose line with a bracket in a Pi font ("was made in Ref. [3]") is not an equation: it
+    # needs a relation or an operator, or nothing but math type
+    seeds = {k for k, (prose, chars, mathy, text) in info.items()
+             if prose < chars * 0.25 and prose < 12 and not EQ_NO.match(text)
+             and (MATH_SYM & set(text) or (mathy >= 2 and prose == 0))}
+    prose_rects = [pymupdf.Rect(raw[k]["bbox"]) for k, (prose, *_) in info.items() if k not in seeds and prose >= 12]
+
+    def inline(r):
+        return any(min(r.y1, p.y1) - max(r.y0, p.y0) > 0.3 * min(r.height, p.height)
+                   and min(r.x1, p.x1) - max(r.x0, p.x0) > -6 for p in prose_rects)
+
+    clusters = []
+    for k in sorted(seeds, key=lambda k: raw[k]["bbox"][1]):
+        r = pymupdf.Rect(raw[k]["bbox"])
+        for c in clusters:
+            if (c[0] + (-4, -4, 4, 4)).intersects(r):
+                c[0] |= r
+                c[1].add(k)
+                break
+        else:
+            clusters.append([r, {k}])
+    _merge_touching(clusters)
+    out = []
+    for r, ks in clusters:
+        if inline(r):
+            continue
+        grew = True
+        while grew:  # subscripts, limits and the equation number
+            grew = False
+            for k, (prose, chars, mathy, text) in info.items():
+                if k in ks or k in seeds:
+                    continue
+                kr = pymupdf.Rect(raw[k]["bbox"])
+                small = prose == 0 and chars <= 12
+                number = EQ_NO.match(text) and min(kr.y1, r.y1) - max(kr.y0, r.y0) > 0
+                if (small and (r + (-4, -4, 4, 4)).intersects(kr)) or number:
+                    r |= kr
+                    ks.add(k)
+                    grew = True
+        out.append([r, ks])
+    _merge_touching(out)  # a piece grown into one cluster can touch another
+    return [(r, ks) for r, ks in out]
+
+
+def _merge_touching(clusters):
+    """Join [rect, keys] clusters that touch, in place: one equation drawn as side-by-side parts."""
+    merged = True
+    while merged:
+        merged = False
+        for a in range(len(clusters)):
+            for b in range(a + 1, len(clusters)):
+                if (clusters[a][0] + (-4, -4, 4, 4)).intersects(clusters[b][0]):
+                    clusters[a][0] |= clusters[b][0]
+                    clusters[a][1] |= clusters[b][1]
+                    del clusters[b]
+                    merged = True
+                    break
+            if merged:
+                break
 
 
 FIG_SCALE = 3  # 3x keeps 4pt map labels readable; this book's 23 figures add ~6MB
@@ -2999,6 +3188,24 @@ def _figure_rect(page, blocks, body):
     # sits inside the box, keep the text and skip the picture (math books hit this hard). Short
     # map labels do not count; a paragraph does. The 9pt floor catches 9.5pt exercise text in
     # books whose main body size is 10.5pt.
+    if _body_chars_in(u, blocks, body) >= 80:
+        return None
+    return _with_labels(u, blocks) & page.mediabox
+
+
+def _with_labels(u, blocks):
+    # ponytail: sub-captions ("(a) Analytical and numerical ...") are centred under each panel
+    # and run wider than the plot, so the clip cut their first letters off (11-19 lead's paper)
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        r = pymupdf.Rect(b["bbox"])
+        if u.contains(pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)):
+            u = u | r
+    return u
+
+
+def _body_chars_in(u, blocks, body) -> int:
     min_body = min(body * 0.95, 9.0) if body else 9.0
     body_chars = 0
     for b in blocks:
@@ -3012,9 +3219,72 @@ def _figure_rect(page, blocks, body):
             text = "".join(s["text"] for s in spans).strip()
             if len(text) >= 10 and max(s["size"] for s in spans) >= min_body:
                 body_chars += len(text)
-    if body_chars >= 80:
-        return None
-    return u & page.mediabox
+    return body_chars
+
+
+def _figure_rects(page, blocks, body) -> list:
+    """Clip rects of the figures on a page, top first.
+
+    ponytail: a journal page with two figures and prose between them (1999 paper, figs 2-5)
+    failed the one-box test, since the union held the prose, and both figures were dropped.
+    Then each embedded picture is its own figure.
+    """
+    u = _figure_rect(page, blocks, body)
+    if u:
+        return [u]
+    area = page.rect.width * page.rect.height
+    out = []
+    for info in page.get_image_info():
+        r = pymupdf.Rect(info["bbox"]) & page.mediabox
+        if not 0.03 < (r.width * r.height) / area <= 0.8 or _body_chars_in(r, blocks, body) >= 80:
+            continue
+        if any(o.contains(r) for o in out):
+            continue
+        out = [o for o in out if not r.contains(o)] + [_with_labels(r, blocks) & page.mediabox]
+    return sorted(out, key=lambda r: (r.y0, r.x0)) if len(out) > 1 else []
+
+
+def _fig_caption(page, raw, fig_page):
+    """(caption, its rect on the page) under a figure, or ("", None).
+
+    Put a "Map 4.1 ..." caption under its picture. PDF block order is not y-sorted,
+    so without this the caption can land a paragraph after the map. Captions on
+    landscape pages sit beside the figure in PDF space, so compare on the page.
+    """
+    cap, cap_page = "", None
+    for cb in raw:
+        if cb.get("type") != 0:
+            continue
+        cr = pymupdf.Rect(cb["bbox"])
+        cr_page = _page_rect(page, cr)
+        if not (fig_page.y1 - 2 <= cr_page.y0 <= fig_page.y1 + 35):
+            continue
+        lines = ["".join(_span_text(s) for s in line["spans"]).strip()
+                 for line in cb.get("lines", [])]
+        txt = _join([x for x in lines if x])
+        if CAPTION_RE.match(txt):
+            cap, cap_page = txt, cr_page
+            # ponytail: a journal caption runs on in blocks of its own under the first
+            # line; they were glued into the body paragraph before the figure (1999 paper)
+            csize = max((sp["size"] for ln in cb.get("lines", []) for sp in ln["spans"]), default=0)
+            more = True
+            while more:
+                more = False
+                for nb in raw:
+                    if nb.get("type") != 0 or nb is cb:
+                        continue
+                    nr = _page_rect(page, pymupdf.Rect(nb["bbox"]))
+                    nsize = max((sp["size"] for ln in nb.get("lines", []) for sp in ln["spans"]), default=99)
+                    ntxt = _join(["".join(_span_text(sp) for sp in ln["spans"]).strip()
+                                  for ln in nb.get("lines", [])])
+                    if (cap_page.y1 - 2 <= nr.y0 <= cap_page.y1 + csize * 0.8 and nsize <= csize + 0.3
+                            and min(nr.x1, cap_page.x1) - max(nr.x0, cap_page.x0) > 0
+                            and ntxt and not CAPTION_RE.match(ntxt)):
+                        cap, cap_page = _join([cap, ntxt]), cap_page | nr
+                        more = True
+                        break
+            break
+    return cap, cap_page
 
 
 PHOTO_CELL = 4  # px at 36 dpi, about one printed line tall
@@ -3507,48 +3777,50 @@ def _blocks(doc):
         for b in raw:
             for line in b.get("lines", []):
                 _fix_line(line, ligmap)
-        fig = _figure_rect(page, raw, body)
-        fig_page = _page_rect(page, fig) if fig else None
+                if not ocr:
+                    for sp in line["spans"]:
+                        _fix_math_span(sp)
+            if not ocr:
+                _merge_bands(b)
+        figs = []
+        for fr in _figure_rects(page, raw, body):
+            fp = _page_rect(page, fr)
+            cap, cap_page = _fig_caption(page, raw, fp)
+            figs.append({"r": fr, "page": fp, "cap": cap, "cap_page": cap_page, "done": False})
+        fig = figs[0]["r"] if figs else None
         xs = [ln["bbox"][0] for b in raw if b.get("type") == 0 for ln in b.get("lines", [])]
-        cap, cap_page = "", None
-        if fig:
-            # Put a "Map 4.1 ..." caption under its picture. PDF block order is not y-sorted,
-            # so without this the caption can land a paragraph after the map. Captions on
-            # landscape pages sit beside the figure in PDF space, so compare on the page.
-            for cb in raw:
-                if cb.get("type") != 0:
-                    continue
-                cr = pymupdf.Rect(cb["bbox"])
-                cr_page = _page_rect(page, cr)
-                if not (fig_page.y1 - 2 <= cr_page.y0 <= fig_page.y1 + 35):
-                    continue
-                lines = ["".join(_span_text(s) for s in line["spans"]).strip()
-                         for line in cb.get("lines", [])]
-                txt = _join([x for x in lines if x])
-                if CAPTION_RE.match(txt):
-                    cap, cap_page = txt, cr_page
-                    break
         photos = _scan_photos(page, raw, known) if ocr and not fig and not page.rotation else []
         photo_rects = list(photos)
-        fig_done = False
-        for b in raw:
+        eqs = [] if ocr or page.rotation else _equations(raw, page.rect.height)
+        eqs = [e for e in eqs if not any(e[0].intersects(f["r"]) for f in figs)]  # labels stay in the figure
+        eq_blocks = {k for _, ks in eqs for k in ks}
+        eq_todo = sorted(eqs, key=lambda e: (e[0].y0, e[0].x0))
+        for bi, b in enumerate(raw):
             while photos and photos[0].y0 <= b["bbox"][1]:
                 ph = photos.pop(0)
                 yield i, ph.y0, -1.0, (_fig_bytes(page.get_pixmap(dpi=SCAN_FIG_DPI, clip=ph)), "")
+            if bi in eq_blocks:
+                hit = next((e for e in eq_todo if bi in e[1]), None)
+                if hit:  # the equation goes out where its first block was
+                    eq_todo.remove(hit)
+                    yield i, hit[0].y0, -1.0, _eq_image(page, hit[0], body)
+                continue
             if photo_rects and b.get("type") == 0 and any(
                     p.contains(pymupdf.Point((b["bbox"][0] + b["bbox"][2]) / 2, (b["bbox"][1] + b["bbox"][3]) / 2))
                     for p in photo_rects) and not _wordy_line(
                     " ".join(s["text"] for ln in b.get("lines", []) for s in ln["spans"]), known):
                 continue  # OCR read the photo itself as letters
-            if fig and not fig_done and b["bbox"][1] > fig.y1:
-                pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
-                yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
-                fig_done = True
-            if fig:
+            for f in figs:
+                if not f["done"] and b["bbox"][1] > f["r"].y1:
+                    pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=f["page"])
+                    yield i, f["r"].y0, -1.0, (_fig_bytes(pm), f["cap"])
+                    f["done"] = True
+            if figs:
                 r = pymupdf.Rect(b["bbox"])
                 center = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
                 center = center * page.rotation_matrix if page.rotation else center
-                if fig_page.contains(center) or (cap_page and cap_page.contains(center)):
+                if any(f["page"].contains(center) or (f["cap_page"] and f["cap_page"].contains(center))
+                       for f in figs):
                     continue  # labels and caption are baked into the figure or its figcaption
             if b.get("type") != 0:
                 continue
@@ -3556,7 +3828,7 @@ def _blocks(doc):
             for line in [] if ocr else b.get("lines", []):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if txt:
-                    rows.append((txt, max(s["size"] for s in line["spans"]), line["bbox"]))
+                    rows.append((txt, _line_size(line), line["bbox"]))
             if not rows:
                 continue
             edge = b["bbox"][3] < 60 or b["bbox"][1] > page.rect.height - 60  # running head/foot
@@ -3584,9 +3856,10 @@ def _blocks(doc):
                 yield i, y0, round(size, 1), _join(lines)
             if REFS_HEAD.fullmatch(" ".join(r[0] for r in rows)):
                 in_refs = True
-        if fig and not fig_done:
-            pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=fig_page)
-            yield i, fig.y0, -1.0, (_fig_bytes(pm), cap)
+        for f in figs:
+            if not f["done"]:
+                pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=f["page"])
+                yield i, f["r"].y0, -1.0, (_fig_bytes(pm), f["cap"])
         for ph in photos:
             yield i, ph.y0, -1.0, (_fig_bytes(page.get_pixmap(dpi=SCAN_FIG_DPI, clip=ph)), "")
     if ref:
@@ -3666,6 +3939,13 @@ def _structure(blocks, doc):
     n = len(doc)
     # ponytail: c >= 2, or a one-page PDF loses its title as a 'repeated' header (reddit 11-06)
     banned = {t for t, c in list(tops.items()) + list(bots.items()) if c >= 2 and c > n * 0.5}
+    # ponytail: "Preprint submitted to Elsevier Page 2 of 16" differs on every page by its
+    # numbers, so the exact count missed it and it was glued into a paragraph running across
+    # the page break (11-19 lead). Same line once the numbers go = the page footer.
+    digits = lambda t: re.sub(r"\d+", "#", t)
+    foot_keys = Counter(digits(t) for p, y, sz, t in blocks if y > ph - 60 and sz > 0 and len(t) < 160)
+    banned |= {t for p, y, sz, t in blocks if y > ph - 60 and sz > 0 and re.search(r"\d", t)
+               and re.search(r"[A-Za-z]{3}", t) and foot_keys[digits(t)] >= 3 and foot_keys[digits(t)] > n * 0.5}
     # ponytail: most books alternate running heads, the book title on left pages and the chapter
     # title on right ones, so neither is on half the pages; an OCR scan kept "SLOWLY BECOMING" /
     # "OF WATER AND THE SPIRIT" as headings on every page (reddit 11-18). A short line at the top

@@ -60,20 +60,38 @@ def audit(path: str) -> list[str]:
     heads = [t for k, t in items if k in ("h1", "h2")]
     for b in text:
         if b[3] in heads and abs(b[2] - body) < 0.3 and not re.match(
-                r"(chapter|part|\d+(\.\d+)*\s|references|bibliography|notes|appendix|abstract)", b[3], re.I):
+                r"(chapter|part|\d+(\.\d+)*\s|references|bibliography|notes|appendix|abstract|acknowledge?ments?)", b[3], re.I):
             flags.append(f"HEAD? body-size heading: {b[3][:90]}")
     # every printed line must reach the book, in its words and their order. Drop the first and
     # last word (hyphen splits at line ends), skip lines repeated on 3+ pages (running heads).
     # letters only: note markers print as "1" in the PDF and "¹" in the book
     seq = lambda s: " ".join(w.lower() for w in re.findall(r"[^\W\d_]+", re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹\u200b]", "", s)))
-    book = seq(" ".join(t for _, t in items))
+    caps = [t[1] for ch in chapters for k, t in ch if k == "img" and isinstance(t, tuple) and t[1]]
+    book = seq(" ".join([t for _, t in items] + caps))  # figure captions are in the book too
     seen = Counter()
     lines = []
     cover = max((k for k in range(min(3, len(doc))) if app.OFFPRINT.search(doc[k].get_text("text"))), default=-1)
     for pg in doc:
         if pg.number <= cover:
             continue  # publisher offprint cover + notice pages are dropped on purpose
-        for b in pg.get_text("dict")["blocks"]:
+        raw = pg.get_text("dict")["blocks"]
+        for b in raw:  # the same span repairs the pipeline makes (ligatures, math fonts)
+            for ln in b.get("lines", []):
+                for sp in ln["spans"]:
+                    sp["text"] = sp["text"].translate(app.PRESENTATION_LIGS)
+                    if not ocr:
+                        app._fix_math_span(sp)
+            if not ocr:
+                app._merge_bands(b)
+        # display equations go into the book as pictures, their lines are not text there
+        eq = set() if ocr else {k for _, ks in app._equations(raw, pg.rect.height) for k in ks}
+        # labels and sub-captions inside a figure are part of its picture
+        figs = [] if ocr else app._figure_rects(pg, raw, app._body_size(doc))
+        eq |= {k for k, b in enumerate(raw) if any(f.contains(pymupdf.Point(
+            (b["bbox"][0] + b["bbox"][2]) / 2, (b["bbox"][1] + b["bbox"][3]) / 2)) for f in figs)}
+        for k, b in enumerate(raw):
+            if k in eq:
+                continue
             for ln in b.get("lines", []):
                 t = "".join(s["text"] for s in ln["spans"]).strip()
                 if len(t) >= 25 and not re.match(r"https?://doi\.org/|Publisher’s Note|jurisdictional claims", t):
@@ -84,7 +102,9 @@ def audit(path: str) -> list[str]:
     for t in gone[:15]:
         flags.append(f"GONE printed line not in the book: {t[:90]}")
     W = lambda s: Counter(w.lower() for w in re.findall(r"[A-Za-z]{4,}", s))
-    src_w, out_w = W(" ".join(b[3] for b in text)), W(" ".join(t for _, t in items))
+    # page-edge lines are running heads and footers, dropped on purpose
+    src_w = W(" ".join(b[3] for b in text if 60 <= b[1] <= doc[b[0]].rect.height - 60))
+    out_w = W(" ".join(t for _, t in items))
     lost = sum(max(0, src_w[w] - out_w[w]) for w in src_w)
     banned = sum(src_w[w] for w in src_w if out_w[w] == 0)  # repeated heads/watermarks never reach the book
     if lost - banned > max(20, sum(src_w.values()) * 0.01):

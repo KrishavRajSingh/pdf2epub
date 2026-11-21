@@ -538,7 +538,33 @@ def make_paper():
 # as KNOWN instead of failing. When one goes away, the run says so: drop it from known.
 # Local runs have no calibre (it is only in the Railway image), so "calibre" means the site
 # would serve an image-only EPUB from it.
+def make_math_paper():
+    """Preprint with display equations (11-19 lead, two papers "did not convert well"): equations
+    in a math font with a number at the right margin, a footer whose page number changes, and a
+    page with two figures and prose between them (a 1999 journal paper lost 4 of its 6 figures)."""
+    d = _doc()
+    pic = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 80), 0)
+    pic.set_rect(pic.irect, (40, 90, 160))
+    for k in range(3):
+        pg = d.new_page()
+        if k == 2:
+            pg.insert_image(pymupdf.Rect(100, 60, 500, 200), pixmap=pic)
+            pg.insert_textbox(pymupdf.Rect(72, 215, 520, 400), PROSE * 3, fontsize=10)
+            pg.insert_image(pymupdf.Rect(100, 420, 500, 560), pixmap=pic)
+            pg.insert_textbox(pymupdf.Rect(72, 580, 520, 780), PROSE * 2 + "and the paper ends", fontsize=10)
+        else:
+            pg.insert_textbox(pymupdf.Rect(72, 72, 520, 260), PROSE * 4, fontsize=10)
+            pg.insert_text((180, 290), "a = b + g", fontname="symb", fontsize=12)
+            pg.insert_text((490, 290), f"({k + 1})", fontsize=10)
+            pg.insert_textbox(pymupdf.Rect(72, 320, 520, 790), PROSE * 9 + "and so the sentence runs on to", fontsize=10)
+        pg.insert_text((72, 815), f"Smith and Jones: Preprint submitted to Elsevier Page {k + 1} of 3", fontsize=8)
+    return d
+
+
 CASES = {
+    # 11-19 lead: equations as pictures, footer "Page N of M" gone, both figures on page 3 kept
+    "math_paper": (make_math_paper, {"path": "text", "has": ["clocks were striking", "and the paper ends"],
+                                     "hasnt": ["Preprint submitted", "a = b + g", "α = β"], "imgs": 4}),
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
                            "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),

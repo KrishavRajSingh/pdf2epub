@@ -1,4 +1,12 @@
 {
+ "math_paper": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 6,
+  "imgs": 4,
+  "words": 793
+ },
  "novel": {
   "path": "text",
   "chapters": 2,
