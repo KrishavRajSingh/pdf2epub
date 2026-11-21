@@ -1243,6 +1243,44 @@ def _chapter_heads(pages: list[str]) -> set:
     return {k for k, c in seen.items() if c >= 3}
 
 
+def _same_title(para: str, title: str) -> bool:
+    """A top line that repeats the chapter already open ("CHAPTER 1" under 'CHAPTER 1 "Not even by
+    the law here"', "BIBLIOGRAPHY" on every page of the bibliography) is its running head.
+
+    ponytail: back matter runs 3-10 pages, too few for _running_heads' 1-in-10 count, so every page
+    of an index became an INDEX chapter (Jon, Unpayable Debt, 11-21). One stray leading letter is
+    allowed: Drive read a mark beside the head as "GCHAPTER 1". Two chapters in a row never share
+    a title, so the check needs no count."""
+    a, b = _squash(para), _squash(title)
+    if len(a) < 5 or not b:
+        return False
+    return b.startswith(a) or b.startswith(a[1:]) and len(a) > 6
+
+
+CONTENTS_HEAD = re.compile(r"(table of )?contents", re.I)
+
+
+def _contents_keys(pages: list[str]) -> set:
+    """Entries of the printed contents page ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"),
+    squashed to letters and digits; empty when the book has none or it lists under 3 entries."""
+    got = []
+    for txt in pages[: max(1, len(pages) // 5)]:
+        paras = _page_paras(txt)
+        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()):
+            got += [_squash(p) for p in paras[1:] if any(c.isalpha() for c in p) and len(p) <= 120]
+    return {k for k in got if len(k) >= 3} if len(got) >= 3 else set()
+
+
+def _squash(t: str) -> str:
+    return re.sub(r"[\W_]", "", t.lower())
+
+
+def _in_contents(para: str, keys: set) -> bool:
+    """The line is a contents entry, or its "CHAPTER 1" start (the title sits on the next line)."""
+    k = _squash(para)
+    return len(k) >= 3 and (k in keys or bool(HEAD_WORD.match(para)) and any(c.startswith(k) for c in keys))
+
+
 def _running_heads(pages: list[str]) -> set:
     """Keys of short first/last paragraphs that repeat across pages: "మాయ 77", "24 AUTHOR NAME".
 
@@ -1352,6 +1390,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
     chapters, cur = [], []
     heads = _running_heads(pages)
     chapter_heads = _chapter_heads(pages)
+    contents = _contents_keys(pages)
     head_words = _head_words(pages)
     stories = _story_numbers(pages)
     letters = [c for c in "".join(pages[:: max(1, len(pages) // 40)]) if c.isalpha()]
@@ -1363,17 +1402,20 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             chapters.append(cur.copy())
             cur.clear()
 
-    head_page, title_done = -1, False
+    head_page, title_done, open_title = -1, False, ""
     for i, txt in enumerate(pages):
         if toc and i in toc:
             flush()
             cur.append(("h1", toc[i]))
+            open_title = toc[i]
         if figures and i in figures:
             for fig in (figures[i] if isinstance(figures[i], list) else [figures[i]]):
                 cur.append(("img", (fig, "")))
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         paras = _drop_caps(_page_paras(txt))
+        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()) and i < len(pages) // 5:
+            continue  # ponytail: the printed contents page; its "CHAPTER 1 ..." lines became chapters (11-21)
         # ponytail: a title page is short lines only and its title is the running head's words, so
         # "THE FEASTING" was dropped as a head and "DEAD" stood alone (11-21). Heads sit over text.
         edges = _edges(paras) if any(len(p.split()) >= 8 for p in paras) else []
@@ -1384,17 +1426,31 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
         for j, para in enumerate(paras):
             if j <= top:
                 continue  # page number(s) + a "CHAPTER 1" running head
+            if (head_page == i and len(cur) == 1 and cur[0][0] == "h1" and len(para) <= 80
+                    and re.fullmatch(r"(chapter|part|book)\s+[\w.]{1,8}", cur[0][1], re.I)
+                    and any(c.isalpha() for c in para) and not HEAD_WORD.match(para)):
+                # ponytail: "CHAPTER 1" + its title below: one contents entry. Before the running-head
+                # drops: the title is also the right-page head and was dropped here (11-21)
+                cur[0] = ("h1", cur[0][1] + " " + para)
+                open_title = cur[0][1]
+                continue
+            # a contents entry that opens a new section is never its own running head
+            entry = bool(contents) and len(para) <= 120 and _in_contents(para, contents) \
+                and not _same_title(para, open_title) and all(len(q) <= 50 for q in paras[:j])
             if j in edges and FOLIO.fullmatch(para) and any(
                     0 <= k < len(paras) and is_head(paras[k]) for k in (j - 1, j + 1)):
                 continue  # the page number beside the running head; "11" reads as "II" and was a chapter
-            if (j in edges and len(para) <= 50
+            if (j in edges and len(para) <= 50 and not entry
                     and (_head_key(para) in heads or _head_first(para) in heads
                          or _mostly_head_words(para, head_words))) or _ornament(para):
                 continue
-            if len(para) <= 30 and _head_key(para) in heads:
+            if len(para) <= 30 and _head_key(para) in heads and not entry:
                 continue  # ponytail: Drive OCR puts the footer between the columns ("చందమామ", "జూలై 2004", 11-11)
             if not any(c.isalpha() for c in para):
                 continue  # ponytail: "|" and "( |" from column rules and picture borders (11-10)
+            if len(para) <= 50 and i != head_page and all(len(q) <= 50 for q in paras[:j]) \
+                    and _same_title(para, open_title):
+                continue  # under the page number and a figure's labels ("Economic", "(moral)")
             nd = len(re.findall("[\u0966-\u096f\u0c66-\u0c6f]", para))
             if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
                 continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
@@ -1404,18 +1460,24 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             head = HEAD_WORD.match(text) or (latin and _caps_head(text) and (not placed or cur and cur[-1][0] == "h1"
                                                      or len(text.split()) >= 2)) \
                 or (stories and NUMBERED.match(text))
+            if contents:
+                # ponytail: the book's own contents page says what the chapters are. Without it an
+                # intro "Future Perfect" (not CAPS) was no chapter, while a frontispiece caption and
+                # the back-cover series ads were (Jon, Unpayable Debt, 11-21)
+                head = _in_contents(text, contents) and all(len(q) <= 50 for q in paras[:j])
             placed += 1
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 if cur and head_page == i and all(k == "h1" for k, _ in cur):
                     if len(cur[-1][1].split()) <= 2 and len(text.split()) <= 2 and len(cur) == 1 and not title_done:
                         cur[-1] = ("h1", cur[-1][1] + " " + text)  # "THE FEASTING" / "DEAD": one title, one entry
+                        open_title = cur[-1][1]
                         title_done = True
                     else:
                         cur.append(("p", text))  # the rest of a title page: author, publisher
                     continue
                 flush()
                 cur.append(("h1", text))
-                head_page = i
+                head_page, open_title = i, text
             elif cur and cur[-1][0] == "p" and (text[:1].islower() and not SENT_END.search(cur[-1][1])
                                                  or re.search(r"[a-z]-$", cur[-1][1]) and text[:1].islower()):
                 # ponytail: a paragraph cut by the page end or by an OCR line break goes on, not a new <p>

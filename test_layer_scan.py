@@ -122,7 +122,36 @@ def chapter_running_head():
     print("ok — scan chapters: a CHAPTER N running head under the page number")
 
 
+def contents_page_chapters():
+    """Same book: the printed contents page names the sections. An intro "Future Perfect" in plain
+    case was no chapter, a frontispiece caption and back-cover ads in CAPS were, back matter
+    (BIBLIOGRAPHY on each of its pages) began a chapter per page, and the contents page's own
+    lines became chapters."""
+    body = ("the papers would not matter because then and there the law already held that the "
+            "enslaved person was property, whatever any document happened to say about it")
+    pages = [
+        "CONTENTS\n\nFuture Perfect\n\n3\n\nCHAPTER 1 \"Not even by the law here\"\n\n5\n\nBIBLIOGRAPHY\n\n9",
+        f"CAPITOL AT WASHINGTON-EAST FRONT.\n\nA LOBBYIST.\n\n{body}.",       # frontispiece caption
+        "Future Perfect",
+        f"Future Perfect\n\n3\n\n{body}.",
+        'CHAPTER 1\n\n"Not even by the law here"',
+        f'"Not even by the law here"\n\n5\n\n{body}.',
+        f"6\n\nCHAPTER 1\n\n{body}.",
+        f"BIBLIOGRAPHY\n\n9\n\nAgamben, Giorgio. Homo Sacer. {body}.",
+        f"10\n\nBIBLIOGRAPHY\n\nButler, Judith. Bodies That Matter. {body}.",
+        f"BIBLIOGRAPHY\n\n11\n\nDouglass, Frederick. {body}.",
+        f"THE BLACK TECHNICAL OBJECT:\n\nWHAT WE DO IS SECRET:\n\n{body}.",    # series ad
+    ]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    want = ["Future Perfect", 'CHAPTER 1 "Not even by the law here"', "BIBLIOGRAPHY"]
+    assert heads[-3:] == want and len(heads) <= 4, heads
+    assert not any("CAPITOL" in h or "SECRET" in h for h in heads), heads
+    print("ok — scan chapters: the printed contents page decides the chapters")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
     chapter_running_head()
+    contents_page_chapters()
