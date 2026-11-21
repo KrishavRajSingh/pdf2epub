@@ -166,7 +166,7 @@ def lint(pdf_path: str, epub_path: str) -> list[str]:
 
     # MARK / SPLIT
     marks = [n for n, t in paras if t.strip() and re.fullmatch(r"[\s*†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹\d]{1,8}", t.strip())
-             and not t.strip().isdigit()]
+             and not t.strip().isdigit() and not re.fullmatch(r"(?:[*†]\s*){3}", t.strip())]  # "* * *" = scene break
     if marks:
         flags.append(f"MARK     {len(marks)} paragraphs that are only a note marker (first in {marks[0]})")
     splits = [(n, a, b) for (n, a), (n2, b) in zip(paras, paras[1:]) if n == n2 and a.strip() and b.strip()
