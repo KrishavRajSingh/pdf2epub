@@ -380,8 +380,9 @@ def _sharp_page(img: bytes, lang: str) -> str | None:
     prompt = (f"Transcribe every piece of text on this scanned page exactly as printed, mostly "
               f"{LANG_NAMES.get(lang, 'English')}. Follow reading order: columns left to right, each column "
               "top to bottom. Keep spelling exactly as printed; do not correct, modernize, translate, "
-              "summarize or add anything. Write [?] for a word you cannot read. Separate paragraphs with "
-              "a blank line. Output only the text.")
+              "summarize or add anything. Write [?] for a word you cannot read. Ignore handwriting, pen marks, "
+              "underlining and margin notes. Write each paragraph as one line, with a blank line between "
+              "paragraphs. If the page has no printed text, output nothing. Output only the text.")
     body = {"model": SHARP_MODEL, "temperature": 0, "reasoning": {"enabled": False},
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": prompt},
@@ -400,7 +401,7 @@ def _sharp_page(img: bytes, lang: str) -> str | None:
     return None
 
 
-def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None) -> int:
+def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None, img=None) -> int:
     """Swap Tesseract text for the vision model's on the pages Tesseract was unsure of, in place.
 
     ponytail: same page pick as scripts/manual_convert.py --gdrive, capped by the key's page budget.
@@ -417,7 +418,7 @@ def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None) 
     for i in todo:  # pymupdf is not thread-safe: render here, call the model in threads
         p = doc[i]
         dpi = min(200, int(2000 * 72 / max(p.rect.width, p.rect.height)))
-        imgs[i] = p.get_pixmap(dpi=dpi).tobytes("jpg", jpg_quality=88)
+        imgs[i] = img(i) if img else p.get_pixmap(dpi=dpi).tobytes("jpg", jpg_quality=88)
     with ThreadPoolExecutor(SHARP_THREADS) as ex:
         got = dict(zip(todo, ex.map(lambda i: read(imgs.pop(i), lang), todo)))
     ok = 0
@@ -519,6 +520,75 @@ def reread_pages(doc, layout: list, confs: dict, lang: str, key: str, drive=None
     if sharp_left(key):
         done += sharp_pages(doc, layout, confs, lang, key, read)
     return done
+
+
+def _strip_pen(page) -> tuple[bytes, bool]:
+    """(grey JPEG of the page with blue and red pen ink painted over in the paper's tone, any ink found).
+
+    ponytail: a library copy with blue-ink margin notes and underlining (davehasl19, The Feasting
+    Dead, 11-21): every OCR read the handwriting as words ("strained O* on", "aXe") and the chapter
+    numerals as junk. Only coloured pixels go, so black print under an underline stays readable."""
+    from PIL import Image, ImageChops, ImageStat
+    # ponytail: 2200px on the long side; at 2000 Drive dropped an underlined line and a drop cap (11-21).
+    # Growing the ink mask by a pixel cost more print than the faint ink edges it caught.
+    dpi = min(220, int(2200 * 72 / max(page.rect.width, page.rect.height)))
+    pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB, alpha=False)
+    im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    r, g, b = im.split()
+    blue = ImageChops.subtract(b, r).point(lambda v: 255 if v > 18 else 0)
+    red = ImageChops.subtract(r, g).point(lambda v: 255 if v > 45 else 0)
+    mask = ImageChops.lighter(blue, red)
+    grey = im.convert("L")
+    inked = ImageStat.Stat(mask).mean[0] / 255 > 0.002
+    if inked:
+        grey.paste(int(ImageStat.Stat(grey).median[0]), mask=mask)
+    buf = BytesIO()
+    grey.save(buf, "JPEG", quality=88)
+    return buf.getvalue(), inked
+
+
+def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> list | None:
+    """Pages of a scan that carries someone else's OCR layer, read again: pen ink removed, Google
+    Drive's OCR first, then for paid keys the AI re-read on inked pages and failed reads.
+    [(text, 1.0), ...], or None when Drive is not set up or failed on most pages (the caller then
+    keeps the old text layer).
+
+    ponytail: Internet Archive and similar scans come with an old OCR layer that the text path
+    copied as-is; three books from one r/ebooks reader (11-18..11-21) all had misreads the printed
+    page does not ("imtil", "PON SO LORN" for "A Story", handwriting as words). Drive read each one
+    clean and costs nothing, so it runs for every reader; only the AI pass is paid."""
+    drive = drive or (_drive_page if DRIVE_REFRESH else None)
+    if not drive or not len(doc):
+        return None
+    pages, confs, inked, failed = [], {}, set(), 0
+    step = DRIVE_THREADS * 8  # ponytail: a 2,000-page paid book would hold ~400MB of page images at once
+    for a in range(0, len(doc), step):
+        part = list(range(a, min(a + step, len(doc))))
+        win = {}
+        for i in part:  # pymupdf is not thread-safe: render here, upload in threads
+            try:
+                win[i] = _strip_pen(doc[i])
+            except Exception:
+                win[i] = (doc[i].get_pixmap(dpi=150).tobytes("jpg", jpg_quality=88), False)
+        with ThreadPoolExecutor(DRIVE_THREADS) as ex:
+            got = list(ex.map(lambda i: drive(win[i][0], lang), part))
+        for i, text in zip(part, got):
+            if IA_NOTICE.search(doc[i].get_text()):
+                text = ""  # the archive's own "Digitized by" page, not the book
+            if text is None:
+                failed += 1
+            pages.append((doc[i].get_text() if text is None else text, 1.0))
+            confs[i] = 0.0 if (text is None or win[i][1]) else 100.0
+            if win[i][1]:
+                inked.add(i)
+    if failed > len(doc) / 2:
+        return None
+    sharp = 0
+    if key and sharp_left(key) and any(c < SHARP_CONF for c in confs.values()):
+        sharp = sharp_pages(doc, pages, confs, lang, key, read, img=lambda i: _strip_pen(doc[i])[0])
+    print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "layer_scan": len(doc), "drive_failed": failed,
+                      "inked": len(inked), "sharp": sharp}), flush=True)
+    return pages
 
 
 def _order_email(checkout_id: str) -> str:
@@ -1129,6 +1199,23 @@ def _page_paras(txt: str) -> list[str]:
             for para in re.split(r"\n\s*\n", txt) if para.strip()]
 
 
+FOLIO = re.compile(r"[\dIVXLCivxlc]{1,4}")
+
+
+def _edges(paras: list[str]) -> list[int]:
+    """Indexes of the paragraphs a running head can be: first and last, and the one past a bare
+    page number. ponytail: Drive OCR gives "8" and "JOHN METCALFE" as two paragraphs (11-21), so
+    the head sat second and became a chapter on every left page."""
+    if not paras:
+        return []
+    k = {0, len(paras) - 1}
+    if len(paras) > 2 and (FOLIO.fullmatch(paras[0]) or FOLIO.fullmatch(paras[1])):
+        k.add(1)
+    if len(paras) > 2 and (FOLIO.fullmatch(paras[-1]) or FOLIO.fullmatch(paras[-2])):
+        k.add(len(paras) - 2)
+    return sorted(k)
+
+
 def _running_heads(pages: list[str]) -> set:
     """Keys of short first/last paragraphs that repeat across pages: "మాయ 77", "24 AUTHOR NAME".
 
@@ -1138,7 +1225,7 @@ def _running_heads(pages: list[str]) -> set:
     seen = Counter()
     for txt in pages:
         paras = _page_paras(txt)
-        for para in {paras[0], paras[-1]} if paras else ():
+        for para in {paras[j] for j in _edges(paras)}:
             if len(para) <= 50 and not HEAD_WORD.match(para):
                 for k in {_head_key(para), _head_first(para)}:
                     if len(k) >= 3:
@@ -1156,7 +1243,7 @@ def _head_words(pages: list[str]) -> set:
     seen = Counter()
     for txt in pages:
         paras = _page_paras(txt)
-        for para in {paras[0], paras[-1]} if paras else ():
+        for para in {paras[j] for j in _edges(paras)}:
             if len(para) <= 50 and not HEAD_WORD.match(para):
                 seen.update(set(_words(para)))
     return {w for w, c in seen.items() if c >= max(3, len(pages) // 10)}
@@ -1194,7 +1281,37 @@ def _caps_head(text: str) -> bool:
     Latin capital in it made the whole line "upper" and a heading (11-10)."""
     letters = [c for c in text if c.isalpha()]
     latin = [c for c in letters if c.isascii()]
+    # ponytail: one letter is a drop cap ("T" of "THEY") or a stray quote ("I'"), not a heading,
+    # unless it is the chapter numeral itself (11-21). Two-letter caps words were never headings either
+    if len(letters) < 3 and not re.fullmatch(r"[IVXLC]{1,4}\.?", text):
+        return False  # also "TA", "TH": faint pen-ink edges left after the ink is painted out
     return bool(letters) and len(latin) >= 0.8 * len(letters) and text.isupper() and len(text) <= 60
+
+
+def _drop_caps(paras: list[str]) -> list[str]:
+    """Glue a drop cap OCR'd as its own paragraph back onto its word: "T" + "HEY were" -> "THEY were".
+
+    ponytail: Drive OCR puts the big first letter of a chapter on its own line, before or after the
+    chapter numeral ("Q", "III", "UESTION and answer", 11-21). A lone I, V or X at the top of the page
+    followed by a word is the numeral, not a drop cap ("I", "UR boy")."""
+    out, i = [], 0
+    while i < len(paras):
+        p = paras[i]
+        if re.fullmatch(r"[A-Z]", p):
+            for j in (i + 1, i + 2):
+                if j < len(paras) and re.match(r"[A-Z]{2,}\b", paras[j]) and not FOLIO.fullmatch(paras[j]):
+                    first = paras[j].split()[0]
+                    if p in "IVX" and i == 0 and len(first) >= 2 and j == i + 1:
+                        break  # the chapter numeral
+                    paras = paras[:j] + [p + paras[j]] + paras[j + 1:]
+                    p = None
+                    break
+            if p is None:
+                i += 1
+                continue
+        out.append(p)
+        i += 1
+    return out
 
 
 def _story_numbers(pages: list[str]) -> bool:
@@ -1220,6 +1337,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             chapters.append(cur.copy())
             cur.clear()
 
+    head_page = -1
     for i, txt in enumerate(pages):
         if toc and i in toc:
             flush()
@@ -1229,9 +1347,18 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 cur.append(("img", (fig, "")))
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
-        paras = _page_paras(txt)
+        paras = _drop_caps(_page_paras(txt))
+        # ponytail: a title page is short lines only and its title is the running head's words, so
+        # "THE FEASTING" was dropped as a head and "DEAD" stood alone (11-21). Heads sit over text.
+        edges = _edges(paras) if any(len(p.split()) >= 8 for p in paras) else []
+        placed = 0  # text paragraphs already taken from this page
+        is_head = lambda q: len(q) <= 50 and (_head_key(q) in heads or _head_first(q) in heads
+                                              or _mostly_head_words(q, head_words))
         for j, para in enumerate(paras):
-            if (j in (0, len(paras) - 1) and len(para) <= 50
+            if j in edges and FOLIO.fullmatch(para) and any(
+                    0 <= k < len(paras) and is_head(paras[k]) for k in (j - 1, j + 1)):
+                continue  # the page number beside the running head; "11" reads as "II" and was a chapter
+            if (j in edges and len(para) <= 50
                     and (_head_key(para) in heads or _head_first(para) in heads
                          or _mostly_head_words(para, head_words))) or _ornament(para):
                 continue
@@ -1243,10 +1370,23 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
                 continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
-            head = HEAD_WORD.match(text) or (latin and _caps_head(text)) or (stories and NUMBERED.match(text))
+            # ponytail: a CAPS line counts as a heading near the top of a page only. Mid-page, on a scan
+            # with pen notes, it was a ghost of the handwriting ("HOW", The Feasting Dead p17, 11-21)
+            head = HEAD_WORD.match(text) or (latin and _caps_head(text) and placed <= 1) \
+                or (stories and NUMBERED.match(text))
+            placed += 1
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
+                if cur and head_page == i and all(k == "h1" for k, _ in cur):
+                    cur[-1] = ("h1", cur[-1][1] + " " + text)  # "THE FEASTING" / "DEAD": one title, one entry
+                    continue
                 flush()
                 cur.append(("h1", text))
+                head_page = i
+            elif cur and cur[-1][0] == "p" and (text[:1].islower() and not SENT_END.search(cur[-1][1])
+                                                 or re.search(r"[a-z]-$", cur[-1][1]) and text[:1].islower()):
+                # ponytail: a paragraph cut by the page end or by an OCR line break goes on, not a new <p>
+                prev = cur[-1][1]
+                cur[-1] = ("p", prev[:-1] + text if prev.endswith("-") else prev + " " + text)
             else:
                 cur.append(("p", text))
     flush()
@@ -4434,7 +4574,6 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 hdr["X-Cap"] = cap
             return Response(data, media_type="application/epub+zip", headers=hdr)
 
-        blocks = _text_blocks(doc)
         npages = len(doc)
         meta = doc.metadata or {}
         # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
@@ -4443,6 +4582,37 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         if "_" in safe_title and " " not in safe_title:
             safe_title = safe_title.replace("_", " ")  # "Into_the_Blue" on the Kindle shelf -> "Into the Blue"
         author = (author or (meta.get("author") or "").strip())[:120]
+        if DRIVE_REFRESH and _ocr_layer(doc):
+            # ponytail (11-21): a scan with someone else's OCR layer is a scan, so it is read again
+            # (layer_scan_pages) under the scan limits: 20 free pages, the whole book paid. Its old
+            # layer was the book before, 150 free pages of misreads and handwriting.
+            cut = preview == "1" and not paid and npages > FREE_OCR_PAGES
+            if npages > FREE_OCR_PAGES and not paid and not cut:
+                doc.close()
+                log(False, npages, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
+                raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
+                                    f"{FREE_OCR_PAGES} pages, the whole book is $5")
+            if cut:
+                cap = f"ocr:{total}"
+                if not cut_pages:
+                    log(False, total, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
+                doc.select(range(FREE_OCR_PAGES))
+            elang = doc_lang(doc)
+            pages = layer_scan_pages(doc, elang, key)
+            event("layer_scan", request, pages=len(doc), total=total, paid=paid, ok=bool(pages))
+            texts = [t for t, _ in pages or []]
+            if pages and ocr_ok(texts):
+                figs = _scan_figures(doc, pages, {})
+                chapters = ocr_chapters(texts, figs, pdf_toc(doc))
+                if cut:
+                    chapters.append([("h1", "The rest of this book"),
+                        ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "
+                              "The whole book is $5 at epub.ftak.net, converted on the spot.")])
+                data = build_epub(chapters, safe_title, author[:120], elang)
+                doc.close()
+                return done(data, len(texts), "layer-preview" if cut else "layer")
+            npages = len(doc)  # Drive failed: the old layer, as before (cut to the free part if cut)
+        blocks = _text_blocks(doc)
         if not blocks:
             # scanned PDF: OCR is the only thing that helps before falling back
             cut = preview == "1" and not paid and npages > FREE_OCR_PAGES
