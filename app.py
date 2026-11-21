@@ -2955,6 +2955,32 @@ def _fix_line(line, ligmap):
         k += len(old)
 
 
+SPACED_LINE = re.compile(r"(?:\b\w ){4,}\w\b")
+
+
+def _unspace(page, line):
+    """Letter-spaced type ("T h e  C h a i n", Paramattha captions 11-21) comes out with a space between
+    every letter. Re-read the line's characters: a space under 0.2 em wide is tracking, a real word
+    space is wider (0.21-0.3 em), so dropping the narrow ones gives the words back."""
+    t = "".join(sp["text"] for sp in line["spans"])
+    if not SPACED_LINE.search(t) or len(re.findall(r"\b\w\b", t)) < 0.4 * len(t.split()):
+        return
+    out = []
+    for b in page.get_text("rawdict", clip=pymupdf.Rect(line["bbox"]) + (-1, -1, 1, 1))["blocks"]:
+        for ln in b.get("lines", []):
+            for sp in ln["spans"]:
+                for c in sp["chars"]:
+                    if c["c"] == " " and c["bbox"][2] - c["bbox"][0] < 0.2 * sp["size"]:
+                        continue
+                    out.append(c["c"])
+            out.append(" ")
+    fixed = re.sub(r"\s+", " ", "".join(out)).strip()
+    if fixed and len(fixed) < len(t.strip()):
+        line["spans"][0]["text"] = fixed
+        for sp in line["spans"][1:]:
+            sp["text"] = ""
+
+
 def _span_text(s):
     # ponytail: flattening spans loses the superscript flag, so a footnote marker reads as a
     # normal digit glued to the sentence ("argument.12"). unicode keeps it visibly raised.
@@ -3238,7 +3264,7 @@ def _body_chars_in(u, blocks, body) -> int:
     return body_chars
 
 
-def _figure_rects(page, blocks, body) -> list:
+def _figure_rects(page, blocks, body, small: bool = False) -> list:
     """Clip rects of the figures on a page, top first.
 
     ponytail: a journal page with two figures and prose between them (1999 paper, figs 2-5)
@@ -3250,14 +3276,89 @@ def _figure_rects(page, blocks, body) -> list:
         return [u]
     area = page.rect.width * page.rect.height
     out = []
+    # ponytail: born-digital books place small pictures on purpose: Paramattha's 51pt section icons
+    # (11-21) were under the 3%-of-page floor and 73 of 155 pictures went missing. Scans keep the floor,
+    # their small "pictures" are specks and stamps.
+    big_enough = (lambda r: r.width >= 20 and r.height >= 20) if small else \
+        (lambda r: (r.width * r.height) / area > 0.03)
     for info in page.get_image_info():
         r = pymupdf.Rect(info["bbox"]) & page.mediabox
-        if not 0.03 < (r.width * r.height) / area <= 0.8 or _body_chars_in(r, blocks, body) >= 80:
+        if not big_enough(r) or (r.width * r.height) / area > 0.8 or _body_chars_in(r, blocks, body) >= 80:
             continue
         if any(o.contains(r) for o in out):
             continue
-        out = [o for o in out if not r.contains(o)] + [_with_labels(r, blocks) & page.mediabox]
+        # a picture stacked on another (a tint or frame over a photo) is one figure, rendered together
+        over = [o for o in out if not (o & r).is_empty and (o & r).get_area() > 0.5 * min(o.get_area(), r.get_area())]
+        for o in over:
+            r = r | o
+        out = [o for o in out if o not in over and not r.contains(o)] + [_with_labels(r, blocks) & page.mediabox]
+    if small:
+        return sorted(out, key=lambda r: (r.y0, r.x0))
     return sorted(out, key=lambda r: (r.y0, r.x0)) if len(out) > 1 else []
+
+
+def _table_rects(page, raw, body, eqs=()) -> list:
+    """Areas of a born-digital page laid out as a table: rows of two or more short cells side by side.
+
+    ponytail: Paramattha's emotion tables and 12-links chart (11-21) came out as one cell per line
+    ("Mental Life / Agitation / Unpleasant Feeling") with the rows' order lost. Text can't keep a
+    table's grid, a picture of that area can. Two-column prose (papers) has long lines, so the
+    short-cell test leaves it alone; a numbered list that continues in the second column is a list.
+    """
+    lines = []
+    for b in raw:
+        for ln in b.get("lines", []):
+            t = "".join(sp["text"] for sp in ln["spans"]).strip()
+            if t:
+                lines.append((pymupdf.Rect(ln["bbox"]), t, max(sp["size"] for sp in ln["spans"])))
+    rows = []
+    for r, t, sz in sorted(lines, key=lambda x: (x[0].y0, x[0].x0)):
+        if rows and abs(rows[-1][0][0].y0 - r.y0) < 3:
+            rows[-1].append((r, t, sz))
+        else:
+            rows.append([(r, t, sz)])
+    paired = []
+    for row in rows:
+        row.sort(key=lambda x: x[0].x0)
+        if any(b[0].x0 - a[0].x1 > 25 for a, b in zip(row, row[1:])):
+            paired.append(row)
+    out, band = [], []
+    for row in paired + [None]:
+        if row and (not band or row[0][0].y0 - band[-1][0][0].y1 < 40):
+            band.append(row)
+            continue
+        if len(band) >= 4:
+            cells = [c for rw in band for c in rw]
+            u = pymupdf.Rect(cells[0][0])
+            for c in cells[1:]:
+                u |= c[0]
+            # wrapped single-cell lines between the paired rows belong to the table too
+            for r, t, sz in lines:
+                if u.y0 - 2 <= r.y0 <= u.y1 + 2 and r.x0 >= u.x0 - 5:
+                    u |= r
+            lens = sorted(len(c[1]) for c in cells)
+            col_med = lambda side: sorted(len(rw[side][1]) for rw in band)[len(band) // 2]
+            # an equation and its "(3)" number sit side by side too; papers' abstract boxes pair a short
+            # "ARTICLE INFO" column with long abstract lines (cas-sc-template, 11-21): neither is a table
+            eq_nums = sum(bool(re.fullmatch(r"\(\s*\d{1,3}[a-z]?\s*\)", rw[-1][1])) for rw in band)
+            if eq_nums >= len(band) * 0.3 or col_med(0) >= 40 or col_med(-1) >= 40 \
+                    or any(not (u & e).is_empty for e in eqs) \
+                    or any(MATH_FONT.search(sp.get("font", "")) for b in raw for ln in b.get("lines", [])
+                           for sp in ln["spans"] if u.contains(pymupdf.Rect(ln["bbox"]))):
+                band = [row] if row else []
+                continue
+            nums = lambda side: [int(m.group(1)) for rw in band for m in [re.match(r"\(?(\d{1,3})[).]", rw[side][1])] if m]
+            left, right = nums(0), nums(-1)
+            seq_list = left and right and min(right) > max(left)
+            small = sum(c[2] < body * 1.05 for c in cells) >= len(cells) * 0.6
+            if lens[len(lens) // 2] < 40 and u.height < page.rect.height * 0.7 and not seq_list and small:
+                for info in page.get_image_info():
+                    ir = pymupdf.Rect(info["bbox"])
+                    if ir.y1 > u.y0 and ir.y0 < u.y1:
+                        u |= ir
+                out.append((u + (-4, -4, 4, 4)) & page.mediabox)
+        band = [row] if row else []
+    return out
 
 
 def _fig_caption(page, raw, fig_page):
@@ -3620,6 +3721,9 @@ def doc_lang(doc) -> str:
     return text_lang("".join(doc[i].get_text() for i in sorted({int(k * n / 12) for k in range(12)})) if n else "")
 
 
+NOTE_MARK_ONLY = re.compile(r"[*†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹]{1,6}")
+
+
 def _paragraphs(rows, bbox, ocr=False):
     """Split one PDF block's lines into paragraphs: [(y0, size, [line, ...]), ...].
 
@@ -3637,6 +3741,9 @@ def _paragraphs(rows, bbox, ocr=False):
     left = min(r[2][0] for r in rows)
     groups = []
     for k, (txt, size, lb) in enumerate(rows):
+        if groups and NOTE_MARK_ONLY.fullmatch(txt.strip()):
+            groups[-1][2][-1] = groups[-1][2][-1].rstrip() + txt.strip()  # a raised "†" set as its own line
+            continue
         lead, trail = lb[0] - bx0, bx1 - lb[2]
         centered = (k == 0 and len(rows) > 1 and len(txt) < 60 and lead > bw * 0.15
                     and trail > bw * 0.15 and abs(lead - trail) < bw * 0.12
@@ -3805,12 +3912,18 @@ def _blocks(doc):
             for line in b.get("lines", []):
                 _fix_line(line, ligmap)
                 if not ocr:
+                    _unspace(page, line)
+                if not ocr:
                     for sp in line["spans"]:
                         _fix_math_span(sp)
             if not ocr:
                 _merge_bands(b)
         figs = []
-        for fr in _figure_rects(page, raw, body):
+        texty = not ocr and len(page.get_text("text").strip()) > 200  # a real text layer, not a bare scan
+        eq_rects = [] if not texty or page.rotation else [e[0] for e in _equations(raw, page.rect.height)]
+        tables = _table_rects(page, raw, body, eq_rects) if texty and not page.rotation else []
+        frs = [fr for fr in _figure_rects(page, raw, body, small=texty) if not any(t.contains(fr) for t in tables)]
+        for fr in sorted(frs + tables, key=lambda r: (r.y0, r.x0)):
             fp = _page_rect(page, fr)
             cap, cap_page = _fig_caption(page, raw, fp)
             figs.append({"r": fr, "page": fp, "cap": cap, "cap_page": cap_page, "done": False})

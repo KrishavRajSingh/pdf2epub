@@ -16,6 +16,8 @@ had that defect and only a human page-by-page look found it (Paramattha, 11-21):
   COLUMNS  numbered items out of order inside one paragraph: "(10) ... (21)" = two columns merged
   LINES    a run of short PDF lines (a list or a poem) that the EPUB glued into running prose
   HYPHEN   "distin- guishes": a line-end hyphen left inside a word
+  MARK     a paragraph that is only a note marker ("§", "†", "***") torn off its sentence
+  SPLIT    a paragraph that stops mid-sentence and the next one goes on in lowercase
   WORDS    share of PDF words (4+ letters) found in the EPUB
 Exit 1 when anything is flagged.
 """
@@ -161,6 +163,17 @@ def lint(pdf_path: str, epub_path: str) -> list[str]:
                 if glued >= max(2, len(run) // 2):
                     flags.append(f"LINES    p{pi + 1}: {len(run)} short lines glued into prose, from {run[0][:40]!r}")
             run = []
+
+    # MARK / SPLIT
+    marks = [n for n, t in paras if t.strip() and re.fullmatch(r"[\s*†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹\d]{1,8}", t.strip())
+             and not t.strip().isdigit()]
+    if marks:
+        flags.append(f"MARK     {len(marks)} paragraphs that are only a note marker (first in {marks[0]})")
+    splits = [(n, a, b) for (n, a), (n2, b) in zip(paras, paras[1:]) if n == n2 and a.strip() and b.strip()
+              and b.strip()[:1].islower() and not re.search(r"[.:;!?\"”’)\]]\W*$", a.strip())]
+    if len(splits) > 2:
+        n, a, b = splits[0]
+        flags.append(f"SPLIT    {len(splits)} paragraphs cut mid-sentence, first {a.strip()[-30:]!r} | {b.strip()[:20]!r}")
 
     # HYPHEN
     book = Counter(words(" ".join(t for _, t in paras)))
