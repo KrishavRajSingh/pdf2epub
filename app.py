@@ -4991,7 +4991,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 tlang, elang = ocr_lang(doc)
                 pics, confs = {}, {}
                 pages = ocr_doc(doc, layout=True, lang=tlang, pics=pics, confs=confs) or []
-                if key and pages:
+                # ponytail (11-23): a $3/$5 one-book buyer has a checkout, not a key, so their scan stayed raw
+                # Tesseract ("many characters garbled", refund asked, 74-p scan 11-22). Every paid run gets
+                # Drive's free re-read of unsure pages; the AI pass still needs a Library key.
+                if paid and pages:
                     reread_pages(doc, pages, confs, elang, key)
                 texts = [t for t, _ in pages]
                 if ocr_ok(texts):

@@ -49,6 +49,15 @@ def main():
     assert pdf2epub.reread_pages(doc, lay, confs, "te", "KEYBATCH", drive=lambda i, l: None) == 0
     assert lay == layout
 
+    # One-book buyer ($3/$5 checkout, no key): Drive still re-reads unsure pages, no AI pages (11-23)
+    lay = list(layout)
+    asked.clear()
+    assert pdf2epub.reread_pages(doc, lay, confs, "en", "", drive=drive, read=lambda i, l: ai_text) == 2
+    assert lay[1][0] == drive_text and asked == ["en", "en"]
+    import inspect
+    assert "if paid and pages:\n                    reread_pages(" in inspect.getsource(pdf2epub.convert), \
+        "paid scans without a key must get the Drive re-read"
+
     # Drive's export: BOM, a "____" rule where the image sat, one paragraph per line
     assert pdf2epub._drive_clean("﻿________________\n\nమొదటి పేరా\nరెండో పేరా\n") == "మొదటి పేరా\n\nరెండో పేరా"
     print("ok: drive")
