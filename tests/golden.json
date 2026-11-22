@@ -1,4 +1,25 @@
 {
+ "ebook_site": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "Chapter 1",
+   "Chapter 2"
+  ],
+  "paragraphs": 4,
+  "imgs": 0,
+  "words": 1256
+ },
+ "latex_book": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [
+   "Chapter 1"
+  ],
+  "paragraphs": 1,
+  "imgs": 0,
+  "words": 1679
+ },
  "math_paper": {
   "path": "text",
   "chapters": 1,

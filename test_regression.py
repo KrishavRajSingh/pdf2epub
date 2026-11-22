@@ -561,7 +561,55 @@ def make_math_paper():
     return d
 
 
+def make_ebook_site():
+    """11-22 QA (1984/Moby-Dick from an ebook site): small page, footer with the page number on every
+    other page only, drop cap at each chapter, paragraphs running across page ends."""
+    d = _doc()
+    for ch in (1, 2):
+        for k in range(4):
+            pg = d.new_page(width=322, height=484)
+            n = (ch - 1) * 4 + k + 1
+            if n % 2 == 0:
+                pg.insert_text((31, 418), f"{n} Free eBooks at Example eBook.com", fontsize=7)
+            y = 50
+            if k == 0:
+                pg.insert_text((31, 66), f"Chapter {ch}", fontsize=20)
+                pg.insert_text((30, 132), "I", fontsize=28)
+                pg.insert_textbox(pymupdf.Rect(44, 110, 290, 160), "t was a bright cold day in April, and the",
+                                  fontsize=10)
+                y = 170
+            body = ("Winston kept his back turned to the telescreen and he did not "
+                    "move at all. " * 9 + "The voice from the plaque went on and on about the figures for pig "
+                    "iron, the")
+            pg.insert_textbox(pymupdf.Rect(31, y, 290, 400), (("start of page %d " % n) if k else "") + body,
+                              fontsize=10)
+    return d
+
+
+def make_latex_book():
+    """11-22 QA (Think Python/Stats): letter page, running head at y~61 that changes with the section,
+    so no text repeats; it split paragraphs at page ends and came back as headings."""
+    d = _doc()
+    for k in range(8):
+        pg = d.new_page()
+        head = "Chapter 1. Getting started" if k % 2 == 0 else f"1.{k}. Section number {k}"
+        pg.insert_text((72, 70), head, fontsize=10)
+        pg.insert_text((520, 70), str(k + 1), fontsize=10)
+        if k == 0:
+            pg.insert_text((72, 140), "Chapter 1", fontsize=24)
+        pg.insert_textbox(pymupdf.Rect(72, 160 if k == 0 else 88, 540, 720),
+                          ("continued here and " if k else "") + PROSE * 8 + "and this sentence runs on to the",
+                          fontsize=10)
+    return d
+
+
 CASES = {
+    # 11-22 QA: footer + drop cap + page-end joins on an ebook-site PDF
+    "ebook_site": (make_ebook_site, {"path": "text", "has": ["It was a bright cold day", "the start of page 2"],
+                                     "hasnt": ["Free eBooks", " t was a bright"], "ch_max": 2, "h_min": 2}),
+    # 11-22 QA: section running head at y~61 on a letter page
+    "latex_book": (make_latex_book, {"path": "text", "has": ["the continued here", "Chapter 1"],
+                                     "hasnt": ["Getting started", "Section number"], "ch_max": 1}),
     # 11-19 lead: equations as pictures, footer "Page N of M" gone, both figures on page 3 kept
     "math_paper": (make_math_paper, {"path": "text", "has": ["clocks were striking", "and the paper ends"],
                                      "hasnt": ["Preprint submitted", "a = b + g", "α = β"], "imgs": 4}),

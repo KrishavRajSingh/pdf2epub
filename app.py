@@ -3856,6 +3856,16 @@ def _scan_photos(page, raw, known: Counter) -> list:
 
 SENT_END = re.compile(r"[.!?:…][\"”’')\]]*$")
 PAGE_NO = re.compile(r"[\[(]?[\d\s.\-–—]+[\])]?")
+DROP_CAP = re.compile(r"[“\"‘']?[A-Z]|[“\"‘']")
+
+
+def _furn_key(t) -> str:
+    """A page head/foot line with its page number gone: digits, symbol-font glyphs (private use
+    area) and control codes dropped, lowercased. "" when nothing but those was on the line."""
+    if not isinstance(t, str):
+        return ""
+    t = re.sub(r"[\d-\x00-\x1f\x7f]", " ", t)
+    return re.sub(r"\s+", " ", t).strip(" .-–—|").lower()
 # a line set big by a noisy OCR layer is not a heading if it stops mid-phrase
 OPEN_END = re.compile(r"(?:[,;\-–—]|\b(?:and|or|but|the|a|an|of|to|in|with|that|for))$", re.I)
 
@@ -4461,8 +4471,29 @@ def _structure(blocks, doc):
             ws.pop()
         return " ".join(ws).lower()
     top_keys = Counter(top_key(t) for p, y, sz, t in blocks if y < 60 and sz > 0 and len(t) < 80)
+    # ponytail: ebook-site PDFs (Planet eBook: 1984, Moby-Dick, The Prince, 11-22 QA) print the page
+    # number in a symbol font (" Free eBooks at Planet eBook.com", "Moby Dick "), so every
+    # page's footer differs and each is on every other page only, under the 50% cut. They stayed in the
+    # text 13-22 times a book, spliced mid-word ("a list of fig Free eBooks... ures"), and the bare
+    # glyph blocks between pages stopped the page-break join, so paragraphs split at every page end.
+    blocks = list(blocks)
+    foot_y = min(ph - 60, ph * 0.84)  # a 484pt ebook page has its footer at y=411, above ph - 60
+    edge_keys = Counter(_furn_key(t) for p, y, sz, t in blocks
+                        if sz > 0 and isinstance(t, str) and len(t) < 80 and (y < 60 or y > foot_y))
+    furniture = {k for k, c in edge_keys.items() if k and c >= 3 and c > n * 0.2 and re.search(r"[a-z]{3}", k)}
+    # ponytail: LaTeX books (Think Python/Stats, 11-22 QA) set the running head at y=61 on a letter page,
+    # just under the 60pt cut, and it changes with the section ("2.4. Script mode", "Chapter 2. ..."),
+    # so no text repeats enough. The place repeats: a short body-size line at one height above where
+    # the text starts, on a third of the pages, is the running head. It split paragraphs at page ends.
+    body_top = sorted(page_top.values())[(len(page_top) - 1) // 2] if page_top else 0
+    head_rows = {}
+    for p, y, sz, t in blocks:
+        if sz > 0 and isinstance(t, str) and y < min(ph * 0.12, body_top - 4) and len(t) < 90 and sz < h2_cut:
+            head_rows.setdefault(round(y / 2), set()).add(p)
+    run_rows = {r for r, ps in head_rows.items() if len(ps) >= max(3, n * 0.3)}
 
     chapters, cur, cur_notes = [], [], []
+    drop = None  # (letter, page) of a drop cap waiting for the paragraph it starts
     ocr = _ocr_layer(doc)
     bms = {} if ocr else _bookmarks(doc)
     if bms:
@@ -4543,6 +4574,31 @@ def _structure(blocks, doc):
             continue
         if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
+        if (y < 60 or y > foot_y) and len(t) < 80 and (_furn_key(t) in furniture or not _furn_key(t)) \
+                and not re.match(r"(chapter|part|book)\b", t, re.I):
+            continue  # a footer/head with a symbol-font page number, or that glyph alone (11-22)
+        if run_rows and sz < h2_cut and len(t) < 90 and {round(y / 2) - 1, round(y / 2), round(y / 2) + 1} & run_rows \
+                and not ocr:
+            continue
+        if (y < 60 or y > foot_y) and re.fullmatch(r"[ivxlcdm]{1,7}", t.strip(), re.I) and t.strip().lower() != "i":
+            continue  # a roman page number in the front matter ("ix", "xiv")
+        if not re.sub(r"[\s\ue000-\uf8ff\x00-\x1f\x7f]", "", t):
+            continue  # an icon in a symbol font (Pro Git's note/tip glyphs) is not a heading
+        if not ocr and drop:
+            # ponytail: a drop cap is its own big block ("I" at 28pt, then "t was a bright cold day"),
+            # so it became a chapter heading and the first sentence lost its letter (1984, 11-22 QA)
+            d, dp = drop
+            drop = None
+            if dp == pno and t[:1].isalpha():
+                first = re.match(r"[^\W\d_]+", t).group(0)
+                spaced = d in ("I", "A") and len(first) >= 3 and known[first.lower()] >= 2 \
+                    and not known[(d + first).lower()]
+                t = d + (" " if spaced else "") + t
+            else:
+                cur.append(("p", d))
+        if not ocr and sz >= h2_cut and len(t) <= 2 and DROP_CAP.fullmatch(t):
+            drop = (t, pno)
+            continue
         # ponytail: a running head carries its page number, so the text differs on every page
         # and the repeated-header counter misses it; it sits at the top edge in smaller type.
         if y < head_cut and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
