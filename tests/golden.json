@@ -1,4 +1,12 @@
 {
+ "ia_layer_quirks": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 6,
+  "imgs": 1,
+  "words": 1024
+ },
  "ebook_site": {
   "path": "text",
   "chapters": 2,

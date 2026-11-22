@@ -3861,6 +3861,18 @@ PAGE_NO = re.compile(r"[\[(]?[\d\s.\-–—]+[\])]?")
 DROP_CAP = re.compile(r"[“\"‘']?[A-Z]|[“\"‘']")
 
 
+def _letters(t: str) -> str:
+    return re.sub(r"[^a-z]", "", (t or "").lower())
+
+
+def _near_head(t: str, heads: set) -> bool:
+    """A top line that is one of the book's running heads with a few letters misread by OCR."""
+    from difflib import SequenceMatcher
+    k = _letters(re.sub(r"\d", "", t))
+    return len(k) >= 8 and any(abs(len(k) - len(h)) <= 4 and SequenceMatcher(None, k, h).ratio() >= 0.8
+                               for h in heads)
+
+
 def _furn_key(t) -> str:
     """A page head/foot line with its page number gone: digits, symbol-font glyphs (private use
     area) and control codes dropped, lowercased. "" when nothing but those was on the line."""
@@ -4146,6 +4158,70 @@ OFFPRINT = re.compile(r"e-?\s*offprint is for personal use only", re.I)
 REFS_HEAD = re.compile(r"(references|bibliography|works cited|literature cited|sources)", re.I)
 
 
+_GRAY = {}
+
+
+def _page_gray(page):
+    """One 72 dpi grayscale render per page, shared by every drop-cap ink test on it."""
+    key = (id(page.parent), page.number)
+    if key not in _GRAY:
+        if len(_GRAY) > 4:
+            _GRAY.clear()
+        _GRAY[key] = page.get_pixmap(dpi=72, colorspace=pymupdf.csGRAY)
+    return _GRAY[key]
+
+
+SHORT_WORDS = set("a i an as at be by do go he if in is it me my no of on or so to up us we".split())
+
+
+def _lost_drop_caps(page, bbox):
+    """Letters that could be the big first letter an OCR text layer left out, read off the page image.
+
+    ponytail: a scanned book with an OCR layer (Ageless Spine, 11-22 corpus) sets each chapter's first
+    letter as a two-line drop cap. The layer has no text for it, so chapters began "o say that",
+    "ere's a quick start", "an you imagine", and the paragraph was taken for the end of the one before.
+    The letter sits left of the first line; tesseract reads it alone (single character, white border),
+    from three crops because the next line's start can confuse it. The caller keeps the first letter
+    that makes a real word, so a misread ("Ho say") is dropped."""
+    x0, y0, x1, y1 = bbox
+    h = max(6.0, y1 - y0)
+    got = []  # a generator: the caller stops at the first letter that makes a word
+    for bottom in (2.8, 2.2, 1.9):
+        clip = pymupdf.Rect(max(0.0, x0 - 3.2 * h), y0 - 0.4 * h, x0 - 1, y0 + bottom * h) & page.rect
+        if clip.is_empty or clip.width < h:
+            return
+        try:
+            if bottom == 2.8:  # the ink test runs on one cached low-res render of the page, not a new render
+                low = _page_gray(page)
+                z = low.width / page.rect.width
+                ir = pymupdf.IRect(int(clip.x0 * z), int(clip.y0 * z), int(clip.x1 * z) + 1, int(clip.y1 * z) + 1)
+                vals = [low.pixel(x, y)[0] for y in range(max(0, ir.y0), min(low.height, ir.y1))
+                        for x in range(max(0, ir.x0), min(low.width, ir.x1))]
+            else:
+                pm = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
+                vals = pm.samples
+            dark = sum(1 for v in vals if v < 110)
+            if not vals or not 0.03 * len(vals) <= dark <= 0.35 * len(vals):
+                if bottom == 2.8:
+                    return  # no ink (the line just starts lowercase) or a photo beside it, not a letter
+                continue
+            if bottom == 2.8:  # ink is there: read it at full resolution
+                pm = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
+            pad = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, pm.width + 80, pm.height + 80), False)
+            pad.clear_with(255)
+            pm.set_origin(40, 40)
+            pad.copy(pm, pm.irect)
+            r = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "10", "-c",
+                                "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ"],
+                               input=pad.tobytes("png"), capture_output=True, timeout=20)
+            ch = r.stdout.decode("utf-8", "ignore").strip()
+            if re.fullmatch(r"[A-Z]", ch) and ch not in got:
+                got.append(ch)
+                yield ch
+        except Exception:
+            return
+
+
 def _ocr_rows(b):
     """An OCR block's lines as visual rows: [(text, size, bbox), ...].
 
@@ -4278,6 +4354,19 @@ def _blocks(doc):
             if b.get("type") != 0:
                 continue
             rows = _ocr_rows(b) if ocr else []
+            # a drop cap pushes the first lines right of the page's left edge; only those are worth a look
+            # (an archive.org layer starts ~3,000 lines a book lowercase, 200 s of renders if all were checked)
+            margin = sorted(xs)[len(xs) // 4] if xs else 0
+            if ocr and rows and rows[0][0][:1].islower() and not page.rotation \
+                    and 1.4 <= (rows[0][2][0] - margin) / max(6.0, rows[0][2][3] - rows[0][2][1]) <= 3.5:
+                # measured 11-22: drop-cap lines sit 1.7-2.5 line heights in; 4+ is a caption or a centered line
+                first = re.match(r"[^\W\d_]*", rows[0][0]).group(0).lower()
+                # the letter must make a word this book uses ("ere" -> "Here"), not glue onto one ("Sstresses")
+                cap = next((c for c in _lost_drop_caps(page, rows[0][2])
+                            if (c + first).lower() in SHORT_WORDS
+                            or known[(c + first).lower()] >= 2 and known[(c + first).lower()] > known[first]), "")
+                if cap:
+                    rows[0] = (cap + rows[0][0], rows[0][1], rows[0][2])
             for line in [] if ocr else b.get("lines", []):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if txt:
@@ -4473,6 +4562,11 @@ def _structure(blocks, doc):
             ws.pop()
         return " ".join(ws).lower()
     top_keys = Counter(top_key(t) for p, y, sz, t in blocks if y < 60 and sz > 0 and len(t) < 80)
+    # ponytail: an archive.org scan (Reminiscences, 11-22 corpus) OCRs its running head differently on
+    # many pages ("LAST SIXTY-FIVE YEARS. 13", "I;AST SIXTY-FIVE YEARS. 27", "C6 REMINISCENCES OFT HE"),
+    # set larger than the text, so the misread ones became headings that cut paragraphs in two. Only a
+    # line carrying its page number counts: a title page "THE FEASTING: DEAD" is not the running head.
+    run_heads = {_letters(k) for k, c in top_keys.items() if c >= 3 and len(_letters(k)) >= 8}
     # ponytail: ebook-site PDFs (Planet eBook: 1984, Moby-Dick, The Prince, 11-22 QA) print the page
     # number in a symbol font (" Free eBooks at Planet eBook.com", "Moby Dick "), so every
     # page's footer differs and each is on every other page only, under the 50% cut. They stayed in the
@@ -4541,21 +4635,35 @@ def _structure(blocks, doc):
         return (len(t.split()) <= 12 and not SENT_END.search(t) and not t[:1].islower()
                 and not prose and bool(ws) and sum(known[w.lower()] >= 3 for w in ws) >= 0.6 * len(ws))
 
+    def open_para():
+        """Index in cur of the paragraph a new block may continue: the last item, or the last
+        paragraph with only pictures after it (at most 3). -1 when there is none.
+
+        ponytail: a photo set mid-paragraph (Ageless Spine, 11-22 corpus: 25 of its 29 page-end
+        splits) sits between the two halves, so the half after it became a new paragraph."""
+        k = len(cur) - 1
+        while k >= 0 and cur[k][0] == "img" and len(cur) - 1 - k < 3:
+            k -= 1
+        return k if k >= 0 and cur[k][0] == "p" and isinstance(cur[k][1], str) else -1
+
     def continues(t, sz):
         # OCR layers size each line differently, so a mid-paragraph line can look like a heading
         # by font size alone; an open sentence before it or a lowercase start says otherwise.
-        if not cur or cur[-1][0] != "p":
+        k = open_para()
+        if k < 0:
             return False
         if ocr and sz >= h2_cut and caps_title(t):
             return False  # a chapter title after a page that ends mid-sentence
-        prev = cur[-1][1]
+        prev = cur[k][1]
         if list_item.match(t) or SENT_END.search(prev):
             return False
         if re.search(r"[a-z]-$", prev) or t[:1].islower():
             return True
         if t[:1] in "—…" and t[1:2].islower():
             return True  # "on that team" / "—no,” he paused": dialogue picked up after a dash
-        return ocr and len(prev) >= 50  # a born-digital block without a full stop is a list or a cell
+        # a born-digital block without a full stop is a list or a cell; past a picture, only a
+        # lowercase start or a broken word says the sentence goes on
+        return ocr and len(prev) >= 50 and k == len(cur) - 1
 
     def flush():
         if cur:
@@ -4574,6 +4682,9 @@ def _structure(blocks, doc):
         if ocr and y < 60 and len(t) < 80 and len(top_key(t).split()) >= 2 and top_keys[top_key(t)] >= 3 \
                 and not re.match(r"(chapter|part|book)\b", top_key(t)):
             continue
+        if ocr and y < 60 and len(t) < 80 and run_heads and re.search(r"\d", t) \
+                and not re.match(r"(chapter|part|book)\b", t, re.I) and _near_head(t, run_heads):
+            continue  # the same running head with a letter or two misread ("I;AST SIXTY-FIVE YEARS. 27")
         if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
         if (y < 60 or y > foot_y) and len(t) < 80 and (_furn_key(t) in furniture or not _furn_key(t)) \
@@ -4651,11 +4762,13 @@ def _structure(blocks, doc):
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
         elif continues(t, sz):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
-            # an OCR text layer that cut the paragraph into blocks) is the same paragraph.
-            prev = cur[-1][1]
+            # an OCR text layer that cut the paragraph into blocks) is the same paragraph. Pictures
+            # between the halves stay where they are, after the joined paragraph.
+            k = open_para()
+            prev = cur[k][1]
             glue = prev[:-1] if prev.endswith("-") and prev[-2:-1].isalpha() else \
                 prev if t[:1] in "—…" else prev + " "
-            cur[-1] = ("p", glue + t)
+            cur[k] = ("p", glue + t)
         elif sz >= h2_cut and len(t) < 120 and not OPEN_END.search(t) and ocr and not size_head(t):
             if any(c.isalpha() for c in t) and WORD3.search(t):
                 cur.append(("p", t))  # big but not a heading: a verse, a quoted letter

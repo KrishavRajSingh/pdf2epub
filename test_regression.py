@@ -603,7 +603,48 @@ def make_latex_book():
     return d
 
 
+def make_ia_layer_quirks():
+    """11-22 corpus (Ageless Spine, Reminiscences): a scan with an OCR layer whose drop cap is only in the
+    picture ("an you imagine"), a photo between the two halves of a paragraph, and a running head that
+    OCR misreads on some pages ("I;AST SIXTY-FIVE YEARS")."""
+    body = "Can you sit well? You can, and you can stand well too. " * 2 + PROSE * 3
+    d = _doc()
+    for k in range(6):
+        src = pymupdf.open().new_page()
+        src.insert_text((200, 40), f"LAST SIXTY-FIVE YEARS. {k + 10}", fontsize=13)
+        layer = []  # (rect or point, text, size) for the invisible OCR layer
+        if k == 0:
+            src.insert_text((72, 110), "Chapter 1", fontsize=26)
+            src.insert_text((72, 186), "C", fontsize=44)  # the drop cap, in the picture only
+            first = "an you imagine a bird straining its wings all day long? " + body
+            # the first two lines wrap around the drop cap, the rest start at the margin
+            src.insert_textbox(pymupdf.Rect(110, 150, 520, 190), first[:100], fontsize=11)
+            src.insert_textbox(pymupdf.Rect(72, 192, 520, 760), first[100:], fontsize=11)
+            layer = [(pymupdf.Rect(110, 150, 520, 190), first[:100]), (pymupdf.Rect(72, 192, 520, 760), first[100:])]
+        elif k == 2:
+            top = PROSE * 2 + "The spine has to carry the weight of the body and other"
+            src.insert_textbox(pymupdf.Rect(72, 80, 520, 260), top, fontsize=11)
+            src.draw_rect(pymupdf.Rect(150, 300, 450, 520), fill=(0.55, 0.35, 0.25))
+            src.draw_circle((300, 410), 70, fill=(0.15, 0.3, 0.5))
+            rest = "stresses of the day, and the muscles share that load. " + PROSE * 2
+            src.insert_textbox(pymupdf.Rect(72, 560, 520, 760), rest, fontsize=11)
+            layer = [(pymupdf.Rect(72, 80, 520, 260), top), (pymupdf.Rect(72, 560, 520, 760), rest)]
+        else:
+            src.insert_textbox(pymupdf.Rect(72, 80, 520, 760), body * 2, fontsize=11)
+            layer = [(pymupdf.Rect(72, 80, 520, 760), body * 2)]
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=src.get_pixmap(dpi=150).tobytes("png"))
+        head = ("I;AST SIXTY-FIVE YEARS. " if k in (2, 4) else "LAST SIXTY-FIVE YEARS. ") + str(k + 10)
+        pg.insert_text((200, 40), head, fontsize=13, render_mode=3)
+        for r, t in layer:
+            pg.insert_textbox(r, t, fontsize=11, render_mode=3)
+    return d
+
+
 CASES = {
+    # 11-22 corpus: OCR layer quirks (lost drop cap, photo inside a paragraph, misread running head)
+    "ia_layer_quirks": (make_ia_layer_quirks, {"path": "text", "has": ["Can you imagine", "body and other stresses"],
+                                               "hasnt": ["I;AST", "SIXTY-FIVE"], "ch_max": 1, "imgs": 1}),
     # 11-22 QA: footer + drop cap + page-end joins on an ebook-site PDF
     "ebook_site": (make_ebook_site, {"path": "text", "has": ["It was a bright cold day", "the start of page 2"],
                                      "hasnt": ["Free eBooks", " t was a bright"], "ch_max": 2, "h_min": 2}),
