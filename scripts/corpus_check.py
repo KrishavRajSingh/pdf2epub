@@ -56,6 +56,28 @@ def run_one(path: str) -> tuple[str, dict]:
     try:
         doc = pymupdf.open(path)
         with contextlib.redirect_stdout(io.StringIO()):
+            if app._ocr_layer(doc):
+                # ponytail (11-22): live /convert re-reads a scan with an old OCR layer (Drive, then
+                # ocr_chapters); the text path is only its fallback. Measure what readers get: the Drive
+                # path, its page texts cached per book so a weekly run makes no new Drive calls.
+                if len(doc) > 40:
+                    doc.select(range(40))
+                cache = Path(path).parent.parent / "cache" / (Path(path).parent.name + "-" + Path(path).stem + ".json")
+                texts = json.loads(cache.read_text()) if cache.exists() else None
+                if texts is not None or app.DRIVE_REFRESH:
+                    it = iter(texts or [])
+                    pages = app.layer_scan_pages(doc, app.doc_lang(doc), "",
+                                                 drive=(lambda img, lang: next(it, None)) if texts is not None else None)
+                    if pages and texts is None:
+                        cache.parent.mkdir(exist_ok=True)
+                        cache.write_text(json.dumps([t for t, _ in pages], ensure_ascii=False))
+                    if pages:
+                        tx = [t for t, _ in pages]
+                        figs = app._scan_figures(doc, pages, {})
+                        chapters = app.ocr_chapters(tx, figs, app.pdf_toc(doc))
+                        m = measure(chapters, len(doc))
+                        m.update(kind="layer", pages=len(doc))
+                        return name, m
             blocks = app._text_blocks(doc)
             cut = 150 if blocks else 20
             if len(doc) > cut:
