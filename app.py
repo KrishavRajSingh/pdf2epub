@@ -1828,6 +1828,8 @@ footer .mono{font-size:11.5px}
 .book h3+p{text-indent:0}
 .said{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;align-items:start}
 .said figure{margin:0}
+.said .qs{display:grid;gap:22px}
+.said .q2 blockquote{font-size:clamp(18px,2.2vw,21px);line-height:1.35}
 .said blockquote{margin:0;font-family:var(--serif);font-size:clamp(24px,3.2vw,30px);line-height:1.2;letter-spacing:-.015em}
 .said figcaption{margin-top:10px;font-size:13px;color:var(--faint)}
 .said .feat{margin:0;font-size:14px;line-height:1.6;color:var(--dim);border-left:1px solid var(--line2);padding:2px 0 2px 16px}
@@ -1949,8 +1951,12 @@ __ALT__
 
 <h2>From readers</h2>
 <div class="said">
+  <div class="qs">
   <figure><blockquote>&ldquo;The footnotes look great.&rdquo;</blockquote>
     <figcaption>A reader, after converting a 497-page book</figcaption></figure>
+  <figure class="q2"><blockquote>&ldquo;My 320-page book with 150+ pictures came out at 23&nbsp;MB with no embedded fonts and went straight into Draft2Digital.&rdquo;</blockquote>
+    <figcaption>A self-published author, whose own Pages export was over 100&nbsp;MB</figcaption></figure>
+  </div>
   <p class="feat">Featured in the <b>deepculture</b> newsletter, issue #243. One of its readers converted 68 books in 32 minutes.</p>
 </div>
 
@@ -2706,9 +2712,6 @@ LIBRARY_CARD = f"""<div class="card">
 <li><b>Sharper reading for faded print.</b> Regular OCR misreads old, faded or unusual type. Pages it is unsure of get a second reading by an AI vision model, up to {LIBRARY_SHARP:,} pages. On our test of faded Telugu pages, that took accuracy from 87% to 97%.</li>
 <li>Telugu, Hindi, English, Portuguese and Spanish scans. No renewal.</li>
 </ul>
-<blockquote style="margin:14px 0 4px;padding:2px 0 2px 14px;border-left:3px solid var(--acc);color:var(--txt);font-family:var(--serif);font-size:17px;line-height:1.5">
-"They look awesome. I never expected these weird formatted books could be converted to EPUB. Now I can read them on my phone and Kindle with font adjustments."</blockquote>
-<p style="margin:0 0 6px;font-size:14px">A reader with a library of old Telugu books</p>
 <blockquote style="margin:14px 0 4px;padding:2px 0 2px 14px;border-left:3px solid var(--acc);color:var(--txt);font-family:var(--serif);font-size:17px;line-height:1.5">
 "They look awesome. I never expected these weird formatted books could be converted to EPUB. Now I can read them on my phone and Kindle with font adjustments."</blockquote>
 <p style="margin:0 0 6px;font-size:14px">A reader with a library of old Telugu books</p>
