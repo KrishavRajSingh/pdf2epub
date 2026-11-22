@@ -196,6 +196,25 @@ def preview_contents_page():
     print("ok — scan chapters: contents page found in a 20-page preview")
 
 
+def contents_heading_not_first():
+    """Ageless Spine via Drive OCR (11-22): "CONTENTS" came fifth on its page, the second contents
+    page had no heading, and the entries are spelled "Acknowlegements"/"Forward". Every dotted line
+    became a chapter, and the real ACKNOWLEDGMENTS and FOREWORD were dropped."""
+    body = ("the spine was never meant to be held stiff and upright by effort, it was meant to rest "
+            "on the bones below it, the way stones rest in an arch that stands for a thousand years")
+    pages = ["", "", "",
+             "Acknowlegements\n\nForward...........\n\nCONTENTS\n\nPART I - A Body of Knowledge\n\nVII\n\n"
+             "Chapter One - The Shape We're In...\n\nChapter Two - Design for Life............\n\n3\n\n15",
+             "Goose Neck........\n\nOpen Your Eyes..........\n\nPART III - Putting It All Together..\n\n"
+             "How to Sit\n\nHow to Stand..\n\nHow to Walk..\n\nIndex...\n\n165",
+             f"ACKNOWLEDGMENTS\n\n{body}.", f"{body}.", f"FOREWORD\n\n{body}.", f"{body}.",
+             f"Chapter One\n\nThe Shape We're In\n\n{body}.", f"{body}."]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    assert heads == ["ACKNOWLEDGMENTS", "FOREWORD", "Chapter One The Shape We're In"], heads
+    print("ok — scan chapters: contents heading mid-page, dotted second page, near spellings")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
@@ -204,3 +223,4 @@ if __name__ == "__main__":
     untitled_front_name()
     scan_cover_page()
     preview_contents_page()
+    contents_heading_not_first()

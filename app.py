@@ -1,5 +1,6 @@
 """PDF -> EPUB MVP. Free text-only. No auth, no DB, no storage."""
 from collections import Counter
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -1290,14 +1291,33 @@ def _front(pages: list) -> int:
     return max(15, len(pages) // 5)
 
 
+LEADER = re.compile(r"\s*\.{2,}.*$")  # "Chapter Two - Design for Life............ 15"
+
+
+def _contents_pages(pages: list[str]) -> set:
+    """Indexes of the printed contents pages in the front of the book. ponytail: Drive OCR put
+    "CONTENTS" fifth on Ageless Spine's page, under four dotted entries, and its second page has no
+    heading at all, so every dotted entry became a chapter (11-22). A page with the heading anywhere
+    near the top counts; the page after one counts when its lines are mostly dot-leader entries."""
+    got = set()
+    for i, txt in enumerate(pages[: _front(pages)]):
+        paras = _page_paras(txt)
+        if any(CONTENTS_HEAD.fullmatch(p.strip()) for p in paras[:8]):
+            got.add(i)
+        elif i - 1 in got and paras:
+            dotted = sum(bool(LEADER.search(p)) and len(p) <= 120 for p in paras)
+            if dotted >= 4 and dotted * 3 >= len(paras):
+                got.add(i)
+    return got
+
+
 def _contents_keys(pages: list[str]) -> set:
     """Entries of the printed contents page ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"),
     squashed to letters and digits; empty when the book has none or it lists under 3 entries."""
     got = []
-    for txt in pages[: _front(pages)]:
-        paras = _page_paras(txt)
-        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()):
-            got += [_squash(p) for p in paras[1:] if any(c.isalpha() for c in p) and len(p) <= 120]
+    for i in sorted(_contents_pages(pages)):
+        got += [_squash(LEADER.sub("", p)) for p in _page_paras(pages[i])
+                if any(c.isalpha() for c in p) and len(p) <= 120 and not CONTENTS_HEAD.fullmatch(p.strip())]
     return {k for k in got if len(k) >= 3} if len(got) >= 3 else set()
 
 
@@ -1308,7 +1328,14 @@ def _squash(t: str) -> str:
 def _in_contents(para: str, keys: set) -> bool:
     """The line is a contents entry, or its "CHAPTER 1" start (the title sits on the next line)."""
     k = _squash(para)
-    return len(k) >= 3 and (k in keys or bool(HEAD_WORD.match(para)) and any(c.startswith(k) for c in keys))
+    if len(k) < 3:
+        return False
+    if k in keys or bool(HEAD_WORD.match(para)) and any(c.startswith(k) for c in keys):
+        return True
+    # ponytail: Ageless Spine's contents page spells "Acknowlegements" and "Forward" while the
+    # pages say ACKNOWLEDGMENTS and FOREWORD (11-22); a near spelling of a whole entry counts
+    return len(k) >= 6 and any(abs(len(c) - len(k)) <= 3 and SequenceMatcher(None, c, k).ratio() >= 0.8
+                               for c in keys)
 
 
 def _running_heads(pages: list[str]) -> set:
@@ -1421,6 +1448,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
     heads = _running_heads(pages)
     chapter_heads = _chapter_heads(pages)
     contents = _contents_keys(pages)
+    contents_pages = _contents_pages(pages)
     head_words = _head_words(pages)
     stories = _story_numbers(pages)
     letters = [c for c in "".join(pages[:: max(1, len(pages) // 40)]) if c.isalpha()]
@@ -1444,7 +1472,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         paras = _drop_caps(_page_paras(txt))
-        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()) and i < _front(pages):
+        if i in contents_pages:
             continue  # ponytail: the printed contents page; its "CHAPTER 1 ..." lines became chapters (11-21)
         # ponytail: a title page is short lines only and its title is the running head's words, so
         # "THE FEASTING" was dropped as a head and "DEAD" stood alone (11-21). Heads sit over text.
