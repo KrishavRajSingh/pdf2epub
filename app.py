@@ -1283,11 +1283,17 @@ def _same_title(para: str, title: str) -> bool:
 CONTENTS_HEAD = re.compile(r"(table of )?contents", re.I)
 
 
+def _front(pages: list) -> int:
+    """How many opening pages can hold the printed contents page. ponytail: 1/5 of the book alone
+    was 4 pages of a 20-page free preview, and Unpayable Debt's contents sit on page 7 (11-22)."""
+    return max(15, len(pages) // 5)
+
+
 def _contents_keys(pages: list[str]) -> set:
     """Entries of the printed contents page ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"),
     squashed to letters and digits; empty when the book has none or it lists under 3 entries."""
     got = []
-    for txt in pages[: max(1, len(pages) // 5)]:
+    for txt in pages[: _front(pages)]:
         paras = _page_paras(txt)
         if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()):
             got += [_squash(p) for p in paras[1:] if any(c.isalpha() for c in p) and len(p) <= 120]
@@ -1437,7 +1443,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
         paras = _drop_caps(_page_paras(txt))
-        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()) and i < len(pages) // 5:
+        if paras and CONTENTS_HEAD.fullmatch(paras[0].strip()) and i < _front(pages):
             continue  # ponytail: the printed contents page; its "CHAPTER 1 ..." lines became chapters (11-21)
         # ponytail: a title page is short lines only and its title is the running head's words, so
         # "THE FEASTING" was dropped as a head and "DEAD" stood alone (11-21). Heads sit over text.

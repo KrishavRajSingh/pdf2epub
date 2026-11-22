@@ -182,6 +182,20 @@ def scan_cover_page():
     print("ok — scan cover: first page is the cover picture")
 
 
+def preview_contents_page():
+    """Free preview = first 20 pages. The contents page on page 7 was past the 1/5 window (4 pages),
+    so its lines became chapters ("CHAPTER 2 ...", "CHAPTER 4 ...") with nothing in them."""
+    body = ("the papers would not matter because then and there the law already held that the "
+            "enslaved person was property, whatever any document happened to say about it")
+    pages = ["", "Unpayable Debt", "", "", "", "",
+             "CONTENTS\n\nFuture Perfect\n\n11\n\nCHAPTER 1 \"Not even\"\n\n19\n\nCHAPTER 2 \"hallucination\"\n\n83",
+             "", "", "", "", "", "Future Perfect"] + [f"Future Perfect\n\n{13 + k}\n\n{body}." for k in range(7)]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    assert heads == ["Future Perfect"], heads
+    print("ok — scan chapters: contents page found in a 20-page preview")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
@@ -189,3 +203,4 @@ if __name__ == "__main__":
     contents_page_chapters()
     untitled_front_name()
     scan_cover_page()
+    preview_contents_page()
