@@ -39,14 +39,15 @@ FAQ = {"en": [
      "No. The PDF is never saved, and the finished EPUB is deleted ten minutes after you download it, so a second tap still works (or after an hour if you never do). There is no account and no library on this side."),
     ("My PDF is a scanned book. Does that work?",
      "Yes. Scanned pages are read with OCR, then split into chapters and paragraphs like any other PDF. "
-     "The first __FREEOCR__ pages are free, and the whole book is $5 once."),
+     "Scans up to __FREEOCR__ pages are free. A longer scan is $5 once for the whole book, full refund if you are not happy."),
     ("What happens to footnotes and maps?",
      "Footnotes move to the end of their chapter, under Notes. Maps, figures and pages that are mostly a picture "
      "come through as images."),
     ("Can it convert a book I bought from Kindle or Kobo?",
      "No. Store books are locked with DRM and are not PDFs. It converts PDFs you can open yourself."),
     ("What if my book has more than 150 pages?",
-     "The free converter gives you the first 150 pages. One book, $5 once, converts up to 2,000 pages. "
+     "Books up to 150 pages convert free. A longer book is $5 once and converts whole, up to 2,000 pages, "
+     "with a full refund if you are not happy. "
      "Anything bigger is still $5: email us and we raise the limit for your book."),
     ("What if the paid conversion is not good enough?",
      "Email me within 30 days and I refund the full amount, no questions asked."),
@@ -1956,7 +1957,7 @@ __ALT__
 <h2 id="prices">Prices</h2>
 <div class="prices">
   <div class="price"><h3>Free</h3><div class="amt">$0</div>
-    <p>One PDF at a time, up to 150 pages and 1GB. Scans: the first __FREEOCR__ pages.</p>
+    <p>One PDF at a time, up to 150 pages and 1GB. Scans up to __FREEOCR__ pages.</p>
     <span class="here">It is the converter above</span></div>
   <div class="price"><h3>One book</h3><div class="amt">$5 once</div>
     <p>One book up to 2,000 pages, scans included. Pay, come back to an upload box, convert on the spot.</p>
@@ -2035,17 +2036,17 @@ function multi(){const w=wallFiles(),nm=window.capName||'book';
  return w.length>=2?w.length:0}
 function multiBox(n,k){return '<div style="margin:0 0 12px;padding:12px 14px;border:2px solid #6b4ce6;border-radius:6px">'
  +'<b>Converting several books?</b> This is your '+(k===2?'second':k===3?'third':k+'th')+' over the free limit today.<br>'
- +'<a style="'+BTN+'" href="/go/batch?why=multi&v='+V+'">$10 for 30 days, every book, no renewal</a>'
- +freeOffer(n)+'</div>'}
+ +'<a style="'+BTN+'" href="/go/batch?why=multi&v='+V+'">$10 for 30 days, every book, no renewal</a></div>'}
+// ponytail (11-22): over the limit there is no free part any more. Both wall sales (11-03 $5, 11-04 Shelf)
+// came from the hard wall (2 of 18 wall readers); since the free 150-page preview (11-07) 0 of 136 paid.
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
 function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
- +(window.previewDone?'':'<button id="preview" data-n="150" style="'+GHOST+'">Free: first 150 pages</button>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
+ +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot, up to 2,000 pages. Nothing stored. Not happy? Full refund.</span>'
- +(k?'':freeOffer(n))
+ +'on the spot, up to 2,000 pages. Nothing stored.</span>'
  +'<br><br><span style="font-size:13px;color:#5b564d">Bigger than 2,000 pages? Still $5. Leave your email and we raise the limit for your book.</span><br>'
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
@@ -2055,9 +2056,9 @@ function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is
  +'Free OCR covers __FREEOCR__ pages.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
- +(window.previewDone?'':'<button id="preview" data-n="__FREEOCR__" style="'+GHOST+'">Free: first __FREEOCR__ pages</button>')
+ +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot. Nothing stored. Not happy? Full refund.</span>'+(k?'':freeOffer(n))}
+ +'on the spot. Nothing stored.</span>'}
 document.addEventListener('click',async(e)=>{
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id==='fbbtn'){const em=document.getElementById('fbmail');
@@ -2155,7 +2156,7 @@ async function convert(preview){
  fd.append('author',document.getElementById('author').value);
  fd.append('email',document.getElementById('email').value);
  // ponytail: always ask for the free part, so an over-limit book uploads once (not refused, then re-sent)
- fd.append('preview','1');window.lastCap='';
+ if(preview)fd.append('preview','1');window.lastCap='';
  if(window.FREE)fd.append('free',window.FREE);
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
@@ -2176,8 +2177,6 @@ async function convert(preview){
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   const cap=e.status===413&&!K?'pages':(e.status===402&&/scanned/.test(e.message)?'ocr':'');
   // over the limit on a full run: convert the free part straight away instead of asking first
-  if(cap&&!preview){window.capPages=n;window.capName=(f&&f.name)||'book';window.capKind=cap;window.previewDone=false;
-   PN=cap==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:cap});go.disabled=false;return convert(true)}
   if(!preview){window.capPages=n;window.capName=(f&&f.name)||'book'}
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(e.status===502||e.status===503||e.status===504){msg.innerHTML='This file was too heavy for the instant converter. That is on our side, not your file.'

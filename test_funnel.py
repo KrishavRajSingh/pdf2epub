@@ -452,10 +452,14 @@ def main():
     assert r.status_code == 400, r.status_code
     assert not any(k.startswith("lead") for k in st["fail_by_err"]), st["fail_by_err"]
 
-    # preview before paying (11-07): over the limit converts the free part first, then pitches $5
-    for path, word in (("/", "pages are downloaded"), ("/pt/", "foram baixadas"), ("/es/", "se descargaron")):
+    # hard wall again (11-22): over the limit there is no free part, the page pitches $5 with the refund in bold.
+    # The 11-07 preview: 0 of 136 wall readers paid; the hard wall before it: 2 of 18.
+    for path, word in (("/", "<b>Not happy with the book? Full refund, no questions asked.</b>"),
+                       ("/pt/", "<b>Não gostou do livro? Reembolso total, sem perguntas.</b>"),
+                       ("/es/", "<b>¿No te convence el libro? Te devolvemos todo, sin preguntas.</b>")):
         page = client.get(path).text
-        assert "preview_auto" in page and "return convert(true)" in page and "pages-seen" in page, path
+        assert "return convert(true)" not in page and 'id="preview"' not in page, path
+        assert "if(preview)fd.append('preview','1')" in page and "pitchPages(n)" in page, path
         assert word in page, (path, word)
 
     # re-download (11-08): a Reddit user got 200 then 404 x2 on the same job; the epub now lives 10 min after the first fetch
