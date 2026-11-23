@@ -562,7 +562,7 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
     drive = drive or (_drive_page if DRIVE_REFRESH else None)
     if not drive or not len(doc):
         return None
-    pages, confs, inked, failed = [], {}, set(), 0
+    pages, confs, inked, failed, drove = [], {}, set(), 0, set()
     step = DRIVE_THREADS * 8  # ponytail: a 2,000-page paid book would hold ~400MB of page images at once
     for a in range(0, len(doc), step):
         part = list(range(a, min(a + step, len(doc))))
@@ -579,18 +579,42 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
                 text = ""  # the archive's own "Digitized by" page, not the book
             if text is None:
                 failed += 1
+            elif text:
+                drove.add(i)
             pages.append((doc[i].get_text() if text is None else text, 1.0))
             confs[i] = 0.0 if (text is None or win[i][1]) else 100.0
             if win[i][1]:
                 inked.add(i)
     if failed > len(doc) / 2:
         return None
+    for i in sorted(drove):  # pages Drive read; a failed page keeps the old layer's text as it is
+            try:
+                pages[i] = (_put_caps(pages[i][0], _cap_rows(doc[i])), pages[i][1])
+            except Exception:
+                pass  # ponytail: a page whose layer can't be read keeps Drive's text as it is
     sharp = 0
     if key and sharp_left(key) and any(c < SHARP_CONF for c in confs.values()):
         sharp = sharp_pages(doc, pages, confs, lang, key, read, img=lambda i: _strip_pen(doc[i])[0])
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "layer_scan": len(doc), "drive_failed": failed,
                       "inked": len(inked), "sharp": sharp}), flush=True)
     return pages
+
+
+def _put_caps(text: str, caps: list) -> str:
+    """Drive's page text with the drop caps the picture shows put back. ponytail: Drive loses a
+    two-line drop cap like the old layer does ("ere's a quick start", Ageless Spine 11-22). The
+    layer says which line it starts; the same words starting a line in Drive's text, still
+    lowercase, get the letter. Drive's line that already has it ("Here's") does not match."""
+    flat = text.replace("\u2019", "'").replace("\u2018", "'")
+    for _, row, cap in caps:
+        words = row.replace("\u2019", "'").replace("\u2018", "'").split()[:4]
+        if len(words) < 2:
+            continue
+        m = re.search(r"(?:^|\n)[ \t]*(" + r"\s+".join(map(re.escape, words)) + ")", flat)
+        if m and flat[m.start(1)].islower():
+            k = m.start(1)
+            text, flat = text[:k] + cap + text[k:], flat[:k] + cap + flat[k:]
+    return text
 
 
 def _order_email(checkout_id: str) -> str:
@@ -4199,55 +4223,79 @@ def _page_gray(page):
     return _GRAY[key]
 
 
-SHORT_WORDS = set("a i an as at be by do go he if in is it me my no of on or so to up us we".split())
-
-
-def _lost_drop_caps(page, bbox):
-    """Letters that could be the big first letter an OCR text layer left out, read off the page image.
+def _drop_cap(page, bbox) -> str:
+    """The big first letter an OCR text layer left out, read off the page image, or "".
 
     ponytail: a scanned book with an OCR layer (Ageless Spine, 11-22 corpus) sets each chapter's first
-    letter as a two-line drop cap. The layer has no text for it, so chapters began "o say that",
-    "ere's a quick start", "an you imagine", and the paragraph was taken for the end of the one before.
-    The letter sits left of the first line; tesseract reads it alone (single character, white border),
-    from three crops because the next line's start can confuse it. The caller keeps the first letter
-    that makes a real word, so a misread ("Ho say") is dropped."""
+    letter as a two-line drop cap. The layer has no text for it, and Google Drive's OCR loses it too,
+    so chapters began "o say that", "ere's a quick start", "an you imagine". The letter sits left of
+    the first line. Nothing here checks words: a book may spell anything on purpose (user, 11-23).
+    What the picture shows decides: one tall letter shape (a sidebar's frame line is thin, the second
+    line beside the same letter sees it cut off at the top), read alone by tesseract from three crops
+    in black and white (gray paper made it read nothing), and at least two reads must agree."""
     x0, y0, x1, y1 = bbox
     h = max(6.0, y1 - y0)
-    got = []  # a generator: the caller stops at the first letter that makes a word
-    for bottom in (2.8, 2.2, 1.9):
-        clip = pymupdf.Rect(max(0.0, x0 - 3.2 * h), y0 - 0.4 * h, x0 - 1, y0 + bottom * h) & page.rect
-        if clip.is_empty or clip.width < h:
-            return
-        try:
-            if bottom == 2.8:  # the ink test runs on one cached low-res render of the page, not a new render
-                low = _page_gray(page)
-                z = low.width / page.rect.width
-                ir = pymupdf.IRect(int(clip.x0 * z), int(clip.y0 * z), int(clip.x1 * z) + 1, int(clip.y1 * z) + 1)
-                vals = [low.pixel(x, y)[0] for y in range(max(0, ir.y0), min(low.height, ir.y1))
-                        for x in range(max(0, ir.x0), min(low.width, ir.x1))]
-            else:
-                pm = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
-                vals = pm.samples
-            dark = sum(1 for v in vals if v < 110)
-            if not vals or not 0.03 * len(vals) <= dark <= 0.35 * len(vals):
-                if bottom == 2.8:
-                    return  # no ink (the line just starts lowercase) or a photo beside it, not a letter
-                continue
-            if bottom == 2.8:  # ink is there: read it at full resolution
-                pm = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
-            pad = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, pm.width + 80, pm.height + 80), False)
+    clip = pymupdf.Rect(max(0.0, x0 - 3.2 * h), y0 - 0.4 * h, x0 - 1, y0 + 2.8 * h) & page.rect
+    if clip.is_empty or clip.width < h:
+        return ""
+    try:
+        low = _page_gray(page)  # the ink test runs on one cached low-res render of the page
+        z = low.width / page.rect.width
+        ir = pymupdf.IRect(int(clip.x0 * z), int(clip.y0 * z), int(clip.x1 * z) + 1, int(clip.y1 * z) + 1)
+        vals = [low.pixel(x, y)[0] for y in range(max(0, ir.y0), min(low.height, ir.y1))
+                for x in range(max(0, ir.x0), min(low.width, ir.x1))]
+        dark = sum(1 for v in vals if v < 110)
+        if not vals or not 0.03 * len(vals) <= dark <= 0.35 * len(vals):
+            return ""  # no ink (the line just starts lowercase) or a photo beside it, not a letter
+        pm = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
+        w, ht, px = pm.width, pm.height, pm.samples
+        ys = [y for y in range(ht) if any(px[y * w + x] < 128 for x in range(w))]
+        xs = [x for x in range(w) if any(px[y * w + x] < 128 for y in range(ht))]
+        hp = h * 300 / 72
+        if not ys or ys[0] == 0 or ys[-1] - ys[0] < 1.5 * hp or xs[-1] - xs[0] < 0.5 * hp:
+            return ""  # not one tall letter: a frame line, a bullet, or the lower half of a letter above
+        reads = []
+        for bottom in (2.8, 2.2, 1.9):
+            c = pymupdf.Rect(clip.x0, clip.y0, clip.x1, y0 + bottom * h) & page.rect
+            pm = page.get_pixmap(dpi=300, clip=c, colorspace=pymupdf.csGRAY)
+            bw = pymupdf.Pixmap(pymupdf.csGRAY, pm.width, pm.height,
+                                bytes(0 if v < 128 else 255 for v in pm.samples), False)
+            pad = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, bw.width + 80, bw.height + 80), False)
             pad.clear_with(255)
-            pm.set_origin(40, 40)
-            pad.copy(pm, pm.irect)
+            bw.set_origin(40, 40)
+            pad.copy(bw, bw.irect)
             r = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "10", "-c",
                                 "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ"],
                                input=pad.tobytes("png"), capture_output=True, timeout=20)
-            ch = r.stdout.decode("utf-8", "ignore").strip()
-            if re.fullmatch(r"[A-Z]", ch) and ch not in got:
-                got.append(ch)
-                yield ch
-        except Exception:
-            return
+            reads.append(r.stdout.decode("utf-8", "ignore").strip())
+        best = max(set(reads), key=reads.count)
+        return best if re.fullmatch(r"[A-Z]", best) and reads.count(best) >= 2 else ""
+    except Exception:
+        return ""
+
+
+def _cap_rows(page, raw=None, xs=None) -> list:
+    """[(row index in raw, first row text, letter)] for each block of the page's OCR layer whose
+    first line lost its drop cap. ponytail: only a first line that starts lowercase and sits pushed
+    in from the page's left edge is worth a look (an archive.org layer starts ~3,000 lines a book
+    lowercase, 200 s of renders if all were checked); measured 11-22: drop-cap lines sit 1.7-2.5
+    line heights in, 4+ is a caption or a centered line."""
+    if page.rotation:
+        return []
+    raw = raw if raw is not None else page.get_text("dict")["blocks"]
+    xs = xs if xs is not None else [ln["bbox"][0] for b in raw if b.get("type") == 0 for ln in b.get("lines", [])]
+    margin = sorted(xs)[len(xs) // 4] if xs else 0
+    got = []
+    for bi, b in enumerate(raw):
+        if b.get("type") != 0:
+            continue
+        rows = _ocr_rows(b)
+        if rows and rows[0][0][:1].islower() \
+                and 1.4 <= (rows[0][2][0] - margin) / max(6.0, rows[0][2][3] - rows[0][2][1]) <= 3.5:
+            cap = _drop_cap(page, rows[0][2])
+            if cap:
+                got.append((bi, rows[0][0], cap))
+    return got
 
 
 def _ocr_rows(b):
@@ -4346,6 +4394,7 @@ def _blocks(doc):
             figs.append({"r": fr, "page": fp, "cap": cap, "cap_page": cap_page, "done": False})
         fig = figs[0]["r"] if figs else None
         xs = [ln["bbox"][0] for b in raw if b.get("type") == 0 for ln in b.get("lines", [])]
+        caps = {bi: c for bi, _, c in _cap_rows(page, raw, xs)} if ocr else {}
         photos = _scan_photos(page, raw, known) if ocr and not fig and not page.rotation else []
         photo_rects = list(photos)
         eqs = [] if ocr or page.rotation else _equations(raw, page.rect.height)
@@ -4382,19 +4431,9 @@ def _blocks(doc):
             if b.get("type") != 0:
                 continue
             rows = _ocr_rows(b) if ocr else []
-            # a drop cap pushes the first lines right of the page's left edge; only those are worth a look
-            # (an archive.org layer starts ~3,000 lines a book lowercase, 200 s of renders if all were checked)
-            margin = sorted(xs)[len(xs) // 4] if xs else 0
-            if ocr and rows and rows[0][0][:1].islower() and not page.rotation \
-                    and 1.4 <= (rows[0][2][0] - margin) / max(6.0, rows[0][2][3] - rows[0][2][1]) <= 3.5:
-                # measured 11-22: drop-cap lines sit 1.7-2.5 line heights in; 4+ is a caption or a centered line
-                first = re.match(r"[^\W\d_]*", rows[0][0]).group(0).lower()
-                # the letter must make a word this book uses ("ere" -> "Here"), not glue onto one ("Sstresses")
-                cap = next((c for c in _lost_drop_caps(page, rows[0][2])
-                            if (c + first).lower() in SHORT_WORDS
-                            or known[(c + first).lower()] >= 2 and known[(c + first).lower()] > known[first]), "")
-                if cap:
-                    rows[0] = (cap + rows[0][0], rows[0][1], rows[0][2])
+            cap = caps.get(bi, "") if ocr and rows else ""
+            if cap:
+                rows[0] = (cap + rows[0][0], rows[0][1], rows[0][2])
             for line in [] if ocr else b.get("lines", []):
                 txt = "".join(_span_text(s) for s in line["spans"]).strip()
                 if txt:

@@ -215,6 +215,47 @@ def contents_heading_not_first():
     print("ok — scan chapters: contents heading mid-page, dotted second page, near spellings")
 
 
+def drive_drop_caps():
+    """Drive loses a two-line drop cap like the old layer does ("ere's a quick start", Ageless Spine
+    11-22). The letter comes back from the picture only; no word list decides (user, 11-23): a
+    line printed lowercase on purpose at the margin, a sidebar's frame line and a line Drive read
+    with its capital already all stay as they are."""
+    body = "a quick start to understanding this whole book is to lie down on the floor and rest. " * 4
+    d = pymupdf.open()
+    layer = []
+    for k in range(3):
+        art = pymupdf.open()
+        ap = art.new_page()
+        if k == 0:  # drop cap H beside the first two lines
+            ap.insert_text((72, 186), "H", fontsize=44)
+            ap.insert_textbox(pymupdf.Rect(110, 150, 520, 190), "ere's " + body[:80], fontsize=11)
+            ap.insert_textbox(pymupdf.Rect(72, 192, 520, 700), body, fontsize=11)
+            layer.append([(pymupdf.Rect(110, 150, 520, 190), "ere's " + body[:80]),
+                          (pymupdf.Rect(72, 192, 520, 700), body)])
+        elif k == 1:  # a sidebar box: its frame line sits left of an indented lowercase line
+            ap.draw_rect(pymupdf.Rect(80, 140, 520, 330), color=(0.2, 0.5, 0.5), width=1)
+            ap.insert_textbox(pymupdf.Rect(110, 150, 500, 320), "injury or pain. " + body[:150], fontsize=11)
+            ap.insert_textbox(pymupdf.Rect(72, 360, 520, 700), body, fontsize=11)
+            layer.append([(pymupdf.Rect(110, 150, 500, 320), "injury or pain. " + body[:150]),
+                          (pymupdf.Rect(72, 360, 520, 700), body)])
+        else:  # lowercase on purpose, at the margin
+            ap.insert_textbox(pymupdf.Rect(72, 150, 520, 700), "e. e. cummings wrote " + body, fontsize=11)
+            layer.append([(pymupdf.Rect(72, 150, 520, 700), "e. e. cummings wrote " + body)])
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=ap.get_pixmap(dpi=150).tobytes("png"))
+        for r, t in layer[-1]:
+            pg.insert_textbox(r, t, fontsize=11, render_mode=3)
+    said = ["ere's " + body, "injury or pain. " + body, "e. e. cummings wrote " + body]
+    it = iter(said)
+    got = [t for t, _ in pdf2epub.layer_scan_pages(d, "en", "", drive=lambda img, l: next(it))]
+    assert got[0].startswith("Here's a quick start"), got[0][:30]
+    assert got[1:] == said[1:], [g[:20] for g in got[1:]]
+    it = iter(["Here's " + body] + said[1:])  # Drive already read the capital: no second one
+    got = [t for t, _ in pdf2epub.layer_scan_pages(d, "en", "", drive=lambda img, l: next(it))]
+    assert got[0].startswith("Here's a quick"), got[0][:30]
+    print("ok — Drive path: drop cap read off the picture, frame lines and lowercase text left alone")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
@@ -224,3 +265,4 @@ if __name__ == "__main__":
     scan_cover_page()
     preview_contents_page()
     contents_heading_not_first()
+    drive_drop_caps()
