@@ -44,7 +44,7 @@ def measure(chapters, pages: int) -> dict:
     latin = sum(c.isascii() for c in "".join(paras[:200])) > 0.6 * max(1, len("".join(paras[:200])))
     splits = sum(1 for a, b in zip(paras, paras[1:]) if latin and b[:1].islower() and not OPEN_END.search(a))
     rep = collections.Counter(p for p in paras if len(p) < 60 and len(p.split()) <= 8 and p[:1] not in "\"“‘'>$#")
-    return {"chapters": len(chapters), "toc": len(heads), "h1": sum(1 for h in heads if len(h.strip()) <= 2),
+    return {"chapters": len(chapters), "toc": len(heads), "h1": sum(1 for h in heads if len(h.strip()) <= 2 and not re.fullmatch(r"[IVXLC]+\.?", h.strip())),
             "splits": splits, "rephead": sum(c for c in rep.values() if c >= 4),
             "words": sum(len(p.split()) for p in paras), "suspect": app._suspect(chapters, pages) or ""}
 
@@ -56,7 +56,7 @@ def run_one(path: str) -> tuple[str, dict]:
     try:
         doc = pymupdf.open(path)
         with contextlib.redirect_stdout(io.StringIO()):
-            if app._ocr_layer(doc):
+            if app._ocr_layer(doc) and (app.DRIVE_REFRESH or (Path(path).parent.parent / "cache" / (Path(path).parent.name + "-" + Path(path).stem + ".json")).exists()):
                 # ponytail (11-22): live /convert re-reads a scan with an old OCR layer (Drive, then
                 # ocr_chapters); the text path is only its fallback. Measure what readers get: the Drive
                 # path, its page texts cached per book so a weekly run makes no new Drive calls.
@@ -108,6 +108,8 @@ def compare(old: dict, new: dict) -> list[str]:
         o = old.get(name)
         if not o or "error" in o:
             continue
+        if "error" not in m and (o.get("kind") != m.get("kind") or o.get("pages") != m.get("pages")):
+            continue  # measured another way (text 150 p -> Drive 40 p): a new baseline, not a change
         if "error" in m:
             out.append(f"{name}: now fails ({m['error']})")
             continue
@@ -146,7 +148,9 @@ def main():
             continue
         print(f"{name:34}{m['kind']:>5}{m['chapters']:5}{m['toc']:5}{m['h1']:4}{m['splits']:6}{m['rephead']:5}"
               f"{m['words']:8}  {m['suspect']}")
-    merged = {**old, **new} if only else new
+    # --only adds its rows to today's file (or to the last run's rows when today has none yet)
+    mine = json.loads(today.read_text()) if today.exists() else old
+    merged = {**mine, **new} if only else new
     today.write_text(json.dumps(merged, indent=1, ensure_ascii=False) + "\n")
     worse = compare(old, new)
     print(f"\nresults: {today}" + (f"  (vs {earlier[-1].name})" if earlier else "  (first run, nothing to compare)"))
