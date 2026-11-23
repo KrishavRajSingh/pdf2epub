@@ -641,7 +641,87 @@ def make_ia_layer_quirks():
     return d
 
 
+def make_print_ready_academic():
+    """Jon 11-23, Schizoanalytic Cartographies: a print-ready InDesign export. Crop marks and a bleed
+    frame on every page (all diagrams were dropped as "full-page"), contents set with en spaces (came
+    out as chapters), an outline with a typo ("Asemblages"), a running foot per essay, two diagrams
+    on one page with prose between, a legend between a diagram and its caption, a notation set big."""
+    tnr = "/System/Library/Fonts/Supplemental/Times New Roman.ttf"
+    d = _doc()
+    W, H, M = 430, 625, 32  # sheet; the trim sits M in from each side
+
+    def page():
+        pg = d.new_page(width=W, height=H)
+        pg.draw_rect(pymupdf.Rect(0, 0, W, H), color=(1, 1, 1), width=0.5)  # bleed frame
+        for x, y in ((M, 8), (W - M, 8), (M, H - 20), (W - M, H - 20)):  # crop marks outside the trim
+            for k in range(12):
+                pg.draw_line((x - 6 + k, y), (x - 6 + k, y + 10), width=0.3)
+        return pg
+
+    def text(pg, x, y, s, size=10):
+        pg.insert_text((M + x, M + y), s, fontsize=size, fontfile=tnr, fontname="tnr")
+
+    def prose(pg, y0, y1, n=3):
+        pg.insert_textbox(pymupdf.Rect(M + 36, M + y0, M + 330, M + y1), PROSE * n, fontsize=10,
+                          fontfile=tnr, fontname="tnr")
+
+    def diagram(pg, y, legend=False):
+        for k in range(4):  # four boxes joined by arrows, labels in small type
+            x = 50 + k * 70
+            pg.draw_rect(pymupdf.Rect(M + x, M + y, M + x + 50, M + y + 30), width=0.8)
+            text(pg, x + 4, y + 18, "Flows" if k % 2 else "Phyla", 8)
+            if k:
+                pg.draw_line((M + x - 20, M + y + 15), (M + x, M + y + 15), width=0.8)
+        text(pg, 120, y + 52, "deterritorialized option", 8)
+        if legend:
+            text(pg, 50, y + 75, "F  material Flow = initial unformed state of redundancies", 8)
+            text(pg, 50, y + 86, "T  substantial Territory = non-discursive operator", 8)
+            return y + 86
+        return y + 52
+
+    pg = page()
+    text(pg, 60, 120, "Cartographies", 24)
+    pg = page()
+    text(pg, 36, 30, "CONTENTS", 12)
+    for k, (t, n) in enumerate([("Preliminary", "1"), ("The Cycle of Assemblages", "3"), ("Filters", "4"),
+                                ("Smoothings and striations", "5"), ("Notation", "6"), ("Index", "9")]):
+        text(pg, 36, 60 + k * 16, f"{t}  {n}", 10)
+    pg = page()
+    text(pg, 36, 40, "Preliminary", 20)
+    prose(pg, 70, 480)
+    for k in range(4):  # the second essay, each page with its own running foot
+        pg = page()
+        if k == 0:
+            text(pg, 36, 40, "The Cycle of Assemblages", 20)
+            prose(pg, 70, 480)
+        elif k == 1:  # two diagrams with prose between, each captioned
+            y = diagram(pg, 20)
+            text(pg, 36, y + 22, "Figure 1.1 Domains of the unconscious", 8.5)
+            prose(pg, y + 40, y + 150, 1)
+            y = diagram(pg, y + 170)
+            text(pg, 36, y + 22, "Figure 1.2 The cycle of the assemblages", 8.5)
+        elif k == 2:  # a legend between the diagram and its caption
+            y = diagram(pg, 20, legend=True)
+            text(pg, 36, y + 22, "Figure 1.3 Module of the sensible smoothing", 8.5)
+            prose(pg, y + 50, 480, 2)
+        else:
+            text(pg, 140, 60, "-o-oo--oo--o oo-oo- -o- -oo", 13)
+            prose(pg, 90, 480)
+        n = 4 + k
+        text(pg, 4 if n % 2 == 0 else 150, 505, f"{n} The Cycle of Assemblages" if n % 2 == 0
+             else f"The Cycle of Assemblages {n}", 8)
+    d.set_toc([[1, "Preliminary", 3], [1, "The Cycle of Asemblages", 4]])
+    for p in d:
+        p.set_cropbox(pymupdf.Rect(M, M, W - M, H - M))
+    return d
+
+
 CASES = {
+    # Jon 11-23: print-ready InDesign book (crop marks, en-space contents, essay running feet, diagrams)
+    "print_ready_academic": (make_print_ready_academic, {
+        "path": "text", "has": ["The Cycle of Assemblages", "clocks were striking"],
+        "hasnt": ["CONTENTS", "Asemblages", "The Cycle of Assemblages 5", "4 The Cycle", "Figure 1.",
+                  "material Flow", "deterritorialized option"], "imgs": 3, "ch_max": 3}),
     # 11-22 corpus: OCR layer quirks (lost drop cap, photo inside a paragraph, misread running head)
     "ia_layer_quirks": (make_ia_layer_quirks, {"path": "text", "has": ["Can you imagine", "body and other stresses"],
                                                "hasnt": ["I;AST", "SIXTY-FIVE"], "ch_max": 1, "imgs": 1}),

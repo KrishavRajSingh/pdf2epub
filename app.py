@@ -3581,6 +3581,147 @@ def _page_rect(page, rect):
     return rect * page.rotation_matrix if page.rotation else rect
 
 
+def _art(page, items: bool = False) -> list:
+    """Rects of the page's drawings that belong to its content ((rect, segments) with items=True).
+
+    ponytail: a print-ready InDesign PDF (Schizoanalytic Cartographies, Jon 11-23) draws crop marks
+    outside the trim and a bleed box round the whole sheet on every page: 47 drawings that made every
+    page "one full-page figure", so all 63 diagrams were dropped and their labels leaked as text.
+    """
+    pr = pymupdf.Rect(0, 0, page.cropbox.width, page.cropbox.height)  # drawings are unrotated
+    out = []
+    for d in page.get_drawings():
+        r = d["rect"]
+        if r.x0 < pr.x0 - 2 or r.y0 < pr.y0 - 2 or r.x1 > pr.x1 + 2 or r.y1 > pr.y1 + 2:
+            continue
+        if r.width * r.height > 0.8 * pr.width * pr.height:
+            continue  # a page-size background or frame
+        out.append((r, len(d.get("items", ()))) if items else r)
+    return out
+
+
+def _fig_captions(blocks) -> list:
+    return [pymupdf.Rect(b["bbox"]) for b in blocks if b.get("type") == 0 and b.get("lines")
+            and CAPTION_RE.match("".join(sp["text"] for sp in b["lines"][0]["spans"]).strip())]
+
+
+def _caption_inside(g, blocks) -> bool:
+    """A figure caption sits within the box, above its bottom edge: the box spans two figures."""
+    return any(g.y0 + 2 < c.y0 and c.y1 < g.y1 - 8 and g.contains(pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2))
+               for c in _fig_captions(blocks) if c.width > c.height)
+
+
+def _grow_fig(page, g, blocks, body):
+    """(rect, labels taken in, has a caption) for a born-digital figure grown to its own small type.
+
+    ponytail: Figure 4.2's labels sit 40-70pt off its box, Figure 3.7's legend sits between the
+    diagram and its caption (Schizoanalytic Cartographies, Jon 11-23): the caption was out of reach
+    and glued into the prose. Small type near a diagram is part of it; body text never is, nor
+    anything past a caption. A caption turned sideways beside it (a landscape table, Figure 8.9) is
+    baked into the picture.
+    """
+    caps = _fig_captions(blocks)
+    small = []
+    for b in blocks:
+        if b.get("type") != 0 or not b.get("lines"):
+            continue
+        sz = max(sp["size"] for ln in b["lines"] for sp in ln["spans"])
+        r = pymupdf.Rect(b["bbox"])
+        if sz < body * 0.95 and not any(c.intersects(r) for c in caps) and r.y1 < page.cropbox.height - 40:
+            small.append(r)
+    g, k = pymupdf.Rect(g), 0
+    grown = True
+    while grown:
+        grown = False
+        for r in small:
+            if not g.contains(r) and (g + (-40, -40, 40, 40)).intersects(r) \
+                    and not any(c.y0 >= g.y1 - 2 and c.y1 <= r.y0 + 2 for c in caps) \
+                    and not any(c.y1 <= g.y0 + 2 and c.y0 >= r.y1 - 2 for c in caps):
+                g |= r
+                k += 1
+                grown = True
+    under = any(0 <= c.y0 - g.y1 <= 25 and min(c.x1, g.x1) > max(c.x0, g.x0) for c in caps)
+    for b in blocks:
+        if b.get("type") != 0 or not b.get("lines") or abs(b["lines"][0].get("dir", (1, 0))[1]) < 0.5:
+            continue
+        if CAPTION_RE.match("".join(sp["text"] for sp in b["lines"][0]["spans"]).strip()):
+            r = pymupdf.Rect(b["bbox"])
+            if (g + (-30, 0, 30, 0)).intersects(r):
+                g |= r
+                under = True
+    return g, k, under
+
+
+def _art_groups(page, blocks, body) -> list:
+    """Separate diagrams on one page: drawings and their short labels that touch (12pt slack).
+
+    ponytail: Guattari's pages hold two diagrams with prose between (Jon 11-23); the one-box test
+    held the prose, failed, and both were lost. Arrows there are apart and joined only by their
+    labels ("abstract machinic Phyla"), so labels join a group; a line of 40+ characters is prose and
+    never does. Rules under a heading or a fraction bar have no height and stay out.
+    """
+    art = _art(page, items=True)
+    if not art:
+        return []
+    labels = []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        ls = ["".join(s["text"] for s in ln["spans"]).strip() for ln in b.get("lines", [])]
+        if ls and all(len(x) < 40 for x in ls) and not CAPTION_RE.match(" ".join(ls)):
+            labels.append(pymupdf.Rect(b["bbox"]))
+    caps = _fig_captions(blocks)
+    groups = []  # [rect, segments, labels]
+    for r, n, k in [(r, n, 0) for r, n in art] + [(r, 0, 1) for r in labels]:
+        g = [pymupdf.Rect(r), n, k]
+        merged = True
+        while merged:
+            merged = False
+            for o in groups:
+                near = (g[0] + (-12, -12, 12, 12)).intersects(o[0])
+                if not near and g[1] and o[1] and min(g[0].x1, o[0].x1) > max(g[0].x0, o[0].x0):
+                    # a diagram and its key stacked 12-25pt apart (Figure 2.4) are one figure,
+                    # unless a caption sits between them: then they are two figures
+                    gap = pymupdf.Rect(min(g[0].x0, o[0].x0), min(g[0].y1, o[0].y1),
+                                       max(g[0].x1, o[0].x1), max(g[0].y0, o[0].y0))
+                    near = 0 < gap.height <= 25 and not any(gap.intersects(c) for c in caps)
+                if near and _caption_inside(g[0] | o[0], blocks):
+                    near = False  # a caption between them: two figures
+                if near:
+                    g = [g[0] | o[0], g[1] + o[1], g[2] + o[2]]
+                    groups.remove(o)
+                    merged = True
+                    break
+        groups.append(g)
+    area = page.rect.width * page.rect.height
+    out = []
+    for g, n, k in groups:
+        if not n:
+            continue
+        inside = [r for r, _ in art if g.contains(r)]
+        frame = len(inside) <= 2 and any(r.get_area() >= 0.8 * g.get_area() for r in inside)
+        g, k2, under = _grow_fig(page, g, blocks, body)
+        k += k2
+        # ponytail: a shaded box round short lines is a code listing or a sidebar (Pro Git lost
+        # 10k words of commands to pictures, corpus 11-24); with a caption under it, it is a figure
+        if frame and not under:
+            continue
+        # two lines and their labels make an axis chart (Figure 8.3); a heading rule is one line
+        if not (under and g.height >= 10) and (n < 2 or n + k < 4 or g.height < 30 or g.width < 30
+                                                or g.width * g.height / area < 0.02):
+            continue
+        g = _with_labels(g, blocks) & page.mediabox
+        if _body_chars_in(g, blocks, body) >= 80:
+            continue
+        if _caption_inside(g, blocks):
+            continue
+        for o in [o for o in out if o.intersects(g) and not _caption_inside(o | g, blocks)]:
+            out.remove(o)  # grown into one another: one diagram
+            g |= o
+        out.append(g)
+    return sorted(out, key=lambda r: (r.y0, r.x0))
+
+
 def _figure_rect(page, blocks, body):
     """Clip rect for a page that is mostly a figure, else None.
 
@@ -3594,9 +3735,9 @@ def _figure_rect(page, blocks, body):
         r = pymupdf.Rect(info["bbox"])
         if (r.width * r.height) / area > 0.03:
             rects.append(r)
-    drawings = page.get_drawings()
+    drawings = _art(page)
     if len(drawings) >= 15:
-        rs = [d["rect"] for d in drawings]
+        rs = drawings
         u = pymupdf.Rect(min(r.x0 for r in rs), min(r.y0 for r in rs),
                          max(r.x1 for r in rs), max(r.y1 for r in rs))
         if (u.width * u.height) / area > 0.10:
@@ -3656,6 +3797,12 @@ def _figure_rects(page, blocks, body, small: bool = False) -> list:
     Then each embedded picture is its own figure.
     """
     u = _figure_rect(page, blocks, body)
+    if u and small:
+        u = _grow_fig(page, u, blocks, body)[0] & page.mediabox
+        # ponytail: two diagrams on a page (Figures 4.5 and 4.6, Jon 11-23) made one box with the
+        # first one's caption baked in the middle; a caption inside the box means separate figures
+        if _caption_inside(u, blocks):
+            u = None
     if u:
         return [u]
     area = page.rect.width * page.rect.height
@@ -3677,6 +3824,9 @@ def _figure_rects(page, blocks, body, small: bool = False) -> list:
             r = r | o
         out = [o for o in out if o not in over and not r.contains(o)] + [_with_labels(r, blocks) & page.mediabox]
     if small:
+        for g in _art_groups(page, blocks, body):
+            if not any(o.intersects(g) for o in out):
+                out.append(g)
         return sorted(out, key=lambda r: (r.y0, r.x0))
     return sorted(out, key=lambda r: (r.y0, r.x0)) if len(out) > 1 else []
 
@@ -3734,6 +3884,11 @@ def _table_rects(page, raw, body, eqs=()) -> list:
             nums = lambda side: [int(m.group(1)) for rw in band for m in [re.match(r"\(?(\d{1,3})[).]", rw[side][1])] if m]
             left, right = nums(0), nums(-1)
             seq_list = left and right and min(right) > max(left)
+            # ponytail: a two-column index ("Kafka, Franz 192–3" | "labour 12, 15, 189") pairs short
+            # lines side by side too; 2 of Schizoanalytic Cartographies' index pages became pictures
+            if sum(bool(re.search(r"[A-Za-z].*\d[\d–-]*,?$", c[1])) for c in cells) >= len(cells) * 0.5:
+                band = [row] if row else []
+                continue
             small = sum(c[2] < body * 1.05 for c in cells) >= len(cells) * 0.6
             if lens[len(lens) // 2] < 40 and u.height < page.rect.height * 0.7 and not seq_list and small:
                 for info in page.get_image_info():
@@ -4367,6 +4522,9 @@ def _ocr_rows(b):
     return out
 
 
+TOC_LINE = re.compile(r"^.*[A-Za-z].*?[\u2002\u2003\u2009 .…]\s*(?:[0-9]{1,3}|[ivxlc]{1,6})[ \t]*$", re.M)
+
+
 def _blocks(doc):
     """Yield (page_no, y0, size, text) per text block, lines joined into one paragraph.
 
@@ -4386,7 +4544,10 @@ def _blocks(doc):
     in_refs, ref = False, None  # inside a reference list: [page, y, size, lines] of the open entry
     # ponytail: a printed contents page ("THE BODY<tab>19") points at page numbers an e-book does not
     # have; with a bookmark outline the EPUB's own contents replaces it (Paramattha 11-21, 4 pages)
-    toc_pages = {k for k in range(min(15, len(doc))) if doc[k].get_text("text").count("\t") >= 5} \
+    # ponytail: Bloomsbury sets "Filters\u2002 108" with an en space, not a tab: 3 tabs a page, the
+    # contents came out as chapters and the copyright page (8 tabs) was the only page dropped (11-24)
+    toc_pages = {k for k in range(min(15, len(doc))) if doc[k].get_text("text").count("\t") >= 5
+                 or len(TOC_LINE.findall(doc[k].get_text("text"))) >= 5} \
         if not ocr and _bookmarks(doc) else set()
     for i, page in enumerate(doc):
         if i <= skip or i in toc_pages:
@@ -4557,6 +4718,15 @@ def _bm_match(bms: dict, page: int, t: str):
             if n == e[2] or (e[2].startswith(n) and len(n) >= 0.6 * len(e[2])) \
                     or (n.startswith(e[2]) and len(e[2]) >= 6 and len(n) <= len(e[2]) + 12):
                 return e
+    # ponytail: a typed outline has typos ("The Cycle of Asemblages", Schizoanalytic
+    # Cartographies 11-23) while the page spells it right; the chapter came out as "Assemblages (First
+    # Global Approach)" with its "3 The Cycle of" lost. A long title one or two letters off is the same.
+    if len(n) >= 15:
+        for p in (page, page + 1, page - 1):
+            for e in bms.get(p, []):
+                if not e[3] and abs(len(e[2]) - len(n)) <= 3 \
+                        and SequenceMatcher(None, n, e[2]).ratio() >= 0.94:
+                    return e
     return None
 
 
@@ -4683,6 +4853,19 @@ def _structure(blocks, doc):
         if sz > 0 and isinstance(t, str) and y < min(ph * 0.12, body_top - 4) and len(t) < 90 and sz < h2_cut:
             head_rows.setdefault(round(y / 2), set()).add(p)
     run_rows = {r for r, ps in head_rows.items() if len(ps) >= max(3, n * 0.3)}
+    # ponytail: an essay collection (Schizoanalytic Cartographies, Jon 11-23) foots each essay with its
+    # own title and the page number ("The Refrains of Being and Sense 193", "xvi Translator's
+    # Introduction"), so each one is on 6-10 pages, under the 20% cut, and they were glued into the
+    # prose or read as footnotes ("192 The ..." starts like a note). Small type at the page foot, the
+    # number at one end only, the same words on 3+ pages: a running foot. A note "12 Ibid., p. 4"
+    # has numbers at both ends and stays.
+    def foot_key(t):
+        m = re.fullmatch(r"(?:\d{1,3}|[ivxlc]{1,7})\s+(\D*[A-Za-z]{3}\D*?)|(\D*[A-Za-z]{3}\D*?)\s+(?:\d{1,3}|[ivxlc]{1,7})",
+                         t.strip())
+        return (m.group(1) or m.group(2)).strip().lower() if m else ""
+    run_foots = Counter(foot_key(t) for p, y, sz, t in blocks
+                        if sz > 0 and isinstance(t, str) and y > foot_y and sz < fn_cut and len(t) < 80)
+    run_foots = {k for k, c in run_foots.items() if k and c >= 3 and len(re.findall(r"[a-z]{3,}", k)) >= 2}
 
     chapters, cur, cur_notes = [], [], []
     drop = None  # (letter, page) of a drop cap waiting for the paragraph it starts
@@ -4784,10 +4967,14 @@ def _structure(blocks, doc):
         if t in banned or boiler.search(t) or PAGE_NO.fullmatch(t):
             continue  # ponytail: page numbers ("12", "[12]", "- 12 -")/running heads dropped, no config
         if (y < 60 or y > foot_y) and len(t) < 80 and (_furn_key(t) in furniture or not _furn_key(t)) \
-                and not re.match(r"(chapter|part|book)\b", t, re.I):
+                and not re.match(r"(chapter|part|book)\b", t, re.I) \
+                and not (bms and sz >= h2_cut and _bm_match(bms, pno, t)):
+            # (an essay's title in heading type is in the outline; its running foot repeats it)
             continue  # a footer/head with a symbol-font page number, or that glyph alone (11-22)
         if run_rows and sz < h2_cut and len(t) < 90 and {round(y / 2) - 1, round(y / 2), round(y / 2) + 1} & run_rows \
                 and not ocr:
+            continue
+        if y > foot_y and sz < fn_cut and len(t) < 80 and run_foots and foot_key(t) in run_foots:
             continue
         if (y < 60 or y > foot_y) and re.fullmatch(r"[ivxlcdm]{1,7}", t.strip(), re.I) and t.strip().lower() != "i":
             continue  # a roman page number in the front matter ("ix", "xiv")
@@ -4868,6 +5055,11 @@ def _structure(blocks, doc):
         elif sz >= h2_cut and len(t) < 120 and not OPEN_END.search(t) and ocr and not size_head(t):
             if any(c.isalpha() for c in t) and WORD3.search(t):
                 cur.append(("p", t))  # big but not a heading: a verse, a quoted letter
+        elif sz >= h2_cut and not ocr and len(t) < 120 and re.search(r"[A-Za-z]", t) \
+                and not re.search(r"[^\W\d_]{3}", t) and not re.fullmatch(r"[\dIVXLCivxlc.\s]+", t):
+            # ponytail: a notation set big ("-o-oo--oo--o oo-oo-", Schizoanalytic Cartographies 11-23)
+            # has letters but no word; it came out as a chapter. A heading has a word or a number.
+            cur.append(("p", t))
         elif sz >= h1_cut and len(t) < 120 and not OPEN_END.search(t):
             if not (ocr and named >= 3):
                 flush()  # ponytail: an OCR scan with its own "Chapter N" lines splits on those only

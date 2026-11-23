@@ -1,4 +1,16 @@
 {
+ "print_ready_academic": {
+  "path": "text",
+  "chapters": 3,
+  "headings": [
+   "Cartographies",
+   "Preliminary",
+   "The Cycle of Assemblages"
+  ],
+  "paragraphs": 6,
+  "imgs": 3,
+  "words": 310
+ },
  "ia_layer_quirks": {
   "path": "text",
   "chapters": 1,
