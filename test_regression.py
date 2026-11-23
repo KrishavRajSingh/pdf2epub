@@ -710,7 +710,14 @@ def make_print_ready_academic():
         n = 4 + k
         text(pg, 4 if n % 2 == 0 else 150, 505, f"{n} The Cycle of Assemblages" if n % 2 == 0
              else f"The Cycle of Assemblages {n}", 8)
-    d.set_toc([[1, "Preliminary", 3], [1, "The Cycle of Asemblages", 4]])
+    for k in range(3):  # the index foots its pages with one word and the page number
+        pg = page()
+        if k == 0:
+            text(pg, 36, 40, "Index", 20)
+        for j in range(12):
+            text(pg, 36 + (j % 2) * 150, 80 + (j // 2) * 14, f"assemblage {j + 3}, {j + 40}", 9)
+        text(pg, 4 if k % 2 else 150, 505, f"{8 + k} Index" if k % 2 else f"Index {8 + k}", 8)
+    d.set_toc([[1, "Preliminary", 3], [1, "The Cycle of Asemblages", 4], [1, "Index", 8]])
     for p in d:
         p.set_cropbox(pymupdf.Rect(M, M, W - M, H - M))
     return d
@@ -721,7 +728,8 @@ CASES = {
     "print_ready_academic": (make_print_ready_academic, {
         "path": "text", "has": ["The Cycle of Assemblages", "clocks were striking"],
         "hasnt": ["CONTENTS", "Asemblages", "The Cycle of Assemblages 5", "4 The Cycle", "Figure 1.",
-                  "material Flow", "deterritorialized option"], "imgs": 3, "ch_max": 3}),
+                  "material Flow", "deterritorialized option", "Index 9", "Index 8", "10 Index"],
+        "imgs": 3, "ch_max": 4}),
     # 11-22 corpus: OCR layer quirks (lost drop cap, photo inside a paragraph, misread running head)
     "ia_layer_quirks": (make_ia_layer_quirks, {"path": "text", "has": ["Can you imagine", "body and other stresses"],
                                                "hasnt": ["I;AST", "SIXTY-FIVE"], "ch_max": 1, "imgs": 1}),

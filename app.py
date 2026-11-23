@@ -4865,7 +4865,10 @@ def _structure(blocks, doc):
         return (m.group(1) or m.group(2)).strip().lower() if m else ""
     run_foots = Counter(foot_key(t) for p, y, sz, t in blocks
                         if sz > 0 and isinstance(t, str) and y > foot_y and sz < fn_cut and len(t) < 80)
-    run_foots = {k for k, c in run_foots.items() if k and c >= 3 and len(re.findall(r"[a-z]{3,}", k)) >= 2}
+    # one word ("Index 289") counts when the outline has it as a title; a note "3 Ibid." never is
+    outline = {e[1].lower() for es in _bookmarks(doc).values() for e in es} if run_foots else set()
+    run_foots = {k for k, c in run_foots.items() if k and c >= 3
+                 and (len(re.findall(r"[a-z]{3,}", k)) >= 2 or k in outline)}
 
     chapters, cur, cur_notes = [], [], []
     drop = None  # (letter, page) of a drop cap waiting for the paragraph it starts
