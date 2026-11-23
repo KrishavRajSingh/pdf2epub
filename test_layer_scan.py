@@ -256,6 +256,26 @@ def drive_drop_caps():
     print("ok — Drive path: drop cap read off the picture, frame lines and lowercase text left alone")
 
 
+def front_matter_and_caps_title():
+    """Signal to Noise via Drive (davehasl19, 11-23): the cover's ISBN, the back-cover review quote,
+    the "Other Avon Books by" list and the copyright page were chapters, and the chapter's drop cap
+    "T" (its own line, before "2" and the title) was glued onto the title: "TJACKKNIFED", "he hum"."""
+    body = ("the taxi crossed the bridge in the rain and the driver said nothing at all about the "
+            "fare or the weather or the way the city lights shook on the black water below them")
+    pages = ["ISBN 0-380-79292-3\n\n9780380792924",
+             '"A BRAVE NEW VISION OF THE FUTURE...WELL-CONCEIVED AND\n\n' + body + ".",
+             "Other Avon Books by Eric S. Nylund\n\nDRY WATER\n\nA GAME OF UNIVERSE",
+             "AVON BOOKS, INC.\n\nISBN: 0-380-79292-3\n\nWCD 10 9 8 7 6 5 4 3 2 1",
+             "T\n\n2\n\nJACKKNIFED\n\nhe hum of the taxi was in Jack's head.\n\n" + body + ".",
+             body + "."]
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for c in chs for k, t in c if k == "h1"]
+    assert heads == ["JACKKNIFED"], heads
+    text = [t for c in chs for k, t in c if k == "p"]
+    assert any(t.startswith("The hum of the taxi") for t in text), text
+    print("ok — scan chapters: no chapters from cover/copyright/also-by pages, drop cap not on the title")
+
+
 if __name__ == "__main__":
     reread()
     chapters()
@@ -266,3 +286,4 @@ if __name__ == "__main__":
     preview_contents_page()
     contents_heading_not_first()
     drive_drop_caps()
+    front_matter_and_caps_title()

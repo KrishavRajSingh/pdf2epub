@@ -1306,6 +1306,8 @@ def _same_title(para: str, title: str) -> bool:
     return b.startswith(a) or b.startswith(a[1:]) and len(a) > 6
 
 
+IMPRINT = re.compile(r"\bISBN\b|\b10 9 8 7 6 5 4 3 2 1\b|\b1 2 3 4 5 6 7 8 9 10\b")
+ALSO_BY = re.compile(r"(other \w+ )?(books|novels|titles|works) by\b|also by\b", re.I)  # "Other Avon Books by ..."
 CONTENTS_HEAD = re.compile(r"(table of )?contents", re.I)
 
 
@@ -1434,7 +1436,7 @@ def _caps_head(text: str) -> bool:
     return bool(letters) and len(latin) >= 0.8 * len(letters) and text.isupper() and len(text) <= 60
 
 
-def _drop_caps(paras: list[str]) -> list[str]:
+def _drop_caps(paras: list[str], running=lambda q: False) -> list[str]:
     """Glue a drop cap OCR'd as its own paragraph back onto its word: "T" + "HEY were" -> "THEY were".
 
     ponytail: Drive OCR puts the big first letter of a chapter on its own line, before or after the
@@ -1445,11 +1447,27 @@ def _drop_caps(paras: list[str]) -> list[str]:
         p = paras[i]
         if re.fullmatch(r"[A-Z]", p) and not (p in "IVX" and not out and i + 1 < len(paras)
                                                and re.match(r"[A-Z]{2,}\b", paras[i + 1])):
-            for j in (i + 1, i + 2):  # (a lone I/V/X first on the page before a CAPS word: the numeral)
-                if j < len(paras) and re.match(r"[A-Z]{2,}\b", paras[j]) and not FOLIO.fullmatch(paras[j]):
+            # (a lone I/V/X first on the page before a CAPS word: the numeral)
+            # ponytail: the letter's word starts lowercase ("he hum") or in small caps ("HEY were");
+            # a line all in capitals is the chapter title. Signal to Noise (11-23): "T", "2",
+            # "JACKKNIFED", "he hum of the taxi" came out "TJACKKNIFED" and "he hum".
+            titled = False  # an all-caps title line sits between the letter and its word
+            for j in (i + 1, i + 2, i + 3):
+                q = paras[j] if j < len(paras) else ""
+                opener = re.match(r"[A-Z]{2,}\b", q) and any(c.islower() for c in q) \
+                    or titled and q[:1].islower()
+                if q and (opener or running(q) and re.match(r"[A-Z]{2,}\b", q)) and not FOLIO.fullmatch(q):
+                    # (a stray letter beside a running head goes with it, as before: Jon's "G" + "CHAPTER 1")
                     paras = paras[:j] + [p + paras[j]] + paras[j + 1:]
                     p = None
                     break
+                if FOLIO.fullmatch(q) or re.fullmatch(r"[IVXLC]+|\d{1,3}", q):
+                    continue  # the chapter number
+                if len(q) <= 60 and any(c.isalpha() for c in q) and not any(c.islower() for c in q) \
+                        and not running(q):  # a running head ("PRIVATE GASPARD") is no chapter title
+                    titled = True
+                    continue
+                break  # anything else: the letter is not this chapter's drop cap
             if p is None:
                 i += 1
                 continue
@@ -1495,7 +1513,9 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 cur.append(("img", (fig, "")))
             if not _wordy(txt):
                 continue  # ponytail: a map or plate OCRs to junk, the picture alone carries it
-        paras = _drop_caps(_page_paras(txt))
+        # a "CHAPTER 1" running head under the page number is no chapter title either (Jon, 11-23)
+        paras = _drop_caps(_page_paras(txt), lambda q: _head_key(q) in heads or _head_first(q) in heads
+                           or bool(chapter_heads) and bool(HEAD_WORD.match(q)))
         if i in contents_pages:
             continue  # ponytail: the printed contents page; its "CHAPTER 1 ..." lines became chapters (11-21)
         # ponytail: a title page is short lines only and its title is the running head's words, so
@@ -1505,6 +1525,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
         is_head = lambda q: len(q) <= 50 and (_head_key(q) in heads or _head_first(q) in heads
                                               or _mostly_head_words(q, head_words))
         top = _under_folio(paras, chapter_heads)
+        imprint = i < _front(pages) and (any(IMPRINT.search(q) for q in paras)
+                                         or bool(paras) and bool(ALSO_BY.match(paras[0])))
         for j, para in enumerate(paras):
             if j <= top:
                 continue  # page number(s) + a "CHAPTER 1" running head
@@ -1547,6 +1569,13 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 # intro "Future Perfect" (not CAPS) was no chapter, while a frontispiece caption and
                 # the back-cover series ads were (Jon, Unpayable Debt, 11-21)
                 head = _in_contents(text, contents) and all(len(q) <= 50 for q in paras[:j])
+            if head and (imprint or text[:1] in "\"\u201c\u2018'"):
+                # ponytail: Signal to Noise (11-23): the cover's and copyright page's "ISBN 0-380-...",
+                # "AVON BOOKS, INC.", "WCD 10 9 8 7 6 5 4 3 2 1" and the back-cover review quote
+                # '"A BRAVE NEW VISION..."' were chapters. A page with an ISBN or the printer's line
+                # starts none, nor does an "Other books by" page ("DRY WATER"), and a heading never
+                # opens with a quote mark.
+                head = False
             placed += 1
             if head and len(text) < 120 and not (toc and cur and cur[-1] == ("h1", toc.get(i))):
                 if cur and head_page == i and all(k == "h1" for k, _ in cur):
