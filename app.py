@@ -2104,6 +2104,7 @@ __ALT__
   <a href="/scan">Scan a physical book with your phone</a>
   <a href="https://ftak.net/translate-pdf">Translate a PDF into another language</a>
   <a href="/shelf">Shelf: $10/mo, no monthly limit</a>
+  <a href="/publish">Publishing a book? Print PDF to store-ready EPUB</a>
   <a href="/guides/scanned-pdf-to-epub">Scanned PDF to EPUB</a>
   <a href="/guides/send-pdf-to-kindle">PDF to Kindle, Kobo, Boox</a>
   <a href="/guides/pdf-to-epub-vs-calibre">vs Calibre</a>
@@ -2557,7 +2558,7 @@ INDEXNOW_KEY = "ad136bf29681a09265f8e9bd56452473"
 
 
 def site_urls() -> list[str]:
-    return ["/", "/pt/", "/es/", "/scan", "/shelf", "/guides"] + ["/guides/" + s for s in GUIDES]
+    return ["/", "/pt/", "/es/", "/scan", "/shelf", "/publish", "/guides"] + ["/guides/" + s for s in GUIDES]
 
 
 @app.get(f"/{INDEXNOW_KEY}.txt")
@@ -2716,6 +2717,69 @@ and we will rerun it on the big-file converter.</p>
 </div><script>{TRACK_JS}
 ev('return',{{cid:{json.dumps(cid)}}});
 if({json.dumps(key)})try{{localStorage.setItem('k',{json.dumps(key)})}}catch(e){{}}</script></body></html>""")
+
+
+@app.get("/publish", response_class=HTMLResponse)
+def publish_page(request: Request):
+    # 11-24 test: authors and small presses with a print PDF and no Word file. Kindle Create turns a PDF into a
+    # fixed "print replica" only, Atticus imports DOCX only. Software only (Polar AUP 11-06 bans human services):
+    # an automatic "Author edition", $29 a book, early-access email for now (fake door, no checkout yet).
+    # Readout 12-08: 2+ paid or 5+ serious inquiries = this is the 1k MRR path.
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/fonts.css">
+<title>Convert a print PDF to EPUB for KDP, Apple Books and Kobo</title>
+<meta name="description" content="Only have the print PDF of your book? pdf2epub rebuilds it as a reflowable EPUB with real chapters, a working table of contents and linked footnotes, ready to upload to Kindle, Apple Books and Kobo.">
+<link rel="canonical" href="https://epub.ftak.net/publish">
+<style>:root{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
+.wrap{max-width:660px;margin:0 auto;padding:56px 20px}
+h1{font-family:var(--serif);font-weight:500;font-size:34px;line-height:1.15;letter-spacing:-.02em;margin:0 0 14px}
+h2{font-family:var(--serif);font-weight:500;font-size:22px;margin:34px 0 10px}p,li{color:var(--dim)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:22px;margin-top:22px}
+.price{font-family:var(--serif);font-size:30px;color:var(--txt)}
+input,select{width:100%;background:#f4f0e7;border:1px solid var(--line);border-radius:4px;padding:11px 12px;font:inherit;margin:6px 0 10px}
+button{background:var(--acc);color:#fff;border:0;border-radius:4px;padding:12px 18px;font:inherit;font-weight:600;cursor:pointer}
+a{color:var(--acc)}.ok{color:#2f7a3d;font-weight:600}</style></head><body><div class="wrap">
+<p><a href="/">pdf2epub</a></p>
+<h1>Your book only exists as a print PDF? Get a store-ready EPUB.</h1>
+<p>Lost the Word file, or the book was laid out in InDesign years ago? Kindle Create turns a PDF into a fixed
+"print replica" only, and Atticus imports Word files. pdf2epub rebuilds the book from the PDF itself, automatically.</p>
+<h2>What the converter does</h2>
+<ul>
+<li>Reflowable text that resizes on any screen, one paragraph per paragraph, no broken lines</li>
+<li>Real chapters and a clickable table of contents</li>
+<li>Footnotes linked to their notes, images kept with their captions</li>
+<li>Running heads and page numbers removed</li>
+<li>Every file runs through an EPUB validator, so it's ready to upload to KDP, Apple Books, Kobo or Draft2Digital</li>
+<li>Scanned books too: the pages are read with OCR</li>
+</ul>
+<div class="card">
+<div class="price">Author edition: $29 a book</div>
+<p>Coming next: the store version of the converter. Your title, author, language and ISBN written into the book,
+your cover added, and a validation report you can keep. Up to 2,000 pages, scans included, full refund if a store rejects the file.
+Leave your email for early access, and publishers with a backlist can ask for a per-title rate.</p>
+<form id="f">
+<input id="em" type="email" required placeholder="Your email" maxlength="120">
+<input id="pg" type="number" min="1" max="5000" placeholder="Pages (roughly)">
+<select id="st"><option value="kdp">Publishing on Amazon KDP</option><option value="apple">Apple Books</option>
+<option value="kobo">Kobo</option><option value="d2d">Draft2Digital / wide</option><option value="backlist">A backlist of several books</option><option value="other">Other</option></select>
+<button type="submit">Get early access</button>
+</form>
+<p id="ok" class="ok" hidden>Thanks, you're on the list. Meanwhile the free converter below already does the first 150 pages of your PDF.</p>
+</div>
+<p style="margin-top:22px">Want to try it yourself first? The <a href="/?s=publish">free converter</a> does the first 150 pages of any PDF.</p>
+</div>
+<script>
+let V='';try{V=localStorage.getItem('v')||'';if(!V){V=Math.random().toString(36).slice(2,12)+Date.now().toString(36);localStorage.setItem('v',V)}}catch(e){V=Math.random().toString(36).slice(2,14)}
+function ev(n,x){try{navigator.sendBeacon('/e',JSON.stringify(Object.assign({n:n,v:V,src:'publish'},x||{})))}catch(e){}}
+ev('view',{path:'/publish'});
+document.getElementById('f').onsubmit=async e=>{e.preventDefault();const st=document.getElementById('st').value;
+ const fd=new FormData();fd.append('email',document.getElementById('em').value);
+ fd.append('pages',document.getElementById('pg').value||'0');fd.append('reason','author:'+st);
+ try{await fetch('/lead'+location.search,{method:'POST',body:fd})}catch(x){}
+ ev('author_lead',{why:st});document.getElementById('f').hidden=true;document.getElementById('ok').hidden=false};
+</script></body></html>""")
 
 
 @app.get("/onebook", response_class=HTMLResponse)
@@ -2991,7 +3055,7 @@ def privacy():
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click", "author_lead"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
 
 
 @app.post("/e")

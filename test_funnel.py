@@ -550,3 +550,18 @@ def test_bilingual_door():
 if __name__ == "__main__":
     test_bilingual_door()
 
+
+def test_publish_page():
+    # 11-24: author/publisher test page, lead reason author:<store>, ev author_lead
+    from fastapi.testclient import TestClient
+    import app as a
+    c = TestClient(a.app)
+    r = c.get("/publish")
+    assert r.status_code == 200 and "Author edition: $29 a book" in r.text and "author:" in r.text
+    assert "author_lead" in a.BEACONS and "/publish" in a.site_urls()
+    assert 'href="/publish"' in c.get("/").text
+
+
+if __name__ == "__main__":
+    test_publish_page()
+
