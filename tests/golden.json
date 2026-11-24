@@ -68,6 +68,22 @@
   "imgs": 0,
   "words": 450
  },
+ "ia_under_image": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 450
+ },
+ "page_background": {
+  "path": "text",
+  "chapters": 1,
+  "headings": [],
+  "paragraphs": 3,
+  "imgs": 0,
+  "words": 450
+ },
  "ia_two_layer": {
   "path": "text",
   "chapters": 1,

@@ -4126,10 +4126,30 @@ def _ocr_layer(doc) -> bool:
     n = len(doc)
     spans = invisible = 0
     for i in sorted({int(k * n / 10) for k in range(10)}) if n else []:
-        for sp in doc[i].get_texttrace():
-            spans += 1
-            invisible += sp["type"] == 3
+        page = doc[i]
+        trace = page.get_texttrace()
+        spans += len(trace)
+        invisible += sum(sp["type"] == 3 for sp in trace)
+        if trace and not any(sp["type"] == 3 for sp in trace):
+            invisible += _under_image(page, len(trace))
     return spans > 0 and invisible > spans * 0.5
+
+
+def _under_image(page, nspans: int) -> int:
+    """nspans when the page's text is drawn first and a page-sized picture is painted over it.
+
+    ponytail: ABBYY's "text under the page image" PDFs draw the OCR text in a plain visible font,
+    then the scan on top, so readers only see the picture. The text path took that junk layer as
+    the book ("T H E CO R PSE", 75 running-head chapters, Tales of Terror 11-24)."""
+    area = abs(page.rect) or 1
+    log = page.get_bboxlog()
+    last_pic = max((k for k, (kind, box) in enumerate(log) if kind in ("fill-image", "fill-imgmask")
+                    and abs(pymupdf.Rect(box) & page.rect) >= 0.8 * area), default=-1)
+    if last_pic < 0:
+        return 0
+    texts = [kind for kind, _ in log if kind.endswith("-text")]
+    under = sum(kind.endswith("-text") for kind, _ in log[:last_pic])
+    return nspans if texts and under >= 0.9 * len(texts) else 0
 
 
 def _mostly_scanned(doc) -> bool:

@@ -14,7 +14,7 @@ import json, sys
 from pathlib import Path
 
 import pymupdf
-from app import _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc, doc_lang
+from app import _ocr_layer, _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc, doc_lang
 
 GOLDEN = Path(__file__).parent / "tests" / "golden.json"
 PROSE = ("It was a bright cold day in April, and the clocks were striking thirteen. "
@@ -60,6 +60,28 @@ def make_ia_layer():
         pg = d.new_page()
         pg.insert_image(pg.rect, stream=png)
         pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), PROSE * 6, fontsize=12, render_mode=3)
+    return d
+
+
+def make_ia_under_image():
+    """ABBYY "text under the page image": the OCR text is drawn in a plain visible font, then the
+    scan is painted over it, so a reader sees the picture and the text path got junk like
+    "T H E CO R PSE" and 75 running-head chapters (Tales of Terror, 11-24). It is an OCR layer."""
+    d, png = _doc(), _page_png(PROSE * 6)
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), PROSE * 6, fontsize=12)
+        pg.insert_image(pg.rect, stream=png)
+    return d
+
+
+def make_page_background():
+    """Born-digital page on a full-page picture (paper texture) with the text drawn on top: not a layer."""
+    d, png = _doc(), _page_png("")
+    for _ in range(3):
+        pg = d.new_page()
+        pg.insert_image(pg.rect, stream=png)
+        pg.insert_textbox(pymupdf.Rect(72, 72, 520, 760), PROSE * 6, fontsize=12)
     return d
 
 
@@ -744,7 +766,10 @@ CASES = {
                                      "hasnt": ["Preprint submitted", "a = b + g", "α = β"], "imgs": 4}),
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
                            "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
-    "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"]}),
+    "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"], "layer": True}),
+    # 11-24 lead: scan painted over a visible OCR text layer must be read again like any OCR layer
+    "ia_under_image": (make_ia_under_image, {"path": "text", "has": ["clocks were striking"], "layer": True}),
+    "page_background": (make_page_background, {"path": "text", "has": ["clocks were striking"], "layer": False}),
     "ia_two_layer": (make_ia_two_layer, {"path": "text", "has": ["clocks were striking"], "imgs": 2}),
     "ia_photos_heads": (make_ia_photos_heads, {"path": "text", "has": ["SLOW WATERS", "clocks were striking"],
                                                "hasnt": ["THE RIVER BOOK", "SL0W", "gf ,."], "imgs": 2,
@@ -832,6 +857,8 @@ def check(name, rules, s, text):
         errs.append(f"path {s['path']}, want {rules['path']}")
     errs += [f"missing {p!r}" for p in rules.get("has", []) if p not in text]
     errs += [f"should be gone: {p!r}" for p in rules.get("hasnt", []) if p in text]
+    if "layer" in rules and rules["layer"] != rules["_layer"]:
+        errs.append(f"OCR layer {rules['_layer']}, want {rules['layer']}")
     if s["imgs"] < rules.get("imgs", 0):
         errs.append(f"{s['imgs']} pictures kept, want {rules['imgs']}")
     if s["paragraphs"] > rules.get("p_max", 10**9):
@@ -865,7 +892,7 @@ def main():
         path, chapters = convert(doc)
         s, text = summary(path, chapters)
         new[name] = s
-        errs = check(name, rules, s, text)
+        errs = check(name, dict(rules, _layer=_ocr_layer(doc)), s, text)
         items = [it for ch in chapters for it in ch]
         for kind, key in (("p", "para"), ("fn", "fn")):  # whole paragraphs / notes, not phrases
             errs += [f"no {kind} block {p!r}" for p in rules.get(key, []) if (kind, p) not in items]
