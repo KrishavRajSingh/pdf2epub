@@ -519,3 +519,21 @@ def test_funnel_week():
 
 if __name__ == "__main__":
     test_funnel_week()
+
+
+def test_nobuy_reason():
+    # 11-24: the pitch carries a one-tap "why not buying" row, logged as ev nobuy with a why
+    from fastapi.testclient import TestClient
+    import app as a
+    assert "nobuy" in a.BEACONS
+    c = TestClient(a.app)
+    html = c.get("/").text
+    assert "function nobuy()" in html and "+nobuy()}" in html and "data-nobuy" in html
+    r = c.post("/e", content=b'{"n":"nobuy","v":"abcdefgh12","why":"price"}',
+               headers={"user-agent": "Mozilla/5.0 (Macintosh) Safari/605"})
+    assert r.status_code == 204
+
+
+if __name__ == "__main__":
+    test_nobuy_reason()
+

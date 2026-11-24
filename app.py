@@ -2162,6 +2162,10 @@ function multiBox(n,k){return '<div style="margin:0 0 12px;padding:12px 14px;bor
 // ponytail (11-22): over the limit there is no free part any more. Both wall sales (11-03 $5, 11-04 Shelf)
 // came from the hard wall (2 of 18 wall readers); since the free 150-page preview (11-07) 0 of 136 paid.
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
+// 11-24: 62 readers saw this pitch in a week, 4 clicked. One tap says why the rest left.
+function nobuy(){const r=[['price','Too expensive'],['enough','The free part was enough'],['calibre','I use Calibre or another tool'],['unsure','Not sure the full book comes out right']];
+ return '<div id="nobuy" style="margin-top:14px;font-size:13px;color:#5b564d">Not buying? Tell me why (one tap): '
+ +r.map(x=>'<button data-nobuy="'+x[0]+'" style="'+GHOST+'font-size:13px;padding:4px 10px">'+x[1]+'</button>').join('')+'</div>'}
 function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
@@ -2173,15 +2177,17 @@ function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This 
  +'<input id="leadmail" type="email" placeholder="your email" '
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
- +'<button id="leadbtn" style="'+BTN+'">Ask</button>'}
+ +'<button id="leadbtn" style="'+BTN+'">Ask</button>'+nobuy()}
 function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
  +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
- +'on the spot. Nothing stored.</span>'}
+ +'on the spot. Nothing stored.</span>'+nobuy()}
 document.addEventListener('click',async(e)=>{
+ if(e.target.dataset&&e.target.dataset.nobuy){ev('nobuy',{why:e.target.dataset.nobuy});
+  const b=document.getElementById('nobuy');if(b)b.textContent='Thanks, that helps.';return}
  if(e.target.id==='preview'){PN=e.target.dataset.n;convert(true);return}
  if(e.target.id==='fbbtn'){const em=document.getElementById('fbmail');
   if(!em||!em.value){em&&em.focus();return}
@@ -2984,7 +2990,7 @@ def privacy():
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
 
 
 @app.post("/e")
