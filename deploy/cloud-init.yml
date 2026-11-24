@@ -1,0 +1,10 @@
+#cloud-config
+# Paste into Hetzner "Cloud config" when creating the server. Installs Docker, firewall, swap.
+package_update: true
+packages: [ufw, fail2ban, rsync]
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - ufw default deny incoming && ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
+  - fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  - mkdir -p /opt/pdf2epub/data /opt/pdf2epub/backups
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl restart ssh

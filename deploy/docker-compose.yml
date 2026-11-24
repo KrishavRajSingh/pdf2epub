@@ -1,0 +1,23 @@
+# Runs on the VPS in /opt/pdf2epub. scripts/deploy-vps.sh copies the committed tree to /opt/pdf2epub/src.
+services:
+  app:
+    build: ./src
+    restart: always
+    env_file: .env          # secrets, never committed (copied from Railway once)
+    environment:
+      LOG_DIR: /data
+      PORT: "8000"
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8000:8000"   # only Caddy and ssh tunnels reach it
+  caddy:
+    image: caddy:2
+    restart: always
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./src/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+volumes:
+  caddy_data:

@@ -1,0 +1,12 @@
+epub.ftak.net {
+	encode gzip
+	request_body {
+		max_size 1100MB
+	}
+	reverse_proxy app:8000 {
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+}
