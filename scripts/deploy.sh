@@ -1,5 +1,4 @@
 #!/bin/zsh
-# Tests first, then Railway. A failing test stops the deploy.
-cd "${0:A:h}/.."
-scripts/check.sh || { print "tests failed, not deploying"; exit 1; }
-railway up --detach
+# Since 2026-11-24 pdf2epub runs on a Contabo VPS (77.237.235.155), not Railway.
+# Tests first, then ship the committed tree. A failing test stops the deploy.
+exec "${0:A:h}/deploy-vps.sh" "$@"

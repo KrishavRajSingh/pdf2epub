@@ -1,8 +1,8 @@
 #!/bin/zsh
 # Tests first, then ship the COMMITTED tree (git archive HEAD, never the working dir) to the VPS and rebuild.
-# Usage: scripts/deploy-vps.sh   (host from PDF2EPUB_HOST, default root@epub-vps)
+# Usage: scripts/deploy-vps.sh   (host from PDF2EPUB_HOST, default root@77.237.235.155 (Contabo))
 cd "${0:A:h}/.."
-host=${PDF2EPUB_HOST:-root@epub-vps}
+host=${PDF2EPUB_HOST:-root@77.237.235.155}
 scripts/check.sh || { print "tests failed, not deploying"; exit 1; }
 print "deploying $(git rev-parse --short HEAD) to $host"
 ssh $host 'rm -rf /opt/pdf2epub/src.new && mkdir -p /opt/pdf2epub/src.new' || exit 1
