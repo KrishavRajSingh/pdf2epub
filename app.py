@@ -2023,9 +2023,10 @@ __ALT__
     <button class="ghost-btn" id="sample">Try it with a sample PDF</button>
     <div id="msg"></div>
     <div id="next" hidden>
-      <p class="next-q">Four things I might build next. Want one?</p>
+      <p class="next-q">Five things I might build next. Want one?</p>
       <button class="ghost-btn" data-want="kindle">Send it to my Kindle by email, no cable</button>
       <button class="ghost-btn" data-want="translate">Translate this book into another language</button>
+      <button class="ghost-btn" data-want="bilingual">Bilingual edition for learning a language: each paragraph with its translation under it</button>
       <button class="ghost-btn" data-want="desktop">Mac app: converts offline, no page limit</button>
       <button class="ghost-btn" data-want="audio">Listen to this book: audiobook with a voice per character</button>
       <form id="wantf" hidden>
@@ -2990,7 +2991,7 @@ def privacy():
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
 
 
 @app.post("/e")
@@ -3175,7 +3176,7 @@ def stats(response: Response):
         return weekly.setdefault(k, {"visits_human": 0, "conversions_human": 0, "cap_rejects": 0,
                                      "checkouts": 0, "leads": 0})
     suspect = {}  # books whose structure looks broken (_suspect), by reason
-    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0, "kindle_click": 0}
+    wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0, "kindle_click": 0, "bilingual_click": 0}
     try:
         for line in LOG.read_text().splitlines():
             try:

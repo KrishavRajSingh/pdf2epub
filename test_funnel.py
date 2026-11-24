@@ -436,7 +436,7 @@ def main():
     client.post("/lead", data={"email": "door@e.com", "reason": "want:desktop"}, headers={"user-agent": mac["user-agent"]})
     st = client.get("/stats").json()
     assert st["wants"] == {"want_view": 2, "translate_click": 1, "desktop_click": 1, "audio_click": 1, "want_email": 1,
-                           "djvu_pick": 1, "kindle_click": 1}, st["wants"]
+                           "djvu_pick": 1, "kindle_click": 1, "bilingual_click": 0}, st["wants"]
     # weekly (11-16): Monday-start IST weeks; this week's human visits and conversions show up, bots don't
     wkly = st["weekly"]
     assert wkly and all(set(v) == {"visits_human", "conversions_human", "cap_rejects", "checkouts", "leads"}
@@ -536,4 +536,17 @@ def test_nobuy_reason():
 
 if __name__ == "__main__":
     test_nobuy_reason()
+
+
+def test_bilingual_door():
+    # 11-24: r/ebooks launches (Bilingua Reader, GlossPage) show language learners; fake door, clicks + emails decide
+    from fastapi.testclient import TestClient
+    import app as a
+    assert "bilingual_click" in a.BEACONS
+    html = TestClient(a.app).get("/").text
+    assert 'data-want="bilingual"' in html and "Five things I might build next" in html
+
+
+if __name__ == "__main__":
+    test_bilingual_door()
 
