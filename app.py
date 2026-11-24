@@ -1300,6 +1300,11 @@ def _same_title(para: str, title: str) -> bool:
     of an index became an INDEX chapter (Jon, Unpayable Debt, 11-21). One stray leading letter is
     allowed: Drive read a mark beside the head as "GCHAPTER 1". Two chapters in a row never share
     a title, so the check needs no count."""
+    # ponytail: an anthology's running head carries the page number ("THE SPECTRE OF RISLIP ABBEY 169",
+    # "4 RED LILY'"), Tales of Terror 11-24; the number is not part of the title
+    if not HEAD_WORD.match(para.strip()):  # "CHAPTER 2" keeps its number
+        para = re.sub(r"^\s*[\dIVXL]{1,4}\s+|\s+[\dIVXL]{1,4}\s*$", "", para)  # "... 'OILY EYES' II" (= 11)
+        para = re.sub(r"^\d+|\d+$", "", para.strip())
     a, b = _squash(para), _squash(title)
     if len(a) < 5 or not b:
         return False
@@ -1340,11 +1345,28 @@ def _contents_pages(pages: list[str]) -> set:
 def _contents_keys(pages: list[str]) -> set:
     """Entries of the printed contents page ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"),
     squashed to letters and digits; empty when the book has none or it lists under 3 entries."""
-    got = []
+    got, lines = [], []
     for i in sorted(_contents_pages(pages)):
-        got += [_squash(LEADER.sub("", p)) for p in _page_paras(pages[i])
-                if any(c.isalpha() for c in p) and len(p) <= 120 and not CONTENTS_HEAD.fullmatch(p.strip())]
+        lines += [LEADER.sub("", p).strip() for p in _page_paras(pages[i]) if len(p) <= 120
+                  and not CONTENTS_HEAD.fullmatch(p.strip())]
+    # ponytail: "III. THE CORPSE LIGHT  51": the story's own page says "III" and "THE CORPSE LIGHT" on
+    # two lines, so the number is dropped from the key. When most entries are numbered, only numbered
+    # lines (or the line after a bare "V.") are entries: Drive split "THE WOMAN WITH THE / 'OILY EYES'"
+    # and "BEING THE SEQUEL TO" off into lines of their own, and "OILY EYES" became a chapter (11-24)
+    num = [bool(ENTRY_NUM.match(t)) for t in lines]
+    named = [t for t in lines if any(c.isalpha() for c in ENTRY_NUM.sub("", t))]
+    numbered = sum(num) >= 5 and sum(num) * 2 >= len(named)
+    for j, t in enumerate(lines):
+        body = re.sub(r"\s+\d{1,4}$", "", ENTRY_NUM.sub("", t)).strip()
+        if not any(c.isalpha() for c in body):
+            continue
+        if numbered and not (num[j] or j and num[j - 1] and not any(c.isalpha() for c in ENTRY_NUM.sub("", lines[j - 1]))):
+            continue
+        got.append(_squash(body))
     return {k for k in got if len(k) >= 3} if len(got) >= 3 else set()
+
+
+ENTRY_NUM = re.compile(r"^(?:[IVXL]{1,6}|[0-9]{1,3}|[1Il])[.)]?(?:\s+|$)")
 
 
 def _squash(t: str) -> str:
@@ -1357,6 +1379,10 @@ def _in_contents(para: str, keys: set) -> bool:
     if len(k) < 3:
         return False
     if k in keys or bool(HEAD_WORD.match(para)) and any(c.startswith(k) for c in keys):
+        return True
+    # ponytail: a two-line entry read as one ("THE STORY OF ANNETTE THE WOMAN WITH THE") or a page
+    # title longer than its entry ("THE WOMAN WITH THE 'OILY EYES'" for "THE WOMAN WITH THE"), 11-24
+    if len(k) >= 12 and any(len(c) >= 12 and (c.startswith(k) or k.startswith(c)) for c in keys):
         return True
     # ponytail: Ageless Spine's contents page spells "Acknowlegements" and "Forward" while the
     # pages say ACKNOWLEDGMENTS and FOREWORD (11-22); a near spelling of a whole entry counts
@@ -1445,7 +1471,10 @@ def _drop_caps(paras: list[str], running=lambda q: False) -> list[str]:
     out, i = [], 0
     while i < len(paras):
         p = paras[i]
-        if re.fullmatch(r"[A-Z]", p) and not (p in "IVX" and not out and i + 1 < len(paras)
+        # ponytail: "95" / "TALES OF TERROR" over "V" is still the top of the page: "V" + "AT the time"
+        # came out "VAT the time" and "I" + "ALTHOUGH" "IALTHOUGH" (Tales of Terror, 11-24)
+        top = all(FOLIO.fullmatch(q) or running(q) for q in out)
+        if re.fullmatch(r"[A-Z]", p) and not (p in "IVX" and top and i + 1 < len(paras)
                                                and re.match(r"[A-Z]{2,}\b", paras[i + 1])):
             # (a lone I/V/X first on the page before a CAPS word: the numeral)
             # ponytail: the letter's word starts lowercase ("he hum") or in small caps ("HEY were");
@@ -1502,7 +1531,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             chapters.append(cur.copy())
             cur.clear()
 
-    head_page, title_done, open_title = -1, False, ""
+    head_page, title_done, open_title, titles = -1, False, "", []
     for i, txt in enumerate(pages):
         if toc and i in toc:
             flush()
@@ -1552,6 +1581,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 continue  # ponytail: Drive OCR puts the footer between the columns ("చందమామ", "జూలై 2004", 11-11)
             if not any(c.isalpha() for c in para):
                 continue  # ponytail: "|" and "( |" from column rules and picture borders (11-10)
+            if latin and len(para) <= 3 and not any(c.isascii() and c.isalpha() for c in para):
+                continue  # ponytail: a cover's ornament read as "盛" in an English book (11-24)
             if len(para) <= 50 and i != head_page and all(len(q) <= 50 for q in paras[:j]) \
                     and _same_title(para, open_title):
                 continue  # under the page number and a figure's labels ("Economic", "(moral)")
@@ -1568,8 +1599,11 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 # ponytail: the book's own contents page says what the chapters are. Without it an
                 # intro "Future Perfect" (not CAPS) was no chapter, while a frontispiece caption and
                 # the back-cover series ads were (Jon, Unpayable Debt, 11-21)
-                head = _in_contents(text, contents) and all(len(q) <= 50 for q in paras[:j])
-            if head and (imprint or text[:1] in "\"\u201c\u2018'"):
+                # ponytail: a sequel's pages carry the first story's title as running head ("THE WOMAN
+                # WITH THE 'OILY EYES' 43" over "THE STORY OF ANNETTE"); a book never repeats a chapter
+                head = _in_contents(text, contents) and all(len(q) <= 50 for q in paras[:j]) \
+                    and not any(_same_title(text, t) for t in titles + [open_title])
+            if head and (imprint or text[:1] in "\"\u201c\u2018'" and not contents):
                 # ponytail: Signal to Noise (11-23): the cover's and copyright page's "ISBN 0-380-...",
                 # "AVON BOOKS, INC.", "WCD 10 9 8 7 6 5 4 3 2 1" and the back-cover review quote
                 # '"A BRAVE NEW VISION..."' were chapters. A page with an ISBN or the printer's line
@@ -1589,6 +1623,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 flush()
                 cur.append(("h1", text))
                 head_page, open_title = i, text
+                titles.append(text)
             elif cur and cur[-1][0] == "p" and (text[:1].islower() and not SENT_END.search(cur[-1][1])
                                                  or re.search(r"[a-z]-$", cur[-1][1]) and text[:1].islower()):
                 # ponytail: a paragraph cut by the page end or by an OCR line break goes on, not a new <p>

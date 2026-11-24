@@ -276,7 +276,34 @@ def front_matter_and_caps_title():
     print("ok — scan chapters: no chapters from cover/copyright/also-by pages, drop cap not on the title")
 
 
+def anthology_contents():
+    """Tales of Terror (11-24): numbered contents ("III. THE CORPSE LIGHT 51"), an entry split over
+    lines, story numerals under the running head, quoted titles, running heads with page numbers
+    and a sequel whose pages carry the first story's title."""
+    body = "It was a dark night and the wind howled about the old house on the moor for hours. " * 6
+    pages = [
+        "CONTENTS\n\n1.\n\nTHE WOMAN WITH THE\n\nOILY EYES'\n\nII.\n\nTHE STORY OF ANNETTE THE WOMAN WITH THE\n\n"
+        "BEING THE SEQUEL TO\n\n41\n\nIII. THE CORPSE LIGHT\n\n51\n\nIV. THE RED LILY.\n\n66\n\nV.\n\nTHE PIRATE'S TREASURE\n\n95",
+        "TALES OF TERROR\n\nI\n\nTHE WOMAN WITH THE OILY EYES'\n\nALTHOUGH often urged. " + body,
+        "THE WOMAN WITH THE 'OILY EYES' II\n\n" + body,
+        "41\n\nII\n\nSEQUEL TO THE WOMAN WITH THE\n\n'OILY EYES'\n\nTHE STORY OF ANNETTE\n\n" + body,
+        "THE WOMAN WITH THE 'OILY EYES' 43\n\n" + body,
+        "51\n\nIII.\n\nTHE CORPSE LIGHT,\n\n" + body,
+        "66\n\nTALES OF TERROR\n\nIV\n\n'RED LILY'\n\n" + body,
+        "'RED LILY'\n\n67\n\n" + body,
+        "95\n\nV\n\nTHE PIRATE'S TREASURE\n\nAT the time the events occurred. " + body,
+        "THE PIRATE'S TREASURE 97\n\n" + body,
+    ] + ["TALES OF TERROR\n\n" + body] * 6
+    chs = pdf2epub.ocr_chapters(pages)
+    heads = [t for ch in chs for k, t in ch if k == "h1"]
+    want = ["OILY EYES", "ANNETTE", "CORPSE LIGHT", "RED LILY", "PIRATE"]
+    assert len(heads) == 5 and all(w in h for w, h in zip(want, heads)), heads
+    text = " ".join(t for ch in chs for k, t in ch if k == "p")
+    assert "IALTHOUGH" not in text and "VAT the" not in text and "AT the time" in text, text[:300]
+
+
 if __name__ == "__main__":
+    anthology_contents()
     reread()
     chapters()
     chapter_running_head()
