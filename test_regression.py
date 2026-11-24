@@ -14,7 +14,7 @@ import json, sys
 from pathlib import Path
 
 import pymupdf
-from app import _ocr_layer, _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc, doc_lang
+from app import cover_title_author, _ocr_layer, _text_blocks, _structure, ocr_doc, ocr_chapters, _scan_figures, ocr_ok, ocr_lang, pdf_toc, doc_lang
 
 GOLDEN = Path(__file__).parent / "tests" / "golden.json"
 PROSE = ("It was a bright cold day in April, and the clocks were striking thirteen. "
@@ -50,6 +50,19 @@ def make_novel():
                 pg.insert_text((72, 110), f"Chapter {ch}", fontsize=22)
                 y = 140
             pg.insert_textbox(pymupdf.Rect(72, y, 520, 780), PROSE * 6, fontsize=11)
+    return d
+
+
+def make_title_page():
+    """11-24 store check: no /Title or /Author in the PDF, both printed big on page 1 (Little Brother came out
+    as "littlebro" with no author, and stores read those fields)."""
+    d = _doc()
+    pg = d.new_page()
+    pg.insert_text((120, 300), "The Quiet Harbor", fontsize=30)
+    pg.insert_text((200, 360), "Jane Ellison", fontsize=16)
+    for k in range(2):
+        pg = d.new_page()
+        pg.insert_textbox(pymupdf.Rect(72, 80, 520, 780), PROSE * 6, fontsize=11)
     return d
 
 
@@ -765,7 +778,9 @@ CASES = {
     "math_paper": (make_math_paper, {"path": "text", "has": ["clocks were striking", "and the paper ends"],
                                      "hasnt": ["Preprint submitted", "a = b + g", "α = β"], "imgs": 4}),
     "novel": (make_novel, {"path": "text", "has": ["Chapter 1", "Chapter 2", "clocks were striking"],
-                           "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en"}),
+                           "hasnt": ["NINETEEN EIGHTY-FOUR"], "h_min": 2, "lang": "en", "cover": ("", "")}),
+    "title_page": (make_title_page, {"path": "text", "has": ["clocks were striking"],
+                                     "cover": ("The Quiet Harbor", "Jane Ellison")}),
     "ia_layer": (make_ia_layer, {"path": "text", "has": ["clocks were striking"], "layer": True}),
     # 11-24 lead: scan painted over a visible OCR text layer must be read again like any OCR layer
     "ia_under_image": (make_ia_under_image, {"path": "text", "has": ["clocks were striking"], "layer": True}),
@@ -896,6 +911,8 @@ def main():
         items = [it for ch in chapters for it in ch]
         for kind, key in (("p", "para"), ("fn", "fn")):  # whole paragraphs / notes, not phrases
             errs += [f"no {kind} block {p!r}" for p in rules.get(key, []) if (kind, p) not in items]
+        if "cover" in rules and (got := cover_title_author(doc)) != tuple(rules["cover"]):
+            errs.append(f"title/author {got}, want {tuple(rules['cover'])}")
         if "lang" in rules and (got := ocr_lang(doc)[1] if s["path"] == "ocr" else doc_lang(doc)) != rules["lang"]:
             errs.append(f"epub language {got}, want {rules['lang']}")
         known = [e for e in errs if any(e.startswith(k) for k in rules.get("known", []))]

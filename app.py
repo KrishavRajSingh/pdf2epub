@@ -1683,6 +1683,60 @@ def _lint_later(pdf: bytes, epub_bytes: bytes, ref: str, pages: int):
     threading.Thread(target=run, daemon=True).start()
 
 
+_JUNK_TITLE = re.compile(r"^(isbn[_ -]?\d|\d[\d -]{6,}$|microsoft word|untitled|document\d*$)", re.I)
+_NOT_TITLE = re.compile(r"^(chapter|part|book|section|contents|table of contents|introduction|prologue|preface|foreword|"
+                        r"acknowledg|dedication|copyright|index|appendix|[ivxlc]+\.?$|\d)", re.I)
+_NAME_WORD = re.compile(r"^(?:[A-Z][\w'’.-]*|[A-Z]\.)$")
+
+
+def cover_title_author(doc) -> tuple[str, str]:
+    """Title and author from the biggest type on the first two pages, for PDFs with no usable metadata.
+
+    ponytail (11-24 store check): Little Brother's PDF has no /Title, so the EPUB was named "littlebro" with no
+    author, and stores read those fields. Born-digital only: an OCR layer's big text is noise ("ewffi").
+    """
+    lines = []
+    for i in range(min(2, len(doc))):
+        try:
+            pg = doc[i]
+            area = abs(pg.rect) or 1
+            if any(abs(r) > 0.8 * area for im in pg.get_images(full=True) for r in pg.get_image_rects(im[0])):
+                continue  # a page that is one big picture is a scan: its text layer is OCR noise
+            blocks = pg.get_text("dict")["blocks"]
+        except Exception:
+            continue
+        for b in blocks:
+            for ln in b.get("lines", []):
+                sp = [x for x in ln.get("spans", []) if x.get("text", "").strip()]
+                if not sp:
+                    continue
+                if any("glyphless" in (x.get("font") or "").lower() for x in sp):
+                    return "", ""  # someone's OCR layer: no guessing from it
+                t = " ".join(" ".join(x["text"] for x in sp).split())
+                lines.append((round(max(x["size"] for x in sp), 1), i, ln["bbox"][1], t))
+    ok = lambda t: (3 <= len(t) <= 80 and "@" not in t and not _NOT_TITLE.match(t) and "http" not in t.lower() and "www." not in t.lower()
+                    and sum(c.isalpha() for c in t) >= 0.7 * len(t.replace(" ", "")) and len(t.replace(" ", "")) >= 3)
+    if not lines:
+        return "", ""
+    top = max(sz for sz, *_ in lines)
+    head = [l for l in lines if l[0] == top]
+    page = head[0][1]
+    title = " ".join(l[3] for l in sorted(head, key=lambda l: l[2]) if l[1] == page)
+    if not ok(title) or len(title) > 120:
+        return "", ""
+    rest = sorted({l[0] for l in lines if l[0] < top}, reverse=True)
+    author = ""
+    for sz in rest[:2]:
+        for l in (l for l in lines if l[0] == sz and l[1] == page):
+            w = re.sub(r"^by\s+", "", l[3], flags=re.I).split()
+            if 2 <= len(w) <= 4 and all(_NAME_WORD.match(x) for x in w) and not any(c.isdigit() for c in l[3]):
+                author = " ".join(w)
+                break
+        if author:
+            break
+    return title, author
+
+
 def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes | None = None) -> bytes:
     book = epub.EpubBook()
     book.set_title(_clean(title)[:120])
@@ -5326,11 +5380,16 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
         npages = len(doc)
         meta = doc.metadata or {}
         # ponytail: most PDFs carry their own /Title and /Author, so the two fields are usually a no-op
-        safe_title = (title or (meta.get("title") or "").strip()
+        meta_title = (meta.get("title") or "").strip()
+        if _JUNK_TITLE.match(meta_title):
+            meta_title = ""
+        guess_t, guess_a = ("", "") if (title and author) or (meta_title and (meta.get("author") or "").strip()) \
+            else cover_title_author(doc)
+        safe_title = (title or meta_title or guess_t
                       or (f.filename or "book").rsplit(".", 1)[0])[:120] or "book"
         if "_" in safe_title and " " not in safe_title:
             safe_title = safe_title.replace("_", " ")  # "Into_the_Blue" on the Kindle shelf -> "Into the Blue"
-        author = (author or (meta.get("author") or "").strip())[:120]
+        author = (author or (meta.get("author") or "").strip() or guess_a)[:120]
         if DRIVE_REFRESH and _ocr_layer(doc):
             # ponytail (11-21): a scan with someone else's OCR layer is a scan, so it is read again
             # (layer_scan_pages) under the scan limits: 20 free pages, the whole book paid. Its old

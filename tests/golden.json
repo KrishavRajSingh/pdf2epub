@@ -60,6 +60,17 @@
   "imgs": 0,
   "words": 904
  },
+ "title_page": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "The Quiet Harbor",
+   "Jane Ellison"
+  ],
+  "paragraphs": 2,
+  "imgs": 0,
+  "words": 305
+ },
  "ia_layer": {
   "path": "text",
   "chapters": 1,
