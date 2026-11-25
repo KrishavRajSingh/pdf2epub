@@ -19,6 +19,8 @@ import time
 import traceback
 import unicodedata
 import uuid
+import contextvars
+import math
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
@@ -125,6 +127,14 @@ SHORT_MAX_PAGES = 400
 LAYER_URL = "https://buy.polar.sh/polar_cl_cPo8GrrTkP9sKqbuSKCT5Hme2E2M9e7fpsSVe3zDPhw"
 LAYER_PRODUCT = "4ee7ace2-a936-49f9-85ec-270fa89b1a1f"
 LAYER_PRICE = "$1"
+# ponytail (11-25): credits, like the rival's packs but on a key (no account). Buying the pack mints a key
+# holding PACK_CREDITS; each book spends by what it needed past the free part: text and OCR-layer scans
+# 1 credit per 10 pages, OCR 1 per page, AI reading (opt-in) AI_CREDITS per page it re-reads.
+PACK_URL = "https://buy.polar.sh/polar_cl_UHKrpBYADlITuHYEaSSjvvOcEypO7E0XxwOTS3laKCO"
+PACK_PRODUCT = "17775bba-8902-4599-8e3b-5d1aaa6aa5a4"
+PACK_CREDITS = 500
+AI_CREDITS = 3
+_AI_PAGES = contextvars.ContextVar("ai_pages", default=0)  # AI pages this run may use on a credit key
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN", "")  # ponytail: read-only OAT, only orders:read is needed
 POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
@@ -178,6 +188,8 @@ def shelf_key(request: Request) -> str:
         parts = ln.split()
         if len(parts) >= 2 and _key_fold(parts[1]) == want:
             k = parts[1]  # ponytail: the stored spelling, so the Library budget is counted on one key
+            if any(p.startswith("credits=") for p in parts[2:]):
+                return k if credits_left(k) > 0 else ""
             until = next((p[6:] for p in parts[2:] if p.startswith("until=")), "")
             if until:
                 return k if today <= until else ""
@@ -330,7 +342,7 @@ def freebook_use(token: str, digest: str):
         pass
 
 
-def issue_key(checkout_id: str, days: int = 0, sharp: int = 0) -> str:
+def issue_key(checkout_id: str, days: int = 0, sharp: int = 0, credits: int = 0) -> str:
     """Mint a key for a paid checkout, once per checkout id.
 
     ponytail: no accounts, no db, no polar api call. the key is a random string in a file on the
@@ -348,14 +360,14 @@ def issue_key(checkout_id: str, days: int = 0, sharp: int = 0) -> str:
         with SHELF_KEYS.open("a") as fh:
             until = (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat() if days else ""
             fh.write(f"{checkout_id} {key}" + (f" until={until}" if until else "")
-                     + (f" sharp={sharp}" if sharp else "") + "\n")
+                     + (f" sharp={sharp}" if sharp else "") + (f" credits={credits}" if credits else "") + "\n")
     except OSError:
         pass
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "key_issued": checkout_id,
                       "ua": ""}), flush=True)
     # ponytail: only a fresh key is mailed, so a refresh of /thanks never sends a second mail.
     # a thread, so a slow polar or resend never holds up the buyer's success page
-    threading.Thread(target=_mail_key, args=(checkout_id, key, days, sharp), daemon=True).start()
+    threading.Thread(target=_mail_key, args=(checkout_id, key, days, sharp, credits), daemon=True).start()
     return key
 
 
@@ -367,6 +379,8 @@ def sharp_left(key: str) -> int:
     """Pages of AI re-reading this key still has (0 for keys without the Library pass)."""
     if not key:
         return 0
+    if key_credits(key) is not None:
+        return _AI_PAGES.get()  # credit pack: only when the reader ticked AI reading, within the balance
     try:
         lines = SHELF_KEYS.read_text().splitlines()
     except OSError:
@@ -384,6 +398,51 @@ def sharp_left(key: str) -> int:
     except (OSError, ValueError):
         used = 0
     return max(0, total - used)
+
+
+CREDITS_USED = Path(os.environ.get("LOG_DIR", ".")) / "credits-used.txt"  # "KEY CREDITS" per book
+
+
+def key_credits(key: str) -> int | None:
+    """Credits a pack key was bought with; None for a key that is not a credit pack."""
+    try:
+        lines = SHELF_KEYS.read_text().splitlines()
+    except OSError:
+        return None
+    for ln in lines:
+        parts = ln.split()
+        if len(parts) >= 2 and parts[1] == key:
+            return next((int(p[8:]) for p in parts[2:] if re.fullmatch(r"credits=\d+", p)), None)
+    return None
+
+
+def _used(path: Path, key: str) -> int:
+    try:
+        return sum(int(b) for a, b in (ln.split() for ln in path.read_text().splitlines() if ln.strip()) if a == key)
+    except (OSError, ValueError):
+        return 0
+
+
+def credits_left(key: str) -> int:
+    """Credits left on a pack key: bought, minus books, minus AI_CREDITS per AI-read page."""
+    total = key_credits(key) if key else None
+    if total is None:
+        return 0
+    return max(0, total - _used(CREDITS_USED, key) - AI_CREDITS * _used(SHARP_USED, key))
+
+
+def credit_cost(kind: str, pages: int) -> int:
+    """Credits a book spends past the free part: kind is text, layer or ocr."""
+    if kind == "ocr":
+        return max(0, pages - FREE_OCR_PAGES)
+    free = FREE_OCR_PAGES if kind == "layer" else MAX_PAGES
+    return math.ceil(max(0, pages - free) / 10)
+
+
+def credits_use(key: str, n: int):
+    if n > 0:
+        with _SHARP_LOCK, CREDITS_USED.open("a") as fh:
+            fh.write(f"{key} {n}\n")
 
 
 LANG_NAMES = {"te": "Telugu", "hi": "Hindi", "en": "English", "pt": "Portuguese", "es": "Spanish"}
@@ -667,16 +726,23 @@ def _order_email(checkout_id: str) -> str:
     return ((items[0].get("customer") or {}).get("email") or "") if items else ""
 
 
-def _mail_key(checkout_id: str, key: str, days: int = 0, sharp: int = 0):
+def _mail_key(checkout_id: str, key: str, days: int = 0, sharp: int = 0, credits: int = 0):
     """Mail a fresh Shelf or Batch key to the buyer, so losing the tab or the browser never loses it."""
     to = _order_email(checkout_id)
     if not (RESEND_KEY and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}", to)):
         event("key_mail_failed", None, checkout=checkout_id[:8], err="no resend key or no email")
         return
-    name = "Library pass" if sharp else ("Batch pass" if days else "Shelf")
-    plan = f"{name} ({days} days, it does not renew)" if days else "Shelf"
+    name = "Credit pack" if credits else ("Library pass" if sharp else ("Batch pass" if days else "Shelf"))
+    plan = (f"Credit pack ({credits} credits, they never expire)" if credits
+            else f"{name} ({days} days, it does not renew)" if days else "Shelf")
+    if credits:
+        sharp = 0  # the AI line below is for the Library pass
     extra = (f"Scans get the sharper AI reading on the pages regular OCR finds hard to read, for up to "
              f"{sharp:,} pages.\n\n") if sharp else ""
+    if credits:
+        extra = ("A book spends credits only past the free part: a text PDF or a scan that already has text "
+                 "1 credit per 10 pages, a scan that needs OCR 1 per page, AI reading 3 per page it re-reads. "
+                 "The converter shows what is left.\n\n")
     body = (f"Thanks for buying pdf2epub {plan}. Your key:\n\n{key}\n\n" + extra +
             f"Open this link to convert with the paid limits (books up to 2,000 pages, 1GB, scans included):\n\n"
             f"https://epub.ftak.net/?k={key}\n\n"
@@ -2421,7 +2487,12 @@ function multi(){const w=wallFiles(),nm=window.capName||'book';
  return w.length>=2?w.length:0}
 function multiBox(n,k){return '<div style="margin:0 0 12px;padding:12px 14px;border:2px solid #6b4ce6;border-radius:6px">'
  +'<b>Converting several books?</b> This is your '+(k===2?'second':k===3?'third':k+'th')+' over the free limit today.<br>'
- +'<a style="'+BTN+'" href="/go/batch?why=multi&v='+V+'">$10 for 30 days, every book, no renewal</a></div>'}
+ +'<a style="'+BTN+'" href="/go/pack?why=multi&v='+V+'">500 credits - $5, never expire</a></div>'}
+// 11-25 credits: what this book costs from a $5 pack of 500 (past the free part), and the pack button
+function cost(kind,n){n=+n||0;return kind==='ocr'?Math.max(1,n-__FREEOCR__):Math.max(1,Math.ceil((n-(kind==='layer'?__FREEOCR__:150))/10))}
+function packBtn(kind,n){const c=cost(kind,n),b=Math.floor(500/c);
+ return '<a style="'+BTN+'" href="/go/pack?why='+kind+(window.previewDone?'-seen':'')+'&v='+V+'">500 credits - $5</a>'
+ +'<span style="font-size:14px;color:#5b564d">This book: '+c+' credits'+(b>1?', so the pack covers about '+b+' like it':'')+'. Credits never expire, no account.</span><br>'}
 // ponytail (11-22): over the limit there is no free part any more. Both wall sales (11-03 $5, 11-04 Shelf)
 // came from the hard wall (2 of 18 wall readers); since the free 150-page preview (11-07) 0 of 136 paid.
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
@@ -2430,8 +2501,9 @@ function nobuy(){const r=[['price','Too expensive'],['enough','The free part was
  return '<div id="nobuy" style="margin-top:14px;font-size:13px;color:#5b564d">Not buying? Tell me why (one tap): '
  +r.map(x=>'<button data-nobuy="'+x[0]+'" style="'+GHOST+'font-size:13px;padding:4px 10px">'+x[1]+'</button>').join('')+'</div>'}
 function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'
- +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $3</a>'
-  :'<a style="'+BTN+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Convert the whole book - $5</a>')
+ +packBtn('pages',n)
+ +(short(n)?'<a style="'+GHOST+'" href="'+buy3(window.previewDone?'pages-seen':'pages')+'">Just this book - $3</a>'
+  :'<a style="'+GHOST+'" href="'+buy(window.previewDone?'pages-seen':'pages')+'">Just this book - $5</a>')
  +'<a style="'+GHOST+'" href="/go/shelf?why=pages&v='+V+'">A whole shelf? $10/month</a>'
  +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
@@ -2445,14 +2517,16 @@ function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This 
 function pitchLayer(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scanned book that already has a text layer ('+(n||'many')+' pages). '
  +'Free reads the first __FREEOCR__ pages.<br>'
  +'<a style="'+BTN+'" href="/go/layer?why='+(window.previewDone?'layer-seen':'layer')+'&v='+V+'">Convert the whole book - $1</a>'
+ +'<a style="'+GHOST+'" href="/go/pack?why=layer'+(window.previewDone?'-seen':'')+'&v='+V+'">More books like this? 500 credits - $5 (this one: '+cost('layer',n)+')</a>'
  +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot, pictures and cover included. Nothing stored.</span>'+nobuy()}
 function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Pages the scan makes hard to read are listed at the end of your book. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
- +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
-  :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
+ +packBtn('ocr',n)
+ +(short(n)?'<a style="'+GHOST+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">Just this book - $3</a>'
+  :'<a style="'+GHOST+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">Just this book - $5</a>')
  +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
  +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
  +'on the spot. Nothing stored.</span>'+nobuy()}
@@ -2510,7 +2584,14 @@ function pickMany(list){BATCH=list.filter(f=>/\.pdf$/i.test(f.name||''));
  if(BATCH.length>1){drop.querySelector('b').textContent=BATCH.length+' PDFs picked';ev('pick',{why:'batch'})}}
 // ponytail (11-14): the key lives in one browser's storage; a buyer who paid on an iPad got the free tier on
 // their Mac (ysvsr). the footer box puts the key on this browser too; with a key, it says so instead
-if(K){const kf=document.getElementById('keyform');if(kf)kf.innerHTML='Paid key active in this browser.';}
+if(K){const kf=document.getElementById('keyform');if(kf)kf.innerHTML='Paid key active in this browser.';
+ // 11-25: a credit-pack key shows its balance and offers AI reading on scans (3 credits a page it re-reads)
+ fetch('/credits?k='+encodeURIComponent(K)).then(r=>r.ok?r.json():null).then(j=>{if(!j||!kf)return;
+  kf.innerHTML='Credit key active: <b>'+j.left+'</b> credits left. <a href="/go/pack?why=topup&v='+V+'">500 more - $5</a>';
+  const lab=document.createElement('label');lab.style.cssText='display:block;margin-top:10px;font-size:14px';
+  lab.innerHTML='<input type="checkbox" id="aibox"> AI reading for scans: re-reads the pages OCR is unsure of (3 credits a page)';
+  go.parentNode.insertBefore(lab,go);document.getElementById('aibox').onchange=e=>{window.AI=e.target.checked;ev('ai_toggle',{why:e.target.checked?'on':'off'})}
+ }).catch(()=>{})}
 if(K){fi.multiple=true;
  const fb=document.createElement('input');fb.type='file';fb.webkitdirectory=true;fb.multiple=true;fb.hidden=true;
  const bb=document.createElement('button');bb.className='ghost-btn';bb.id='folder';bb.type='button';
@@ -2526,7 +2607,7 @@ async function convertMany(){
   +(bad.length?'<br><br>Failed so far:<br>'+failed():'')};
  for(let i=0;i<n;i++){const f=BATCH[i];show(i,f.name);
   const fd=new FormData();fd.append('f',f);fd.append('title','');fd.append('author','');
-  fd.append('email',document.getElementById('email').value);
+  fd.append('email',document.getElementById('email').value);if(window.AI)fd.append('ai','1');
   try{const job=()=>runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},s=>show(i,f.name+' ('+clock(s)+')'));
    let u;try{u=await job()}catch(e1){const st=+(e1&&e1.status)||0;if(e1&&e1.status==='read'||st&&![502,503].includes(st))throw e1;
     show(i,f.name+' (server restarted, trying this book again in 30 s)');ev('fail',{status:String(st||'net'),why:'batch-retry'});
@@ -2558,7 +2639,7 @@ async function convert(preview){
  fd.append('author',document.getElementById('author').value);
  fd.append('email',document.getElementById('email').value);
  // ponytail: always ask for the free part, so an over-limit book uploads once (not refused, then re-sent)
- if(preview)fd.append('preview','1');window.lastCap='';
+ if(preview)fd.append('preview','1');window.lastCap='';if(window.AI)fd.append('ai','1');
  if(window.FREE)fd.append('free',window.FREE);
  try{
   const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},n=>{if(n>=20)msg.textContent='Still converting ('+clock(n)
@@ -2944,9 +3025,20 @@ def thanks(request: Request):
         key, batch = issue_key(cid, BATCH_DAYS), True
     elif LIBRARY_PRODUCT and paid_checkout(cid, LIBRARY_PRODUCT):
         key, batch = issue_key(cid, LIBRARY_DAYS, LIBRARY_SHARP), True
-    lib = bool(key) and sharp_left(key) > 0
+    elif paid_checkout(cid, PACK_PRODUCT):
+        key = issue_key(cid, credits=PACK_CREDITS)
+    pack = bool(key) and key_credits(key) is not None
+    lib = bool(key) and not pack and sharp_left(key) > 0
     days = LIBRARY_DAYS if lib else BATCH_DAYS
-    pname = "Library pass" if lib else ("Batch pass" if batch else "Shelf")
+    pname = "Credit pack" if pack else ("Library pass" if lib else ("Batch pass" if batch else "Shelf"))
+    if pack:
+        intro = (f"The Credit pack is {PACK_CREDITS} credits that never expire. A book spends credits only past "
+                 "the free part: a text PDF or a scan that already has text 1 credit per 10 pages, a scan that "
+                 "needs OCR 1 per page, AI reading 3 per page it re-reads. Books up to 2,000 pages, scans included.")
+    else:
+        lead = (f"The Library pass is {LIBRARY_DAYS} days of Shelf plus the sharper AI reading for faded scans, paid once"
+                if lib else ("The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month"))
+        intro = lead + ": no monthly limit, any number of books, each up to 2,000 pages, scans included."
     key_html = ""
     if key:
         key_html = (f'<div class="card"><p><b>Your {pname} key</b></p>'
@@ -2974,8 +3066,7 @@ b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,m
 <body><div class="wrap">
 <a class="mark" href="/"><span class="dot"></span>pdf2epub</a>
 <h1>You're in.</h1>
-<p>{f"The Library pass is {LIBRARY_DAYS} days of Shelf plus the sharper AI reading for faded scans, paid once" if lib else ("The Batch pass is 30 days of Shelf, paid once" if batch else "Shelf is $10 a month")}: no monthly limit,
-any number of books, each up to 2,000 pages, scans included.</p>
+<p>{intro}</p>
 {key_html}
 <div class="card">
 <p><b>What happens next</b></p>
@@ -3397,10 +3488,19 @@ async def beacon(request: Request):
     return Response(status_code=204)
 
 
+@app.get("/credits")
+def credits_view(request: Request):
+    """Balance of a credit-pack key, for the converter page."""
+    k = (request.query_params.get("k") or "").strip()[:64]
+    if not k or key_credits(k) is None:
+        raise HTTPException(404, "not a credit key")
+    return JSONResponse({"left": credits_left(k)})
+
+
 @app.get("/go/{offer}")
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
-    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "layer": LAYER_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
+    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "layer": LAYER_URL, "pack": PACK_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
            "library": LIBRARY_URL if OPENROUTER_KEY else "",
            "translate": translate.TRANSLATE_URL}.get(offer)  # no model key = no AI reading to sell
     if not url:
@@ -5591,7 +5691,7 @@ def _structure(blocks, doc):
 
 @app.post("/convert")
 async def convert(request: Request, f: UploadFile = File(...), title: str = Form(""), author: str = Form(""),
-                  email: str = Form(""), preview: str = Form(""), free: str = Form("")):
+                  email: str = Form(""), preview: str = Form(""), free: str = Form(""), ai: str = Form("")):
     throttle(request)
     ref = ref_of(request)
     key = shelf_key(request)  # ponytail: a paying subscriber gets a bigger ceiling, no account needed
@@ -5642,6 +5742,17 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                                 f"and this PDF is not one. Reply to the Polar receipt or email {SHELF_MAIL} "
                                 "and we will sort it out")
         total = len(doc)
+        pack = bool(key) and key_credits(key) is not None
+        if pack:
+            # ponytail: a credit key pays per book by what it needs; refuse before the work, not after
+            kind = "layer" if DRIVE_REFRESH and _ocr_layer(doc) else ("text" if _text_blocks(doc) else "ocr")
+            need, left = credit_cost(kind, total), credits_left(key)
+            if need > left:
+                doc.close()
+                log(False, total, kb_in, 0, "credits-short", ref, request=request)
+                raise HTTPException(402, f"this book needs {need} credits and your key has {left} left. "
+                                    "Another 500 credits are $5: epub.ftak.net/go/pack")
+            _AI_PAGES.set((left - need) // AI_CREDITS if ai == "1" and kind != "text" else 0)
         # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
         cut_pages = preview == "1" and not paid and total > max_pages
         cap = ""  # ponytail: "pages:380" / "ocr:246" tells the page to pitch $5 after the free part, one upload instead of two
@@ -5659,6 +5770,12 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
 
         def done(data: bytes, pages: int, kind: str):
             log(True, pages, kb_in, len(data) // 1024, kind, ref, email.strip()[:120], request=request)
+            if pack:
+                k = "layer" if kind.startswith("layer") else ("ocr" if kind.startswith("ocr") else
+                                                              ("text" if kind in ("", "pages-preview") else ""))
+                spent = credit_cost(k, pages) if k else 0
+                credits_use(key, spent)
+                event("credits", request, spent=spent, kind=k, pages=pages, left=credits_left(key))
             if book:
                 onebook_use(cid, digest)
                 event("paid_convert", request, checkout_id=cid, pages=pages)

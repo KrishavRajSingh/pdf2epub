@@ -242,7 +242,7 @@ def main():
         "unverified checkout minted a key"
     pdf2epub.paid_checkout = lambda c, p: (c, p) == (cid, pdf2epub.SHELF_PRODUCT)
     real_mail_key, key_mails = pdf2epub._mail_key, []
-    pdf2epub._mail_key = lambda c, k, d=0, s=0: key_mails.append((c, k, d))
+    pdf2epub._mail_key = lambda c, k, d=0, s=0, cr=0: key_mails.append((c, k, d))
     page = client.get(f"/thanks?checkout_id={cid}").text
     assert "Shelf key" in page, "a verified checkout must mint a key"
     key = re.search(r"\?k=([0-9A-Za-z_-]+)</code>", page).group(1)
@@ -617,3 +617,59 @@ def test_layer_offer():
 
 if __name__ == "__main__":
     test_layer_offer()
+
+
+def test_credit_pack():
+    # 11-25: $5 = 500 credits on a key, no account; books spend by kind past the free part
+    import pymupdf, tempfile
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    import app as a
+    tmp = Path(tempfile.mkdtemp())
+    real = (a.SHELF_KEYS, a.CREDITS_USED, a.SHARP_USED, a.paid_checkout, a._mail_key)
+    a.SHELF_KEYS, a.CREDITS_USED, a.SHARP_USED = tmp / "k.txt", tmp / "c.txt", tmp / "s.txt"
+    a._HITS.clear()
+    cid = "6f2d0b54-8e7a-4c9b-ad5f-2e4c3a0b9f87"
+    a.paid_checkout = lambda c, p: (c, p) == (cid, a.PACK_PRODUCT)
+    a._mail_key = lambda *x: None
+    c = TestClient(a.app)
+    try:
+        r = c.get("/go/pack?why=pages", follow_redirects=False)
+        assert r.status_code == 302 and r.headers["location"] == a.PACK_URL
+        t = c.get(f"/thanks?checkout_id={cid}").text
+        assert "Credit pack" in t and "500 credits" in t, t[:400]
+        key = a.SHELF_KEYS.read_text().split()[1]
+        assert a.key_credits(key) == 500 and a.credits_left(key) == 500
+        assert c.get(f"/credits?k={key}").json() == {"left": 500}
+        assert c.get("/credits?k=nosuchkey123").status_code == 404
+        # costs: text 341 p = 20 credits past 150, OCR-layer 260 p = 24, OCR 104 p = 84
+        assert (a.credit_cost("text", 341), a.credit_cost("layer", 260), a.credit_cost("ocr", 104)) == (20, 24, 84)
+        assert a.credit_cost("text", 120) == 0
+        d = pymupdf.open()
+        for i in range(341):
+            d.new_page().insert_text((72, 72), f"Page {i + 1} of a long born-digital book with words.")
+        raw = d.tobytes()
+        ok = c.post(f"/convert?k={key}", files={"f": ("long.pdf", raw, "application/pdf")})
+        assert ok.status_code == 200, ok.text[:200]
+        assert a.credits_left(key) == 480, a.credits_left(key)
+        assert a.sharp_left(key) == 0, "no AI reading unless the reader ticked it"
+        tok = a._AI_PAGES.set(7)
+        assert a.sharp_left(key) == 7
+        a._AI_PAGES.reset(tok)
+        # AI pages spend AI_CREDITS each; the key runs dry, then it is refused before the work
+        a.SHARP_USED.write_text(f"{key} 150\n")
+        assert a.credits_left(key) == 30
+        a.CREDITS_USED.write_text(a.CREDITS_USED.read_text() + f"{key} 25\n")
+        short = c.post(f"/convert?k={key}", files={"f": ("long.pdf", raw, "application/pdf")})
+        assert short.status_code == 402 and "needs 20 credits" in short.text and "has 5 left" in short.text, short.text
+        a.CREDITS_USED.write_text(a.CREDITS_USED.read_text() + f"{key} 5\n")
+        assert a.shelf_key(type("R", (), {"query_params": {"k": key}, "headers": {}})()) == "", "empty key still paid"
+        html = c.get("/").text
+        assert "function packBtn(" in html and "/go/pack?why=" in html and "/credits?k=" in html and "aibox" in html
+    finally:
+        a.SHELF_KEYS, a.CREDITS_USED, a.SHARP_USED, a.paid_checkout, a._mail_key = real
+    print("ok — credit pack: key minted, balance shown, text book spends past 150, refused when short")
+
+
+if __name__ == "__main__":
+    test_credit_pack()
