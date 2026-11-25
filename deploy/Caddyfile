@@ -1,3 +1,4 @@
+# ponytail: 45m, a 345-page 78 MB Telugu scan beside another paid book ran past 15m and the buyer got a 504 (11-25)
 epub.ftak.net {
 	encode gzip
 	request_body {
@@ -5,8 +6,8 @@ epub.ftak.net {
 	}
 	reverse_proxy app:8000 {
 		transport http {
-			read_timeout 15m
-			write_timeout 15m
+			read_timeout 45m
+			write_timeout 45m
 		}
 	}
 }

@@ -9,7 +9,7 @@ Usage: tail -n 4000 conversions.log | python3 scripts/paid_busy.py [now-iso]
 import json, sys
 from datetime import datetime, timedelta, timezone
 
-MAX_MIN = 20  # longest paid book seen ~12 min; older starts with no result are dead jobs, not running ones
+MAX_MIN = 45  # ponytail: = the proxy timeout; a 345-page scan beside another book ran 15+ min (11-25). Older = dead job
 
 
 def busy(lines, now):

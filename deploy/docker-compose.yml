@@ -16,7 +16,7 @@ services:
     restart: always
     ports: ["80:80", "443:443"]
     volumes:
-      - ./src/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro  # copied in place by deploy-vps.sh: src/ is replaced each deploy, a mount into it goes stale
       - caddy_data:/data
     depends_on: [app]
 volumes:
