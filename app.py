@@ -3332,7 +3332,9 @@ def stats(response: Response):
     response.headers["X-Robots-Tag"] = "noindex"
     ok = fail = pages = visits = ocr = scan_fail = emails = 0
     emailset = set()
-    leads = cap_rejects = checkouts = clicks_real = 0
+    leads = cap_rejects = checkouts = 0
+    pickers: set[str] = set()
+    clickers: set[str] = set()
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
     uas: dict[str, int] = {}
@@ -3368,8 +3370,12 @@ def stats(response: Response):
                 continue
             if r.get("ev"):
                 starts += r["ev"] == "start"
-                # ponytail: bot bursts click every offer in one ms with no visitor id; real readers carry v
-                clicks_real += r["ev"] == "checkout_click" and bool(r.get("v")) and not is_bot(r.get("ua") or "")
+                # ponytail: bot bursts click every offer in one ms, some with a fresh v each; a reader picked a file first
+                if r.get("v") and not is_bot(r.get("ua") or ""):
+                    if r["ev"] in ("pick", "submit"):
+                        pickers.add(r["v"])
+                    elif r["ev"] == "checkout_click":
+                        clickers.add(r["v"])
                 if r["ev"] in ("view", "pitch", "checkout_click", "nobuy") and not is_bot(r.get("ua") or ""):
                     cc_add(r["ev"] + (":" + r["why"] if r["ev"] == "nobuy" and r.get("why") else ""), r)
                 if r["ev"] == "suspect" and not is_bot(r.get("ua") or ""):
@@ -3432,7 +3438,7 @@ def stats(response: Response):
             "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
             "emails_captured": len(emailset), "leads": leads, "cap_rejects": cap_rejects,
             "checkouts": checkouts,  # ponytail: /thanks landings incl. our tests and refreshes, not sales
-            "clicks_real": clicks_real, "paid_orders": paid_orders(),
+            "clicks_real": len(clickers & pickers), "paid_orders": paid_orders(),
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,

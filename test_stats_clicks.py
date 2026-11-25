@@ -1,4 +1,4 @@
-"""/stats: real buy clicks (with a visitor id) and Polar-verified paid orders.
+"""/stats: readers who clicked buy (picked a file first; unique visitors) and Polar-verified paid orders.
 
 11-25: "checkouts" was read as 120 buy clicks. It counts /thanks landings (our tests, refreshes),
 and 160 of 205 checkout_click lines were bot bursts with no visitor id. Run: python3 test_stats_clicks.py
@@ -18,7 +18,10 @@ def main():
     a.LOG.write_text("\n".join(json.dumps(r) for r in [
         {"t": "2026-11-25T00:00:00+00:00", "ev": "checkout_click", "v": "", "ua": ua, "offer": "onebook"},
         {"t": "2026-11-25T00:00:00+00:00", "ev": "checkout_click", "v": "", "ua": ua, "offer": "shelf"},
+        {"t": "2026-11-25T00:00:01+00:00", "ev": "pick", "v": "reader1", "ua": ua},
         {"t": "2026-11-25T00:00:01+00:00", "ev": "checkout_click", "v": "reader1", "ua": ua, "offer": "short"},
+        {"t": "2026-11-25T00:00:01+00:00", "ev": "checkout_click", "v": "reader1", "ua": ua, "offer": "onebook"},
+        {"t": "2026-11-25T00:00:01+00:00", "ev": "checkout_click", "v": "burst99", "ua": ua, "offer": "library"},
         {"t": "2026-11-25T00:00:02+00:00", "ev": "checkout_click", "v": "crawler1", "ua": "Googlebot/2.1", "offer": "short"},
     ]) + "\n")
     a.PAID = d / "paid-checkouts.txt"
