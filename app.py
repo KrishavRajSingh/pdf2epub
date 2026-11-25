@@ -3132,7 +3132,7 @@ def privacy():
             "If you type an email we keep it in the same log, used only to contact you about the paid tier and to email you a file "
             "if a conversion needs a queue. The page keeps a random id in your browser's localStorage so we can count "
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
-            "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
+            "Page visits are also counted by Cloudflare Web Analytics, which uses no cookies and does not track you across sites. No accounts, no ad trackers, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
            "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click", "author_lead", "nav_cta"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28

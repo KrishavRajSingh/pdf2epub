@@ -46,7 +46,8 @@ def main():
     assert by["pitch"] == {"US": 1}, by
     assert by["cap"] == {"IN": 1}, by
     assert by.get("checkout_click", {}).get("US") == 1 or not a.ONETIME_URL, by
-    assert "DB-IP" in c.get("/privacy").text
+    priv = c.get("/privacy").text
+    assert "DB-IP" in priv and "Cloudflare Web Analytics" in priv and "no third party analytics" not in priv
     print("ok country")
 
 
