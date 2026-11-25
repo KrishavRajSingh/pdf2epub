@@ -4,3 +4,4 @@ pymupdf
 ebooklib
 python-multipart
 pillow
+maxminddb

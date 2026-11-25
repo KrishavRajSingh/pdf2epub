@@ -698,12 +698,38 @@ def vid_of(request: Request | None) -> str:
     return v if re.fullmatch(r"[0-9A-Za-z]{8,40}", v) else ""
 
 
+GEO_DB = Path(os.environ.get("LOG_DIR", ".")) / "dbip-country.mmdb"  # DB-IP lite (CC BY 4.0), monthly file on the /data volume
+_GEO = None
+
+
+def cc_of(request: Request | None) -> str:
+    """Two-letter country of the visitor, '' if unknown. Only the code is logged, never the IP."""
+    # ponytail (11-25): user wanted to know where paywall hits and buy clicks come from (UPI/INR question)
+    global _GEO
+    if request is None:
+        return ""
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
+    if _GEO is None:
+        try:
+            import maxminddb
+            _GEO = maxminddb.open_database(str(GEO_DB))
+        except Exception:
+            _GEO = False
+    if not _GEO or not ip:
+        return ""
+    try:
+        r = _GEO.get(ip) or {}
+        return str((r.get("country") or {}).get("iso_code") or "")[:2]
+    except Exception:
+        return ""
+
+
 def log(ok: bool, pages: int, kb_in: int, kb_out: int, err: str = "", ref: str = "", email: str = "",
         request: Request = None):
     _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(),
         "ok": ok, "pages": pages, "in": kb_in, "out": kb_out, "err": err[:80],
         "ref": ref[:60], "email": email, "ua": ua_of(request)[:120] if request else "",
-        "v": vid_of(request)}))
+        "v": vid_of(request), "cc": cc_of(request)}))
 
 
 def crash_reason(e: BaseException) -> str:
@@ -719,7 +745,7 @@ def event(name: str, request: Request | None = None, **fields):
     """One funnel step. `ev` lines are not visits or conversions, /stats skips them."""
     _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ev": name[:40],
         "v": vid_of(request), "ref": ref_of(request)[:60] if request else "",
-        "ua": ua_of(request)[:120] if request else "", **fields}))
+        "ua": ua_of(request)[:120] if request else "", "cc": cc_of(request), **fields}))
 
 def ref_of(request: Request) -> str:
     # ponytail: reddit sends origin-only referer, ?s= tag distinguishes which post
@@ -3102,14 +3128,14 @@ def favicon():
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
-    return ("<h1>Privacy</h1><p>PDFs are never saved. The finished EPUB waits on the server until you download it (an hour at most), then it is deleted. Counts (pages, bytes) logged to conversions.log. "
+    return ("<h1>Privacy</h1><p>PDFs are never saved. The finished EPUB waits on the server until you download it (an hour at most), then it is deleted. Counts (pages, bytes) and your country (looked up from your IP address, which is not stored; IP geolocation by DB-IP.com) logged to conversions.log. "
             "If you type an email we keep it in the same log, used only to contact you about the paid tier and to email you a file "
             "if a conversion needs a queue. The page keeps a random id in your browser's localStorage so we can count "
             "how many people get from upload to download; it is not a cookie and is never linked to your name. "
             "No accounts, no third party analytics, nothing resold.</p><p><a href='/'>back</a></p>")
 
 BEACONS = {"view", "multi_wall", "pick", "submit", "done", "fail", "pitch", "return", "sample", "lead", "faq", "again",
-           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click", "author_lead"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
+           "want_view", "translate_click", "desktop_click", "audio_click", "want_email", "djvu_pick", "kindle_click", "nobuy", "bilingual_click", "author_lead", "nav_cta"}  # ponytail: want_* = fake doors; kindle (11-16): DropKind sells send-to-Kindle, new-Kindle wave from 11-28
 
 
 @app.post("/e")
@@ -3126,7 +3152,7 @@ async def beacon(request: Request):
         return Response(status_code=204)
     extra = {k: str(d[k])[:80] for k in ("src", "why", "status", "cid", "path") if d.get(k)}
     _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "ev": n, "v": v,
-                       "ua": ua_of(request)[:120], **extra}))
+                       "ua": ua_of(request)[:120], "cc": cc_of(request), **extra}))
     return Response(status_code=204)
 
 
@@ -3293,6 +3319,12 @@ def stats(response: Response):
             k = "?"
         return weekly.setdefault(k, {"visits_human": 0, "conversions_human": 0, "cap_rejects": 0,
                                      "checkouts": 0, "leads": 0})
+    by_cc: dict[str, dict[str, int]] = {}  # ponytail (11-25): country of paywall hits, pitches, buy clicks, nobuy taps
+
+    def cc_add(kind: str, r) -> None:
+        if r.get("cc"):
+            d = by_cc.setdefault(kind, {})
+            d[r["cc"]] = d.get(r["cc"], 0) + 1
     suspect = {}  # books whose structure looks broken (_suspect), by reason
     wants = {"want_view": 0, "translate_click": 0, "desktop_click": 0, "audio_click": 0, "want_email": 0, "djvu_pick": 0, "kindle_click": 0, "bilingual_click": 0}
     try:
@@ -3303,6 +3335,8 @@ def stats(response: Response):
                 continue
             if r.get("ev"):
                 starts += r["ev"] == "start"
+                if r["ev"] in ("view", "pitch", "checkout_click", "nobuy") and not is_bot(r.get("ua") or ""):
+                    cc_add(r["ev"] + (":" + r["why"] if r["ev"] == "nobuy" and r.get("why") else ""), r)
                 if r["ev"] == "suspect" and not is_bot(r.get("ua") or ""):
                     suspect[r.get("why") or "?"] = suspect.get(r.get("why") or "?", 0) + 1
                 if r["ev"] in wants and not is_bot(r.get("ua") or ""):
@@ -3343,6 +3377,8 @@ def stats(response: Response):
             cap_rejects += 1 if c in ("too many pages", "too big") else 0
             if c.startswith("lead"):
                 wk(r)["leads"] += 1
+            if c in ("too many pages", "too big", "ocr-wall") and not is_bot(ua):
+                cc_add("cap", r)
             if c in ("too many pages", "too big") and not is_bot(ua):
                 wk(r)["cap_rejects"] += 1
             if r.get("ok"):  # ponytail: per-launch-post measurement, ref tag before the pipe
@@ -3364,7 +3400,8 @@ def stats(response: Response):
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
-            "starts": starts, "wants": wants, "suspect": suspect, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
+            "starts": starts, "wants": wants,
+            "by_cc": {k: dict(sorted(d.items(), key=lambda kv: -kv[1])[:12]) for k, d in sorted(by_cc.items())}, "suspect": suspect, "fail_by_err": dict(sorted(fail_by_err.items(), key=lambda kv: -kv[1])),
             "recent_fails": recent_fails[-15:],
             "user_agents": dict(sorted(uas.items(), key=lambda kv: -kv[1])[:8]),
             "weekly": dict(sorted(kv for kv in weekly.items() if kv[0] != "?")[-12:])}
