@@ -2338,7 +2338,10 @@ async function convertMany(){
  for(let i=0;i<n;i++){const f=BATCH[i];show(i,f.name);
   const fd=new FormData();fd.append('f',f);fd.append('title','');fd.append('author','');
   fd.append('email',document.getElementById('email').value);
-  try{const u=await runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},s=>show(i,f.name+' ('+clock(s)+')'));
+  try{const job=()=>runJob('/convert'+location.search,fd,{'X-V':V,'X-K':K},s=>show(i,f.name+' ('+clock(s)+')'));
+   let u;try{u=await job()}catch(e1){const st=+(e1&&e1.status)||0;if(e1&&e1.status==='read'||st&&![502,503].includes(st))throw e1;
+    show(i,f.name+' (server restarted, trying this book again in 30 s)');ev('fail',{status:String(st||'net'),why:'batch-retry'});
+    await new Promise(z=>setTimeout(z,30000));u=await job()}  // ponytail (P-deploy 11-25): a restart used to skip the book for good
    const a=document.createElement('a');a.href=u;a.download=f.name.replace(/\.pdf$/i,'')+'.epub';
    document.body.appendChild(a);a.click();a.remove();ok.push(f.name);ev('done',{why:'batch'})}
   catch(e){const m=String(e&&e.message||e);bad.push([f.name,((m.match(/"detail":"([^"]+)"/)||[])[1]||m).slice(0,140)]);ev('fail',{status:String(e&&e.status||'net'),why:'batch'})}
