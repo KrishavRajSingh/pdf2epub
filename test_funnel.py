@@ -565,3 +565,55 @@ def test_publish_page():
 if __name__ == "__main__":
     test_publish_page()
 
+
+
+def test_layer_offer():
+    # 11-25 test b: a scan that already has a text layer gets a $1 whole-book offer (rival ~$0.35 a book);
+    # the $1 checkout converts only such a scan
+    import io
+    import pymupdf
+    from PIL import Image
+    from fastapi.testclient import TestClient
+    import app as a
+    c = TestClient(a.app)
+    r = c.get("/go/layer?why=layer", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == a.LAYER_URL
+    html = c.get("/").text
+    assert "function pitchLayer(" in html and "/go/layer?why=" in html and "text layer \\(" in html
+
+    img = io.BytesIO()
+    Image.new("RGB", (60, 80), (240, 236, 228)).save(img, "JPEG")
+    scan = pymupdf.open()
+    for i in range(30):
+        p = scan.new_page()
+        p.insert_image(p.rect, stream=img.getvalue())
+        p.insert_text((72, 100), f"Page {i + 1} words of an old scan read long ago.", render_mode=3)
+    sraw = scan.tobytes()
+    plain = pymupdf.open()
+    for i in range(30):
+        plain.new_page().insert_text((72, 72), f"Page {i + 1} of a born-digital book.")
+    praw = plain.tobytes()
+
+    real = (a.DRIVE_REFRESH, a.layer_scan_pages, a.paid_checkout)
+    a._HITS.clear()  # earlier tests in this file used up the per-ip limit
+    a.DRIVE_REFRESH = "x"
+    a.layer_scan_pages = lambda doc, lang, key="": [(f"Chapter {i + 1}\n\n" + "Real words of the book. " * 20, 1.0)
+                                                     for i in range(len(doc))]
+    try:
+        wall = c.post("/convert", files={"f": ("s.pdf", sraw, "application/pdf")})
+        assert wall.status_code == 402 and "text layer (30 here)" in wall.text and "$1" in wall.text, wall.text
+        prev = c.post("/convert", data={"preview": "1"}, files={"f": ("s.pdf", sraw, "application/pdf")})
+        assert prev.status_code == 200 and prev.headers.get("x-cap") == "layer:30", prev.headers
+        lcid = "5e1c9a43-7d6f-4b8a-9c4e-1f3d2b9a8e76"
+        a.paid_checkout = lambda cid, p: (cid, p) == (lcid, a.LAYER_PRODUCT)
+        wrong = c.post(f"/convert?paid={lcid}", files={"f": ("p.pdf", praw, "application/pdf")})
+        assert wrong.status_code == 402 and "already has a text layer" in wrong.text, wrong.text
+        ok = c.post(f"/convert?paid={lcid}", files={"f": ("s.pdf", sraw, "application/pdf")})
+        assert ok.status_code == 200, ok.text[:200]
+    finally:
+        a.DRIVE_REFRESH, a.layer_scan_pages, a.paid_checkout = real
+    print("ok — layer offer: $1 pitch on OCR-layer scans, checkout converts only those")
+
+
+if __name__ == "__main__":
+    test_layer_offer()

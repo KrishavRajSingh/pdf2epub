@@ -119,6 +119,12 @@ ONEBOOK_PRODUCT = "c9dd91ab-92b9-4d82-a79d-191bd965cd86"
 SHORT_URL = "https://buy.polar.sh/polar_cl_0xs3znrEUDiRWhJrHmHtJhaL6utEFjmHy1nDI2jpW3C"
 SHORT_PRODUCT = "154810a2-37a4-4b8a-bc21-cb68fbd67ad8"
 SHORT_MAX_PAGES = 400
+# ponytail (11-25 test b): a scan that already has a text layer costs the rival 1 credit per 10 pages
+# (~$0.35 a book, free on sign-up), so a reader (Spiritual-Willow2778) said ours at $5 costs far more.
+# Those scans get a $1 whole-book offer; the checkout only converts an OCR-layer scan.
+LAYER_URL = "https://buy.polar.sh/polar_cl_cPo8GrrTkP9sKqbuSKCT5Hme2E2M9e7fpsSVe3zDPhw"
+LAYER_PRODUCT = "4ee7ace2-a936-49f9-85ec-270fa89b1a1f"
+LAYER_PRICE = "$1"
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN", "")  # ponytail: read-only OAT, only orders:read is needed
 POLAR_ORDERS = "https://api.polar.sh/v1/orders/"
 # ponytail: a paying subscriber gets a key that lifts the per-file ceiling. no accounts, no db:
@@ -273,7 +279,7 @@ def paid_checkout(cid: str, product_id: str) -> bool:
 
 def onebook_pages(cid: str) -> int:
     """Page limit a paid one-book checkout buys: 2,000 for the $5 book, 400 for the $3 one, 0 unpaid."""
-    if paid_checkout(cid, ONEBOOK_PRODUCT):
+    if paid_checkout(cid, ONEBOOK_PRODUCT) or paid_checkout(cid, LAYER_PRODUCT):
         return SHELF_MAX_PAGES
     return SHORT_MAX_PAGES if paid_checkout(cid, SHORT_PRODUCT) else 0
 
@@ -2329,6 +2335,13 @@ function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This 
  +'style="max-width:340px;background:#f4f0e7;border:1px solid #e4ded2;color:#1b1916;'
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'+nobuy()}
+// 11-25 test b: a scan that already has a text layer gets the whole book for $1 (rival ~$0.35)
+function pitchLayer(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scanned book that already has a text layer ('+(n||'many')+' pages). '
+ +'Free reads the first __FREEOCR__ pages.<br>'
+ +'<a style="'+BTN+'" href="/go/layer?why='+(window.previewDone?'layer-seen':'layer')+'&v='+V+'">Convert the whole book - $1</a>'
+ +'<br><span style="font-size:16px"><b>Not happy with the book? Full refund, no questions asked.</b></span>'
+ +'<br><span style="font-size:13px;color:#5b564d">Pay once, you come straight back here and the book converts '
+ +'on the spot, pictures and cover included. Nothing stored.</span>'+nobuy()}
 function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
  +'Pages the scan makes hard to read are listed at the end of your book. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
@@ -2452,10 +2465,10 @@ async function convert(preview){
    +'<span style="font-size:14px">More books coming? <a href="/go/batch?why=freebook-done&v='+V+'">$10 for 30 days, unlimited books</a>'
    +' or <a href="/go/onebook?why=freebook-done&v='+V+'">$5 for the next one</a>.</span>';ev('free_done')}
   const lc=(window.lastCap||'').split(':');
-  if(!preview&&(lc[0]==='pages'||lc[0]==='ocr')){window.capKind=lc[0];window.capPages=+lc[1]||0;window.capName=(f&&f.name)||'book';
+  if(!preview&&(lc[0]==='pages'||lc[0]==='ocr'||lc[0]==='layer')){window.capKind=lc[0];window.capPages=+lc[1]||0;window.capName=(f&&f.name)||'book';
    PN=lc[0]==='pages'?'150':'__FREEOCR__';ev('preview_auto',{why:lc[0]});preview=true}
   if(preview&&window.capKind){window.previewDone=true;msg.className='';
-   msg.innerHTML=window.capKind==='ocr'?pitchOcr(window.capPages):pitchPages(window.capPages);ev('pitch',{why:window.capKind+'-seen'})}}
+   msg.innerHTML=window.capKind==='layer'?pitchLayer(window.capPages):window.capKind==='ocr'?pitchOcr(window.capPages):pitchPages(window.capPages);ev('pitch',{why:window.capKind+'-seen'})}}
  catch(e){msg.className='err';msg.innerHTML=failHtml(e);ev('fail',{status:String(e.status||'net')});
   const n=+(e.message.match(/\((\d+) here\)/)||[])[1]||0;
   const cap=e.status===413&&!K?'pages':(e.status===402&&/scanned/.test(e.message)?'ocr':'');
@@ -2464,7 +2477,8 @@ async function convert(preview){
   if(e.status===413&&!K){msg.className='';msg.innerHTML=pitchPages(n);ev('pitch',{why:'pages'})}
   else if(e.status===502||e.status===503||e.status===504){msg.innerHTML='This file was too heavy for the instant converter. That is on our side, not your file.'
    +'<br><br>Email the PDF to <a href="mailto:__MAIL__">__MAIL__</a> so we can rerun it on the big-file converter and send you the download link.'}
-  if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
+  if(e.status===402&&/text layer \(/.test(e.message)){msg.className='';msg.innerHTML=pitchLayer(n);ev('pitch',{why:'layer'})}
+  else if(e.status===402&&/scanned/.test(e.message)){msg.className='';msg.innerHTML=pitchOcr(n);ev('pitch',{why:'ocr'})}}
  go.disabled=false}
 go.onclick=()=>BATCH.length>1?convertMany():convert(false);
 smp.onclick=async()=>{
@@ -3280,7 +3294,7 @@ async def beacon(request: Request):
 @app.get("/go/{offer}")
 def go_checkout(offer: str, request: Request):
     # ponytail: every checkout link goes through here, so a click is counted before polar takes over
-    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
+    url = {"onebook": ONETIME_URL, "short": SHORT_URL, "layer": LAYER_URL, "shelf": SHELF_URL, "batch": BATCH_URL,
            "library": LIBRARY_URL if OPENROUTER_KEY else "",
            "translate": translate.TRANSLATE_URL}.get(offer)  # no model key = no AI reading to sell
     if not url:
@@ -5515,6 +5529,12 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             doc.close()
             log(False, 0, kb_in, 0, "encrypted pdf", ref, request=request)
             raise HTTPException(400, "this PDF is password protected, remove the password and upload it again")
+        if book and paid_checkout(cid, LAYER_PRODUCT) and not _ocr_layer(doc):
+            doc.close()  # ponytail: the $1 is for a scan that already has text; the checkout stays unused
+            log(False, 0, kb_in, 0, "layer-wrong-kind", ref, request=request)
+            raise HTTPException(402, "this $1 checkout covers a scanned book that already has a text layer, "
+                                f"and this PDF is not one. Reply to the Polar receipt or email {SHELF_MAIL} "
+                                "and we will sort it out")
         total = len(doc)
         # ponytail: a long book gets its first pages free, so the $5 is for a book they have already seen work
         cut_pages = preview == "1" and not paid and total > max_pages
@@ -5565,10 +5585,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             if npages > FREE_OCR_PAGES and not paid and not cut:
                 doc.close()
                 log(False, npages, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
-                raise HTTPException(402, f"scanned PDF ({npages} here) - free OCR reads the first "
-                                    f"{FREE_OCR_PAGES} pages, the whole book is $5")
+                raise HTTPException(402, f"scanned PDF with a text layer ({npages} here) - free reads the first "
+                                    f"{FREE_OCR_PAGES} pages, the whole book is {LAYER_PRICE}")
             if cut:
-                cap = f"ocr:{total}"
+                cap = f"layer:{total}"
                 if not cut_pages:
                     log(False, total, kb_in, 0, "ocr-wall", ref, email.strip()[:120], request=request)
                 doc.select(range(FREE_OCR_PAGES))
