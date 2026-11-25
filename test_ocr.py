@@ -225,8 +225,80 @@ def magazine_page_rules():
     print("ok — magazine page rules")
 
 
+def telugu_story_book():
+    """ysvsr 11-25, Humourology 1/3: a Telugu story book printed as two-page spreads. The contents
+    page is headed "కథా సూచిక" (or not at all: "ఇందులో ..."), numbers sit on their own line, each
+    story opens mid-page and every page foot says "story title  page"."""
+    from app import ocr_chapters
+    body = "ఒక చిన్న గ్రామంలో ఒక రైతు ఉండేవాడు. అతను ప్రతి రోజు పొలానికి వెళ్ళేవాడు. అక్కడ చాలా పని ఉంది."
+    titles = ["దొంగలొస్తున్నారు", "శంకర్ దాదా జిందాబాద్", "కరాటే చదువులు", "వరుడు కావలెను",
+              "క్రికెట్! క్రికెట్!", "నిరాహార దీక్ష", "బంద్ - 1999"]
+    for head in ("కథా సూచిక", "ఇందులో ..."):
+        toc = [head] + [x for n, t in enumerate(titles, 1) for x in (f"{n}.", t, str(5 + 20 * n))]
+        toc += ["232", "హ్యూమారాలజీ"]  # the facing page's foot under the last page number: no entry
+        pages = ["\n\n".join(toc)]
+        for t in titles:
+            for k in range(3):  # story opens under the last story's long text, then two page feet
+                pages.append("\n\n".join([body, t, body] if k == 0 else [body, f"{t} {40 + k}", body]))
+        chs = ocr_chapters(pages)
+        heads = [t for ch in chs for k, t in ch if k == "h1"]
+        assert heads == titles, (head, heads)
+        text = " ".join(t for ch in chs for k, t in ch if k == "p")
+        assert "41" not in text and "42" not in text, "page foot kept as text"
+        assert "హ్యూమారాలజీ" not in heads
+    print("ok — Telugu story book: contents order opens each story, page feet dropped")
+
+
+def telugu_cut_paragraphs():
+    """ysvsr 11-25, Villain: Telugu has no lowercase, so a sentence cut by the line end never rejoined
+    ("చెప్పింది దేవిక జాకెట్టు" / "వేసుకుంటూ."), and "చుట్టు -కున్న" kept its line-break hyphen."""
+    from app import ocr_chapters
+    page = ("చెప్పింది దేవిక జాకెట్టు\n\nవేసుకుంటూ.\n\n“ఏమిటి?” అడిగాడు.\n\n"
+            "వంటికి చుట్టు -కున్న టవల్తో వచ్చింది. ఆమె నవ్వింది - అతను చూశాడు.")
+    other = "అక్కడ చాలా పని ఉంది. రైతు పొలానికి వెళ్ళాడు."  # different pages: a repeated top line is a head
+    paras = [t for ch in ocr_chapters([page, other, other + " మళ్ళీ."]) for k, t in ch if k == "p"]
+    assert paras[0] == "చెప్పింది దేవిక జాకెట్టు వేసుకుంటూ.", paras[:3]
+    assert paras[1] == "“ఏమిటి?” అడిగాడు.", "a quote opens its own paragraph"
+    assert "చుట్టుకున్న" in paras[2] and "నవ్వింది - అతను" in paras[2], paras[2]
+    print("ok — Telugu paragraphs cut by the line end rejoin")
+
+
+def spread_mid_heads():
+    """ysvsr 11-25, Villain: two book pages per scan; the right page's head "విలన్" sat mid-text on
+    every page and stayed in the book 40 times. Short dialogue that repeats is kept."""
+    from app import ocr_chapters
+    body = "అతను ప్రతి రోజు పొలానికి వెళ్ళేవాడు. అక్కడ చాలా పని ఉంది."
+    pages = [f"{2*i} మల్లాది వెంకట కృష్ణమూర్తి\n\n{body} {i}\n\nవిలన్\n\n“అవును.”\n\n{body} రెండు {i}"
+             for i in range(12)]
+    paras = [t for ch in ocr_chapters(pages) for k, t in ch if k == "p"]
+    assert not any(p.strip() == "విలన్" for p in paras), paras[:6]
+    assert sum(p == "“అవును.”" for p in paras) == 12, "repeated dialogue dropped as a head"
+    print("ok — spread heads mid-page dropped")
+
+
+def big_chapter_split():
+    """ysvsr 11-25: a Telugu scan with no chapter titles was ONE 830k-character xhtml file and showed as
+    2 blank pages. Files stay under ~80k characters; an untitled book lists each file in the contents."""
+    import re as _re
+    from app import build_epub, FILE_CHARS
+    para = "అతను ప్రతి రోజు పొలానికి వెళ్ళేవాడు. " * 20
+    for named in (False, True):
+        rows = ([("h1", "నరుడు")] if named else []) + [("p", para)] * (FILE_CHARS * 5 // len(para))
+        z = zipfile.ZipFile(io.BytesIO(build_epub([rows], "నరుడు", "", "te")))
+        files = [n for n in z.namelist() if _re.match(r"EPUB/ch\d+\.xhtml", n)]
+        assert len(files) >= 4 and all(z.getinfo(n).file_size < 300_000 for n in files), files
+        nav = _re.findall(r"<a [^>]*>(.*?)</a>", z.read("EPUB/nav.xhtml").decode())
+        assert len(nav) == (1 if named else len(files)), nav
+        assert sum(z.read(n).decode().count("<p>") for n in files) == len(rows) - named, "paragraphs lost"
+    print("ok — big chapters split into small files")
+
+
 if __name__ == "__main__":
     main()
+    telugu_story_book()
+    telugu_cut_paragraphs()
+    spread_mid_heads()
+    big_chapter_split()
     heads_with_misread_numbers()
     clean_layer_page_kept()
     mixed_page_second_pass()

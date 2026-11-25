@@ -1414,7 +1414,22 @@ def _same_title(para: str, title: str) -> bool:
 
 IMPRINT = re.compile(r"\bISBN\b|\b10 9 8 7 6 5 4 3 2 1\b|\b1 2 3 4 5 6 7 8 9 10\b")
 ALSO_BY = re.compile(r"(other \w+ )?(books|novels|titles|works) by\b|also by\b", re.I)  # "Other Avon Books by ..."
-CONTENTS_HEAD = re.compile(r"(table of )?contents", re.I)
+# ponytail: Telugu/Hindi books head it "కథా సూచిక", "విషయ సూచిక", "विषय सूची", "अनुक्रम"; Humourology's
+# English-only check missed it and its 23 entries became empty chapters over one 480k-char book (ysvsr, 11-25)
+CONTENTS_HEAD = re.compile(r"(table of )?contents|(కథా\s*|విషయ\s*)?సూచిక|(विषय[\s-]*)?(सूची|अनुक्रम(णिका)?)|"
+                           r"(విషయ|కథా)\s*క్రమం|ఇందులో\s*\.*", re.I)
+
+
+def _numbered_run(paras: list[str]) -> bool:
+    """A page that lists entries 1, 2, 3 ... in order ("1." on a line, the title on the next) is a
+    contents page whatever its heading says. ponytail: Humourology-3 heads it "ఇందులో ..." ("in
+    this book"), 11-25. Six in a row is no numbered list in prose: those sit inside one paragraph."""
+    want = 1
+    for p in paras:
+        m = re.match(r"^(\d{1,3})[.)](?:\s|$)", p.strip())
+        if m and int(m.group(1)) == want:
+            want += 1
+    return want > 6
 
 
 def _front(pages: list) -> int:
@@ -1434,7 +1449,7 @@ def _contents_pages(pages: list[str]) -> set:
     got = set()
     for i, txt in enumerate(pages[: _front(pages)]):
         paras = _page_paras(txt)
-        if any(CONTENTS_HEAD.fullmatch(p.strip()) for p in paras[:8]):
+        if any(CONTENTS_HEAD.fullmatch(p.strip()) for p in paras[:8]) or _numbered_run(paras):
             got.add(i)
         elif i - 1 in got and paras:
             dotted = sum(bool(LEADER.search(p)) and len(p) <= 120 for p in paras)
@@ -1443,9 +1458,10 @@ def _contents_pages(pages: list[str]) -> set:
     return got
 
 
-def _contents_keys(pages: list[str]) -> set:
-    """Entries of the printed contents page ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"),
-    squashed to letters and digits; empty when the book has none or it lists under 3 entries."""
+def _contents_entries(pages: list[str]) -> list:
+    """Entries of the printed contents page in printed order, as (squashed key, title) pairs:
+    ("Future Perfect", 'CHAPTER 1 "Not even..."', "INDEX"). Empty when the book has none or it
+    lists under 3 entries."""
     got, lines = [], []
     for i in sorted(_contents_pages(pages)):
         lines += [LEADER.sub("", p).strip() for p in _page_paras(pages[i]) if len(p) <= 120
@@ -1458,13 +1474,23 @@ def _contents_keys(pages: list[str]) -> set:
     named = [t for t in lines if any(c.isalpha() for c in ENTRY_NUM.sub("", t))]
     numbered = sum(num) >= 5 and sum(num) * 2 >= len(named)
     for j, t in enumerate(lines):
-        body = re.sub(r"\s+\d{1,4}$", "", ENTRY_NUM.sub("", t)).strip()
+        # a page number has 1-3 digits; "బంద్ - 1999" keeps its year (ysvsr 11-25)
+        body = re.sub(r"\s+[-\u2013]?\d{1,3}$", "", ENTRY_NUM.sub("", t)).strip()
         if not any(c.isalpha() for c in body):
             continue
-        if numbered and not (num[j] or j and num[j - 1] and not any(c.isalpha() for c in ENTRY_NUM.sub("", lines[j - 1]))):
+        # the title under a bare "V." / "7." is an entry; under a bare page number "232" it is the facing
+        # page's text (Humourology-3's contents sit on a spread beside the first story, 11-25)
+        if numbered and not (num[j] or j and num[j - 1] and re.search(r"[.)]\s*$", lines[j - 1])
+                             and not any(c.isalpha() for c in ENTRY_NUM.sub("", lines[j - 1]))):
             continue
-        got.append(_squash(body))
-    return {k for k in got if len(k) >= 3} if len(got) >= 3 else set()
+        if len(_squash(body)) >= 3 and all(_squash(body) != k for k, _ in got):
+            got.append((_squash(body), body))
+    return got if len(got) >= 3 else []
+
+
+def _contents_keys(pages: list[str]) -> set:
+    """Squashed entries of the printed contents page; empty when the book has none."""
+    return {k for k, _ in _contents_entries(pages)}
 
 
 ENTRY_NUM = re.compile(r"^(?:[IVXL]{1,6}|[0-9]{1,3}|[1Il])[.)]?(?:\s+|$)")
@@ -1505,7 +1531,14 @@ def _running_heads(pages: list[str]) -> set:
                 for k in {_head_key(para), _head_first(para)}:
                     if len(k) >= 3:
                         seen[k] += 1
-    return {k for k, c in seen.items() if c >= max(3, len(pages) // 10)}
+    # ponytail (ysvsr 11-25, Villain): on a two-page spread the right page's head ("విలన్") sits mid-text,
+    # never first or last. A bare short line (no quote, no sentence end) on a quarter of all pages is one
+    mid = Counter()
+    for txt in pages:
+        mid.update({_head_key(p) for p in _page_paras(txt) if len(p) <= 30 and not SENT_END.search(p)
+                    and not re.search(r"[\"“”‘’']", p) and not HEAD_WORD.match(p)})
+    return {k for k, c in seen.items() if c >= max(3, len(pages) // 10)} | \
+        {k for k, c in mid.items() if len(k) >= 3 and c >= max(5, len(pages) // 4)}
 
 
 def _words(para: str) -> list:
@@ -1626,6 +1659,13 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
     letters = [c for c in "".join(pages[:: max(1, len(pages) // 40)]) if c.isalpha()]
     # ponytail: in a Telugu magazine the CAPS lines are English ads ("MITSUBISHI PAPER MILLS LTD.", 11-11)
     latin = not letters or sum(c.isascii() for c in letters) >= 0.5 * len(letters)
+    # ponytail (ysvsr 11-25, Humourology 1/3): a Telugu story book printed as two-page spreads opens
+    # each story mid-page, under the last story's long paragraphs, and every page foot says "story
+    # title  page". There the contents entries are taken in printed order: the first line naming the
+    # next entry opens it wherever it sits, and a short line naming the open entry is its page foot.
+    # Latin books keep the rules above (regression suite); their spreads are split before OCR.
+    entries = _contents_entries(pages) if not latin else []
+    nxt = 0
 
     def flush():
         if cur:
@@ -1691,6 +1731,20 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
             if nd >= 3 and nd >= 0.1 * len(para.replace(" ", "")):
                 continue  # ponytail: books print 0-9; native digits in bulk = a picture or cover OCR'd as text
             text = re.sub(r"(?<=[a-z])- (?=[a-z])", "", para)  # "horse- shoe" -> "horseshoe"
+            # Indian scripts: a word broken at the line end reads "చుట్టు -కున్న" (a real dash has spaces both sides)
+            text = re.sub(r"(?<=[\u0900-\u0dff]) -(?=[\u0900-\u0dff])", "", text)
+            if entries and len(text) <= 120:
+                if nxt and _in_contents(text, {entries[nxt - 1][0]}):
+                    continue  # the open story's page foot: "కరాటే చదువులు 50"
+                hit = next((n for n in range(nxt, min(nxt + 4, len(entries)))
+                            if _in_contents(text, {entries[n][0]})), None)
+                if hit is not None:
+                    flush()
+                    cur.append(("h1", entries[hit][1]))  # the contents page's spelling, no page number
+                    head_page, open_title, nxt = i, entries[hit][1], hit + 1
+                    titles.append(open_title)
+                    placed += 1
+                    continue
             # ponytail: a one-word CAPS line mid-page is not a heading: on a scan with pen notes it was a
             # ghost of the handwriting ("HOW", The Feasting Dead p17, 11-21). "THE LONG WINTER" still is
             head = HEAD_WORD.match(text) or (latin and _caps_head(text) and (not placed or cur and cur[-1][0] == "h1"
@@ -1704,6 +1758,7 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 # WITH THE 'OILY EYES' 43" over "THE STORY OF ANNETTE"); a book never repeats a chapter
                 head = _in_contents(text, contents) and all(len(q) <= 50 for q in paras[:j]) \
                     and not any(_same_title(text, t) for t in titles + [open_title])
+                head = head and not entries  # those open by the entry order above
             if head and (imprint or text[:1] in "\"\u201c\u2018'" and not contents):
                 # ponytail: Signal to Noise (11-23): the cover's and copyright page's "ISBN 0-380-...",
                 # "AVON BOOKS, INC.", "WCD 10 9 8 7 6 5 4 3 2 1" and the back-cover review quote
@@ -1725,8 +1780,12 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 cur.append(("h1", text))
                 head_page, open_title = i, text
                 titles.append(text)
-            elif cur and cur[-1][0] == "p" and (text[:1].islower() and not SENT_END.search(cur[-1][1])
+            elif cur and cur[-1][0] == "p" and ((text[:1].islower() or not latin and _caseless(text[:1]))
+                                                 and not SENT_END.search(cur[-1][1])
                                                  or re.search(r"[a-z]-$", cur[-1][1]) and text[:1].islower()):
+                # ponytail (ysvsr 11-25, Villain): Telugu has no lowercase, so a sentence cut by the line or
+                # page end ("చెప్పింది దేవిక జాకెట్టు" / "వేసుకుంటూ.") never joined: 1 paragraph in 8 was a
+                # fragment. A letter with no case and no sentence end before it goes on the same way
                 # ponytail: a paragraph cut by the page end or by an OCR line break goes on, not a new <p>
                 prev = cur[-1][1]
                 cur[-1] = ("p", prev[:-1] + text if prev.endswith("-") else prev + " " + text)
@@ -1838,6 +1897,53 @@ def cover_title_author(doc) -> tuple[str, str]:
     return title, author
 
 
+FILE_CHARS = 60_000  # ponytail: ~180 KB of Telugu UTF-8 per xhtml file
+
+
+def _caseless(c: str) -> bool:
+    """A letter of a script with no upper/lower case (Telugu, Hindi, Tamil...)."""
+    return c.isalpha() and c.lower() == c.upper()
+
+
+def _split_big(chapters) -> list:
+    """Cut chapters over FILE_CHARS of text into several files at paragraph ends. Returns
+    (rows, toc) pairs: toc "" = the chapter's own entry, None = a piece the contents skips,
+    other text = a contents label for a piece of an untitled chapter.
+
+    ponytail (ysvsr 11-25): Telugu scans with no chapter titles came out as ONE xhtml file of
+    480-830k characters (Narudu 538 p, Colonel Ekalingam 345 p); his reader showed "2 blank pages",
+    and Kindle wants files under ~300 KB. An untitled chapter gets one contents entry per file,
+    named by its first words, so the contents page still moves through the book."""
+    out = []
+    for ch in chapters:
+        size = sum(len(t) for k, t in ch if isinstance(t, str))
+        if size <= FILE_CHARS * 1.3 or any(k in ("s2", "s3", "fn") for k, _ in ch):
+            out.append((ch, ""))  # sections and notes are anchored to their file: left whole
+            continue
+        named = any(k in ("h1", "h2") for k, _ in ch)
+        pieces, piece, n = [], [], 0
+        for row in ch:
+            piece.append(row)
+            n += len(row[1]) if isinstance(row[1], str) else 0
+            if n >= FILE_CHARS and row[0] == "p":
+                pieces.append(piece)
+                piece, n = [], 0
+        if piece:
+            if pieces and sum(len(t) for k, t in piece if isinstance(t, str)) < FILE_CHARS // 4:
+                pieces[-1] += piece  # a short tail stays with the piece before it
+            else:
+                pieces.append(piece)
+        for j, pc in enumerate(pieces):
+            if j == 0:
+                out.append((pc, ""))
+            elif named:
+                out.append((pc, None))
+            else:
+                words = next((t for k, t in pc if k == "p" and t.strip()), "").split()
+                out.append((pc, f"{j + 1}. " + " ".join(words[:6]) + (" …" if len(words) > 6 else "")))
+    return out
+
+
 def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes | None = None) -> bytes:
     book = epub.EpubBook()
     book.set_title(_clean(title)[:120])
@@ -1847,11 +1953,11 @@ def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes
         book.add_author(_clean(author)[:120])
     book.set_language(lang)  # ponytail: a Kindle picks the font and hyphenation by this
     items, toc, fig_no = [], [], 0
-    for i, ch in enumerate(chapters or [[("p", "empty")]]):
+    for i, (ch, label) in enumerate(_split_big(chapters or [[("p", "empty")]])):
         # ponytail: TOC label = the chapter's own heading, else the Kindle menu shows "ch1", "ch2"
         # an untitled opening part (cover, title page, dedication) is named after the book (11-21: "ch1")
-        name = next((t for k, t in ch if k in ("h1", "h2", "s2", "s3")),
-                    title if i == 0 and title.strip() else f"Part {i+1}")
+        name = label or next((t for k, t in ch if k in ("h1", "h2", "s2", "s3")),
+                             title if i == 0 and title.strip() else f"Part {i+1}")
         c = epub.EpubHtml(title=_clean(name)[:120], file_name=f"ch{i+1}.xhtml")
         parts, sections = [], []
         for k, t in ch:
@@ -1904,7 +2010,7 @@ def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes
                 else:
                     kids.append(link)
             toc.append((epub.Section(_clean(name)[:120], href=f"ch{i+1}.xhtml"), kids))
-        else:
+        elif label is not None:
             toc.append(c)
     book.toc = tuple(toc)
     book.add_item(epub.EpubNcx())
@@ -4433,7 +4539,7 @@ def _scan_photos(page, raw, known: Counter) -> list:
     return sorted(out, key=lambda r: (r.y0, r.x0))
 
 
-SENT_END = re.compile(r"[.!?:…][\"”’')\]]*$")
+SENT_END = re.compile(r"[.!?:…।॥][\"”’')\]]*$")  # ponytail: । ends a Hindi sentence (11-25)
 PAGE_NO = re.compile(r"[\[(]?[\d\s.\-–—]+[\])]?")
 DROP_CAP = re.compile(r"[“\"‘']?[A-Z]|[“\"‘']")
 
