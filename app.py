@@ -3104,11 +3104,57 @@ def sample_pdf():
     return Response(_sample_pdf(), media_type="application/pdf",
                     headers={"Content-Disposition": "inline; filename=sample.pdf"})
 
+ROBOTS_TXT = """User-agent: *
+Allow: /
+
+# AI search, answer and training bots, named so AI answers can read and cite the site.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: Google-Extended
+User-agent: Google-CloudVertexBot
+User-agent: Google-Agent
+User-agent: GoogleOther
+User-agent: Applebot
+User-agent: Applebot-Extended
+User-agent: bingbot
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: meta-externalagent
+User-agent: meta-externalfetcher
+User-agent: meta-webindexer
+User-agent: Amazonbot
+User-agent: Amzn-SearchBot
+User-agent: Amzn-User
+User-agent: MistralAI-Index
+User-agent: MistralAI-User
+User-agent: MistralAI-Training
+User-agent: GrokAgent
+User-agent: DuckAssistBot
+User-agent: Bravebot
+User-agent: YouBot
+User-agent: cohere-ai
+User-agent: cohere-training-data-crawler
+User-agent: CCBot
+User-agent: Bytespider
+User-agent: KimiBot
+User-agent: PetalBot
+User-agent: Diffbot
+User-agent: LinerBot
+User-agent: Cloudflare-AI-Search-External
+Allow: /
+
+Sitemap: https://epub.ftak.net/sitemap.xml
+"""
+
+
 @app.get("/robots.txt")
 def robots():
     # ponytail: fastapi does not serve static files, so the rule lives here
-    return Response("User-agent: *\nAllow: /\n\nSitemap: https://epub.ftak.net/sitemap.xml\n",
-                    media_type="text/plain")
+    return Response(ROBOTS_TXT, media_type="text/plain")
 
 
 @app.get("/llms.txt")
