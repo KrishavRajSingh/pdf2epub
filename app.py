@@ -1855,7 +1855,8 @@ def ocr_chapters(pages: list[str], figures: dict | None = None, toc: dict | None
                 # ponytail: a paragraph cut by the page end or by an OCR line break goes on, not a new <p>
                 prev = cur[-1][1]
                 cur[-1] = ("p", prev[:-1] + text if prev.endswith("-") else prev + " " + text)
-            else:
+            elif not (cur and cur[-1] == ("p", text) and len(text) <= 40):
+                # ponytail: an imprint page's own layer said "Edition :" 8 times in a row (Narudu, ysvsr 11-25)
                 cur.append(("p", text))
     flush()
     return chapters

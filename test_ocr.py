@@ -260,6 +260,8 @@ def telugu_cut_paragraphs():
     assert paras[0] == "చెప్పింది దేవిక జాకెట్టు వేసుకుంటూ.", paras[:3]
     assert paras[1] == "“ఏమిటి?” అడిగాడు.", "a quote opens its own paragraph"
     assert "చుట్టుకున్న" in paras[2] and "నవ్వింది - అతను" in paras[2], paras[2]
+    echo = ocr_chapters(["Edition :\n\n" * 8 + "అక్కడ చాలా పని ఉంది.", other, other + " మళ్ళీ."])
+    assert [t for ch in echo for k, t in ch if k == "p"].count("Edition :") == 1, "echoed line kept 8 times"
     print("ok — Telugu paragraphs cut by the line end rejoin")
 
 
