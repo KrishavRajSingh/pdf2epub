@@ -182,6 +182,34 @@ def scan_cover_page():
     print("ok — scan cover: first page is the cover picture")
 
 
+def text_pdf_cover():
+    """A text PDF whose page 1 is a picture (or a few words) gets it as the cover; prose page 1 does not."""
+    d = pymupdf.open()
+    p = d.new_page()
+    pm = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 60, 80), 0)
+    pm.clear_with(120)
+    p.insert_image(p.rect, pixmap=pm)
+    for _ in range(25):
+        d.new_page().insert_text((72, 72), "body " * 80)
+    c = pdf2epub.text_cover(d)
+    assert c and c[:2] == b"\xff\xd8"
+    t = pymupdf.open()
+    t.new_page().insert_text((72, 100), "The Quiet Harbor")
+    for _ in range(25):
+        t.new_page()
+    assert pdf2epub.text_cover(t), "title-only page 1 = cover"
+    prose = pymupdf.open()
+    for _ in range(25):
+        pg = prose.new_page()
+        for y in range(80, 700, 14):
+            pg.insert_text((72, y), "words of a paper that opens on its abstract")
+    assert pdf2epub.text_cover(prose) is None, "prose page 1 is no cover"
+    short = pymupdf.open()
+    short.new_page().insert_image(short[0].rect, pixmap=pm)
+    assert pdf2epub.text_cover(short) is None, "short PDF: no cover"
+    print("ok — text PDF cover: page 1 picture on the shelf")
+
+
 def preview_contents_page():
     """Free preview = first 20 pages. The contents page on page 7 was past the 1/5 window (4 pages),
     so its lines became chapters ("CHAPTER 2 ...", "CHAPTER 4 ...") with nothing in them."""
@@ -310,6 +338,7 @@ if __name__ == "__main__":
     contents_page_chapters()
     untitled_front_name()
     scan_cover_page()
+    text_pdf_cover()
     preview_contents_page()
     contents_heading_not_first()
     drive_drop_caps()

@@ -1279,6 +1279,25 @@ def scan_cover(doc, texts: list, figs: dict | None = None) -> bytes | None:
         return None
 
 
+def text_cover(doc) -> bytes | None:
+    """The first page of a text PDF as the EPUB cover when it looks like one: a big picture or few words.
+
+    ponytail: text PDFs went out with no cover, so the Kindle shelf showed a blank tile (reader
+    Spiritual-Willow2778, 11-25: "could they have the cover that the PDF has"). Page 1 stays in the
+    book as before; this only fills the shelf tile. Papers and mid-book PDFs open on prose: no cover."""
+    if len(doc) < 20:
+        return None
+    try:
+        p = doc[0]
+        area = abs(p.rect) or 1
+        pic = max((abs(r & p.rect) for i in p.get_images() for r in p.get_image_rects(i[0])), default=0)
+        if pic < 0.4 * area and len(p.get_text("words")) >= 60:
+            return None
+        return _jpeg(p.get_pixmap(dpi=SCAN_FIG_DPI))
+    except Exception:
+        return None
+
+
 def _jpeg(pm) -> bytes:
     if pm.n - pm.alpha != 3:
         pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
@@ -5558,7 +5577,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                 ("p", f"This is the free preview: the first {max_pages} of {total} pages. "
                       "The whole book is $5 at epub.ftak.net, converted on the spot.")])
 
-        data = build_epub(chapters, safe_title, author[:120], doc_lang(doc))
+        data = build_epub(chapters, safe_title, author[:120], doc_lang(doc), text_cover(doc))
         _lint_later(raw, data, ref, npages)
         # ponytail: nothing stored, files die with request — matches their privacy pitch for free
         doc.close()
