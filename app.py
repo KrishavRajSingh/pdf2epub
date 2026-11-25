@@ -428,6 +428,7 @@ def sharp_pages(doc, layout: list, confs: dict, lang: str, key: str, read=None, 
         n = len(layout[i][0].split())
         if text and len(text.split()) >= (0.5 * n if n >= 20 else 40):
             layout[i] = (text, layout[i][1])
+            confs[i] = 100.0  # read again: not a page to check
             ok += 1
     if ok:
         with _SHARP_LOCK, SHARP_USED.open("a") as fh:
@@ -510,8 +511,7 @@ def reread_pages(doc, layout: list, confs: dict, lang: str, key: str, drive=None
             imgs[i] = p.get_pixmap(dpi=dpi).tobytes("jpg", jpg_quality=88)
         with ThreadPoolExecutor(DRIVE_THREADS) as ex:
             got = dict(zip(todo, ex.map(lambda i: drive(imgs.pop(i), lang), todo)))
-        confs = dict(confs)
-        for i, text in got.items():
+        for i, text in got.items():  # confs updated in place: the caller lists what is still unsure
             n = len(layout[i][0].split())
             if text and len(text.split()) >= (0.5 * n if n >= 20 else 40):
                 layout[i] = (text, layout[i][1])
@@ -522,6 +522,28 @@ def reread_pages(doc, layout: list, confs: dict, lang: str, key: str, drive=None
     if sharp_left(key):
         done += sharp_pages(doc, layout, confs, lang, key, read)
     return done
+
+
+WEAK_CONF = 70  # ponytail (11-25, teardown play 2): clean novels score 86-93; under 70 a reader will notice garbled words
+
+
+def weak_pages(layout: list, confs: dict) -> list[int]:
+    """1-based PDF page numbers whose OCR stayed unsure after every re-read (text pages only, not pictures)."""
+    return [i + 1 for i, (t, _) in enumerate(layout) if confs.get(i, 100) < WEAK_CONF and len(t.split()) >= 20]
+
+
+def check_chapter(weak: list[int], total: int) -> list:
+    """Last chapter of a scanned book: where the OCR may be wrong, so the reader knows where to look.
+
+    ponytail: the only paid scan since the wall was refunded 11-23 for "many characters garbled";
+    the reader found out by reading. Telling them first turns a surprise into a known limit."""
+    if not weak:
+        return []
+    shown = ", ".join(map(str, weak[:60])) + (f" and {len(weak) - 60} more" if len(weak) > 60 else "")
+    lead = (f"This book was scanned, so its text was read with OCR. On {len(weak)} of {total} pages the scan was hard "
+            "to read and some words may be wrong. If a sentence looks odd, check the same page in your PDF:")
+    return [("h1", "Pages to check"), ("p", lead), ("p", shown),
+            ("p", "Send the PDF to " + SHELF_MAIL + " and we will read those pages again for you.")]
 
 
 def _strip_pen(page) -> tuple[bytes, bool]:
@@ -2261,6 +2283,7 @@ function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This 
  +'border-radius:4px;padding:10px 12px;font:inherit;font-size:14px"> '
  +'<button id="leadbtn" style="'+BTN+'">Ask</button>'+nobuy()}
 function pitchOcr(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This is a scan ('+(n||'many')+' pages), so every page has to be read with OCR. '
+ +'Pages the scan makes hard to read are listed at the end of your book. '
  +'Free OCR covers __FREEOCR__ pages.<br>'
  +(short(n)?'<a style="'+BTN+'" href="'+buy3(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $3</a>'
   :'<a style="'+BTN+'" href="'+buy(window.previewDone?'ocr-seen':'ocr')+'">OCR the whole book - $5</a>')
@@ -5489,6 +5512,10 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
                     figs = _scan_figures(doc, pages, pics)
                     cover = scan_cover(doc, texts, figs)
                     chapters = ocr_chapters(texts, figs, pdf_toc(doc))
+                    weak = weak_pages(pages, confs)
+                    if weak:
+                        chapters.append(check_chapter(weak, len(texts)))
+                        event("weak_ocr", request, pages=len(texts), weak=len(weak), paid=paid)
                     if cut:
                         chapters.append([("h1", "The rest of this book"),
                             ("p", f"This is the free preview: the first {FREE_OCR_PAGES} of {total} pages. "

@@ -30,7 +30,7 @@ def main():
     # Batch pass (no AI pages): Drive still re-reads every unsure page, free
     pdf2epub.SHELF_KEYS.write_text("cid1 KEYBATCH until=2099-01-01\ncid2 KEYLIB until=2099-01-01 sharp=5\n")
     lay = list(layout)
-    assert pdf2epub.reread_pages(doc, lay, confs, "te", "KEYBATCH", drive=drive, read=lambda i, l: ai_text) == 2
+    assert pdf2epub.reread_pages(doc, lay, dict(confs), "te", "KEYBATCH", drive=drive, read=lambda i, l: ai_text) == 2
     assert lay[0][0] == words and lay[1][0] == drive_text and lay[2][0] == drive_text
     assert asked == ["te", "te"]
 
@@ -40,19 +40,19 @@ def main():
         return drive_text if flaky.n == 1 else None
     flaky.n = 0
     lay = list(layout)
-    assert pdf2epub.reread_pages(doc, lay, confs, "te", "KEYLIB", drive=flaky, read=lambda i, l: ai_text) == 2
+    assert pdf2epub.reread_pages(doc, lay, dict(confs), "te", "KEYLIB", drive=flaky, read=lambda i, l: ai_text) == 2
     assert sorted(t for t, _ in lay[1:]) == [drive_text, ai_text]
     assert pdf2epub.sharp_left("KEYLIB") == 4
 
     # Drive down and no AI pages: Tesseract text stays
     lay = list(layout)
-    assert pdf2epub.reread_pages(doc, lay, confs, "te", "KEYBATCH", drive=lambda i, l: None) == 0
+    assert pdf2epub.reread_pages(doc, lay, dict(confs), "te", "KEYBATCH", drive=lambda i, l: None) == 0
     assert lay == layout
 
     # One-book buyer ($3/$5 checkout, no key): Drive still re-reads unsure pages, no AI pages (11-23)
     lay = list(layout)
     asked.clear()
-    assert pdf2epub.reread_pages(doc, lay, confs, "en", "", drive=drive, read=lambda i, l: ai_text) == 2
+    assert pdf2epub.reread_pages(doc, lay, dict(confs), "en", "", drive=drive, read=lambda i, l: ai_text) == 2
     assert lay[1][0] == drive_text and asked == ["en", "en"]
     import inspect
     assert "if paid and pages:\n                    reread_pages(" in inspect.getsource(pdf2epub.convert), \
