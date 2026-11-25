@@ -3179,6 +3179,8 @@ def llms_txt():
 - Portuguese: https://epub.ftak.net/pt/
 - Spanish: https://epub.ftak.net/es/
 - Scan a physical book with your phone: https://epub.ftak.net/scan
+- Authors: turn a print PDF into an EPUB for KDP, Apple Books and Kobo: https://epub.ftak.net/publish
+- All guides: https://epub.ftak.net/guides
 
 ## Guides
 
