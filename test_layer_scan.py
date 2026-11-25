@@ -210,6 +210,34 @@ def text_pdf_cover():
     print("ok — text PDF cover: page 1 picture on the shelf")
 
 
+def layer_scan_photos():
+    """Drive re-read of a layer scan keeps the photos (Ageless Spine 206 -> 0 on 11-25)."""
+    import io
+    from PIL import Image, ImageDraw
+    d = pymupdf.open()
+    for k in range(3):
+        p = d.new_page(width=400, height=600)
+        im = Image.new("RGB", (800, 1200), (245, 240, 230))
+        dr = ImageDraw.Draw(im)
+        for y in range(100, 1100, 30):
+            if not 500 < y < 800:
+                dr.rectangle((80, y, 720, y + 12), fill=(30, 30, 30))
+        if k == 1:
+            for x in range(150, 650, 6):
+                dr.line((x, 500, x + 60, 800), fill=(120, 60, 40), width=4)
+        b = io.BytesIO()
+        im.save(b, "JPEG")
+        p.insert_image(p.rect, stream=b.getvalue())
+        for y in range(60, 560, 15):
+            if not 250 < y < 400:
+                p.insert_text((40, y), "the quick brown fox jumps over lazy dogs again", render_mode=3, fontsize=9)
+    pics = pdf2epub.layer_pics(d)
+    assert list(pics) == [1], pics
+    figs = pdf2epub._scan_figures(d, [("text " * 50, 1.0)] * 3, pics)
+    assert list(figs) == [1] and len(figs[1]) == 1, figs.keys()
+    print("ok — layer scan: photos found for the Drive re-read")
+
+
 def preview_contents_page():
     """Free preview = first 20 pages. The contents page on page 7 was past the 1/5 window (4 pages),
     so its lines became chapters ("CHAPTER 2 ...", "CHAPTER 4 ...") with nothing in them."""
@@ -339,6 +367,7 @@ if __name__ == "__main__":
     untitled_front_name()
     scan_cover_page()
     text_pdf_cover()
+    layer_scan_photos()
     preview_contents_page()
     contents_heading_not_first()
     drive_drop_caps()

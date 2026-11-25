@@ -1262,6 +1262,27 @@ def _scan_figures(doc, pages, pics: dict | None = None):
         figs[i] = _fig_bytes(doc[i].get_pixmap(dpi=SCAN_FIG_DPI))
     return figs
 
+def layer_pics(doc) -> dict:
+    """Photo boxes (page fractions) on a scan that carries an OCR layer, for _scan_figures.
+
+    ponytail: the Drive re-read (11-21) passed no picture boxes, so layer scans lost every photo
+    the text path had found: Ageless Spine 206 pictures -> 0 (Spiritual-Willow2778, 11-25)."""
+    known = Counter(w.lower() for pg in doc for w in WORD3.findall(pg.get_text("text")))
+    out = {}
+    for i, page in enumerate(doc):
+        if page.rotation:
+            continue
+        try:
+            rs = _scan_photos(page, page.get_text("dict")["blocks"], known)
+        except Exception:
+            continue
+        r = page.rect
+        if rs:
+            out[i] = [((p.x0 - r.x0) / r.width, (p.y0 - r.y0) / r.height,
+                       (p.x1 - r.x0) / r.width, (p.y1 - r.y0) / r.height) for p in rs]
+    return out
+
+
 def scan_cover(doc, texts: list, figs: dict | None = None) -> bytes | None:
     """The first page of a scan as the EPUB cover, its OCR text dropped (texts/figs edited in place).
 
@@ -5556,7 +5577,7 @@ async def convert(request: Request, f: UploadFile = File(...), title: str = Form
             event("layer_scan", request, pages=len(doc), total=total, paid=paid, ok=bool(pages))
             texts = [t for t, _ in pages or []]
             if pages and ocr_ok(texts):
-                figs = _scan_figures(doc, pages, {})
+                figs = _scan_figures(doc, pages, layer_pics(doc))
                 cover = scan_cover(doc, texts, figs)
                 chapters = ocr_chapters(texts, figs, pdf_toc(doc))
                 if cut:
