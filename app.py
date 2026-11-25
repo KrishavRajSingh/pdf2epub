@@ -228,6 +228,13 @@ def shelf_active(cid: str) -> bool:
     return ok
 
 
+def paid_orders() -> int:
+    try:  # ponytail: one line per Polar-verified checkout id; refunds still count, check Polar for those
+        return len({ln.split()[0] for ln in PAID.read_text().splitlines() if ln.strip()})
+    except OSError:
+        return 0
+
+
 def paid_checkout(cid: str, product_id: str) -> bool:
     """True only if Polar says this checkout succeeded for this product.
 
@@ -3325,7 +3332,7 @@ def stats(response: Response):
     response.headers["X-Robots-Tag"] = "noindex"
     ok = fail = pages = visits = ocr = scan_fail = emails = 0
     emailset = set()
-    leads = cap_rejects = checkouts = 0
+    leads = cap_rejects = checkouts = clicks_real = 0
     refs: dict[str, int] = {}
     ok_by_ref: dict[str, int] = {}
     uas: dict[str, int] = {}
@@ -3361,6 +3368,8 @@ def stats(response: Response):
                 continue
             if r.get("ev"):
                 starts += r["ev"] == "start"
+                # ponytail: bot bursts click every offer in one ms with no visitor id; real readers carry v
+                clicks_real += r["ev"] == "checkout_click" and bool(r.get("v")) and not is_bot(r.get("ua") or "")
                 if r["ev"] in ("view", "pitch", "checkout_click", "nobuy") and not is_bot(r.get("ua") or ""):
                     cc_add(r["ev"] + (":" + r["why"] if r["ev"] == "nobuy" and r.get("why") else ""), r)
                 if r["ev"] == "suspect" and not is_bot(r.get("ua") or ""):
@@ -3422,7 +3431,8 @@ def stats(response: Response):
     return {"visits": visits, "refs": top, "conversions_ok": ok, "ocr_ok": ocr,
             "failed": fail, "scan_fail": scan_fail, "pages": pages, "ok_by_ref": top_ok,
             "emails_captured": len(emailset), "leads": leads, "cap_rejects": cap_rejects,
-            "checkouts": checkouts,
+            "checkouts": checkouts,  # ponytail: /thanks landings incl. our tests and refreshes, not sales
+            "clicks_real": clicks_real, "paid_orders": paid_orders(),
             "visits_human": visits_human, "visits_bot": visits_bot,
             "visits_unknown": visits_unknown,
             "conversions_human": conv_human, "conversions_bot": conv_bot,
