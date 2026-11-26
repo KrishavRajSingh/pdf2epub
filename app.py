@@ -3942,10 +3942,21 @@ def _lig_ok(t, k, lig):
 PRESENTATION_LIGS = str.maketrans({"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04": "ffl"})
 
 
+# ponytail (Jon 11-26, The Political Clinic, Warnock Pro): Adobe Pro fonts set capitals' punctuation and
+# figures from private-use codes, the glyph raised to cap height; the text layer keeps the code, so the
+# EPUB showed boxes: "UNFREE", "EVERYWHERENOW", "2. BEYOND REPAIR". Checked against the embedded
+# font: same width and outline as the plain glyph. Only codes seen in a real book are mapped.
+ADOBE_CASE = str.maketrans({0xF6AE: "(", 0xF6AF: ")", 0xF6BA: "-", 0xF6BC: "\u2014", 0xF650: "#",
+                            0xF6DC: "1", 0xF63A: "2", 0xF63B: "3", 0xF63C: "4", 0xF63D: "5", 0xF63E: "6"})
+ADOBE_PRO = re.compile(r"Pro-|Pro$|Pro[A-Z]")  # WarnockPro-Regular, MinionPro-It, ArnoPro
+
+
 def _fix_line(line, ligmap):
     # real ligature chars (U+FB01 "ﬁ") break search and fonts without the glyph: plain letters
     for sp in line["spans"]:
         sp["text"] = sp["text"].translate(PRESENTATION_LIGS)
+        if ADOBE_PRO.search(sp["font"]):  # (an icon font uses the same codes for pictures)
+            sp["text"] = sp["text"].translate(ADOBE_CASE)
     if not ligmap or not any(sp["font"] in ligmap for sp in line["spans"]):
         return
     t = "".join(sp["text"] for sp in line["spans"])
@@ -4932,6 +4943,22 @@ def _paragraphs(rows, bbox, ocr=False):
     An indented line after a finished sentence starts a new paragraph, and a short centered
     first line ("Author's Note" over the prose) is its own heading block.
     """
+    # ponytail (Jon 11-26, Dark Continents): endnotes set the number and its note as two lines on one
+    # baseline ("21" | "Mannoni, Prospero and Caliban, 32-33."); the number read as a page number below
+    # and the Notes lost every number. A bare number with words beside it is the note's label.
+    if not ocr:
+        k, merged = 0, []
+        while k < len(rows):
+            r = rows[k]
+            if k + 1 < len(rows) and re.fullmatch(r"\d{1,3}", r[0].strip()):
+                q = rows[k + 1]
+                if abs(q[2][1] - r[2][1]) < 2 and 0 <= q[2][0] - r[2][2] < 30 and re.match(r"[^\W\d_]|[‘“\"'(\[]", q[0]):
+                    merged.append((f"{r[0].strip()} {q[0]}", max(r[1], q[1]), (r[2][0], r[2][1], q[2][2], q[2][3])))
+                    k += 2
+                    continue
+            merged.append(r)
+            k += 1
+        rows = merged
     # a page number the OCR layer put in the same block as the last paragraph line
     rows = [r for r in rows if not PAGE_NO.fullmatch(r[0])] or rows
     if not rows:

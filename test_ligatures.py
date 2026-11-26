@@ -59,3 +59,17 @@ for n in (1, 2):
 paras = [(k, t) for ch in _structure(list(_blocks(doc)), doc) for k, t in ch]
 assert paras[0] == ("h1", "Chapter 1: a title") and paras[1][1].startswith("Body of chapter 1"), paras[:3]
 print("heading order ok")
+
+
+def adobe_case_glyphs():
+    """Jon 11-26, The Political Clinic: Warnock Pro's cap-height "(", "—", "2" sit at private-use codes."""
+    import app
+    line = {"spans": [{"font": "OJDNAJ+WarnockPro-Regular", "text": "UNFREE . EVERYWHERENOW"},
+                      {"font": "FontAwesome", "text": ""}]}
+    app._fix_line(line, {})
+    assert line["spans"][0]["text"] == "(UN)FREE 2. EVERYWHERE—NOW", line["spans"][0]["text"]
+    assert line["spans"][1]["text"] == "", "an icon font keeps its code"
+
+
+adobe_case_glyphs()
+print("ok: adobe case glyphs")

@@ -694,6 +694,11 @@ def make_press_no_outline():
             else:
                 pg.insert_text((66 if k % 2 else 300, 621), str(len(d) + 1), fontsize=9.5)
                 pg.insert_text((80 if k % 2 else 200, 621), feet[k % 2], fontsize=9.5)
+    pg = d.new_page(width=432, height=666)  # endnotes: the number and its note are two blocks on one line
+    pg.insert_text((90, 112), "Notes", fontsize=11.5)
+    for k in range(1, 4):
+        pg.insert_text((68, 150 + k * 40), str(k), fontsize=8.5)
+        pg.insert_text((84, 150 + k * 40), f"Mannoni, Prospero and Caliban, {30 + k}.", fontsize=8.5)
     return d
 
 
@@ -829,8 +834,9 @@ CASES = {
     "press_no_outline": (make_press_no_outline, {
         "path": "text", "has": ["clocks were striking"],
         "hasnt": ["Worlding Psychoanalysis Introduction", "Psychoanalysis Worlding", "Genealogies"],
+        "para": ["2 Mannoni, Prospero and Caliban, 32."],
         "toc": ["Introduction. Worlding Psychoanalysis", "1. Psychoanalysis and Archaeology",
-                "2. Freud in the Sacred Grove"]}),
+                "2. Freud in the Sacred Grove", "Notes"]}),
     # Jon 11-23: print-ready InDesign book (crop marks, en-space contents, essay running feet, diagrams)
     "print_ready_academic": (make_print_ready_academic, {
         "path": "text", "has": ["The Cycle of Assemblages", "clocks were striking"],
