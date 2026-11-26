@@ -5615,6 +5615,7 @@ def _structure(blocks, doc):
     contents_pg = {p for p, y, sz, t in blocks if not bms and p < 15 and isinstance(t, str)
                    and CONTENTS_HEAD.fullmatch(t.strip()) and (sz >= h2_cut or title_sz and abs(sz - title_sz) < 0.06)}
     bm_first = min(bms) if bms else 0
+    in_index = [False]  # inside the back-of-book index (its lowercase headwords are entries, Jon 11-26)
     bm_rest = None  # (page, norm) of a bookmark whose printed title came first: its subtitle lines go with it
     if bms:
         blocks = _bm_join(list(blocks), bms)
@@ -5681,6 +5682,8 @@ def _structure(blocks, doc):
         prev = cur[k][1]
         if list_item.match(t) or SENT_END.search(prev) or VERSE_BREAK in t or VERSE_BREAK in prev:
             return False  # (a poem is a paragraph of its own: Jon 11-26)
+        if in_index[0] and re.search(r"\d\s*$", prev):
+            return False  # an index entry ends on its page numbers; "aesthetics, of ..." is the next one
         if re.search(r"[a-z]-$", prev) or t[:1].islower():
             return True
         if t[:1] in "—…" and t[1:2].islower():
@@ -5771,6 +5774,7 @@ def _structure(blocks, doc):
                 t = bm[1]
                 bm_rest = (pno, bm[2])
             if bm[0] == 1:
+                in_index[0] = _bm_norm(t) == "index" and pno >= len(doc) * 0.6
                 flush()
                 cur.append(("h1", t))
             else:
@@ -5810,6 +5814,7 @@ def _structure(blocks, doc):
             # ponytail: "Preface" in note type over its notes in the back (Jon 11-26) is no chapter
             cur.append(("p", t))
         elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
+            in_index[0] = t.strip().lower() == "index" and pno >= len(doc) * 0.6
             flush()
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
         elif title_sz and abs(sz - title_sz) < 0.06 and len(t) < 120 and re.search(r"[A-Za-z]{3}", t):

@@ -706,7 +706,8 @@ def make_press_no_outline():
     pg = d.new_page(width=432, height=666)
     pg.insert_text((90, 112), "Index", fontsize=11.5)
     for k, (x, t) in enumerate([(58, "Arendt, Hannah, 207"), (58, "Argentina: Dirty War in, 9, 81, 121; Langer in,"),
-                                (70, "5, 9; reparations in, 81"), (58, "Aron, Lewis, 18-19")]):
+                                (70, "5, 9; reparations in, 81"), (58, "Aron, Lewis, 18-19"),
+                                (58, "authority, of the analyst, 44")]):
         pg.insert_text((x, 150 + k * 12), t, fontsize=9)
     return d
 
@@ -844,7 +845,7 @@ CASES = {
         "path": "text", "has": ["clocks were striking"],
         "hasnt": ["Worlding Psychoanalysis Introduction", "Psychoanalysis Worlding", "Genealogies"],
         "para": ["2 Mannoni, Prospero and Caliban, 32.", "vibrate\u2028vibrate you very essence of the dark\u2028the word in the night\u2028"
-                 "sprung fully armed from the howling\u2028of a poisonous flower", "Arendt, Hannah, 207", "Aron, Lewis, 18-19",
+                 "sprung fully armed from the howling\u2028of a poisonous flower", "Arendt, Hannah, 207", "Aron, Lewis, 18-19", "authority, of the analyst, 44",
                  "Argentina: Dirty War in, 9, 81, 121; Langer in, 5, 9; reparations in, 81"],
         "toc": ["Introduction. Worlding Psychoanalysis", "1. Psychoanalysis and Archaeology",
                 "2. Freud in the Sacred Grove", "Notes", "Index"]}),
