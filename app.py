@@ -2488,6 +2488,10 @@ __ALT__
   <a href="/" hreflang="en" lang="en">English</a>
   <a href="/pt/" hreflang="pt" lang="pt-BR">Português</a>
   <a href="/es/" hreflang="es" lang="es">Español</a>
+  <a href="/fr/" hreflang="fr" lang="fr">Français</a>
+  <a href="/de/" hreflang="de" lang="de">Deutsch</a>
+  <a href="/it/" hreflang="it" lang="it">Italiano</a>
+  <a href="/nl/" hreflang="nl" lang="nl">Nederlands</a>
 </div>
 
 <footer>
@@ -2834,6 +2838,10 @@ def index(request: Request):
 
 @app.get("/pt/", response_class=HTMLResponse)
 @app.get("/es/", response_class=HTMLResponse)
+@app.get("/fr/", response_class=HTMLResponse)
+@app.get("/de/", response_class=HTMLResponse)
+@app.get("/it/", response_class=HTMLResponse)
+@app.get("/nl/", response_class=HTMLResponse)
 def index_lang(request: Request):
     lang = request.url.path.strip("/")
     _write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "visit": 1,
@@ -2960,7 +2968,7 @@ INDEXNOW_KEY = "ad136bf29681a09265f8e9bd56452473"
 
 
 def site_urls() -> list[str]:
-    return ["/", "/pt/", "/es/", "/scan", "/shelf", "/publish", "/guides"] + ["/guides/" + s for s in GUIDES]
+    return ["/", "/pt/", "/es/", "/fr/", "/de/", "/it/", "/nl/", "/scan", "/shelf", "/publish", "/guides"] + ["/guides/" + s for s in GUIDES]
 
 
 @app.get(f"/{INDEXNOW_KEY}.txt")
@@ -3461,6 +3469,10 @@ def llms_txt():
 - Converter (English): https://epub.ftak.net/
 - Portuguese: https://epub.ftak.net/pt/
 - Spanish: https://epub.ftak.net/es/
+- French: https://epub.ftak.net/fr/
+- German: https://epub.ftak.net/de/
+- Italian: https://epub.ftak.net/it/
+- Dutch: https://epub.ftak.net/nl/
 - Scan a physical book with your phone: https://epub.ftak.net/scan
 - Authors: turn a print PDF into an EPUB for KDP, Apple Books and Kobo: https://epub.ftak.net/publish
 - All guides: https://epub.ftak.net/guides

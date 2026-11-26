@@ -74,7 +74,8 @@ def main():
     for u in ["/scan", "/guides", "/guides/pdf-to-epub", "/sitemap.xml"]:
         assert client.get(u).status_code == 200, u
     # /pt/ and /es/: same converter, translated copy, tied to the english page by hreflang
-    for lang, word in (("pt", "Converter para EPUB"), ("es", "Convertir a EPUB")):
+    for lang, word in (("pt", "Converter para EPUB"), ("es", "Convertir a EPUB"), ("fr", "Convertir en EPUB"),
+                       ("de", "In EPUB umwandeln"), ("it", "Converti in EPUB"), ("nl", "Omzetten naar EPUB")):
         pg = client.get(f"/{lang}/")
         assert pg.status_code == 200 and word in pg.text, f"/{lang}/ not translated"
         assert f'hreflang="{lang}"' in pg.text and 'hreflang="x-default"' in pg.text, f"/{lang}/ lacks hreflang"
@@ -425,7 +426,8 @@ def main():
     assert st["starts"] >= 1
 
     # fake doors (11-07): translate + Mac app buttons, counted in /stats, emails are leads not failures
-    for path, word in (("/", "Notify me"), ("/pt/", "Me avise"), ("/es/", "Avísame")):
+    for path, word in (("/", "Notify me"), ("/pt/", "Me avise"), ("/es/", "Avísame"), ("/fr/", "Prévenez-moi"),
+                       ("/de/", "Benachrichtige mich"), ("/it/", "Avvisami"), ("/nl/", "Laat het me weten")):
         page = client.get(path).text
         assert 'id="next" hidden' in page and 'data-want="translate"' in page and 'data-want="desktop"' in page and 'data-want="audio"' in page and 'data-want="kindle"' in page, path
         assert word in page, (path, word)
@@ -445,7 +447,7 @@ def main():
     assert wkly[this]["visits_human"] >= 1 and sum(v["visits_human"] for v in wkly.values()) <= st["visits_human"], wkly
     # djvu fake door (11-16, Google Trends "djvu to epub" +350%): the picker takes .djvu, the page asks for an email
     # instead of uploading it, and the server still refuses a djvu that gets posted anyway
-    for path in ("/", "/pt/", "/es/"):
+    for path in ("/", "/pt/", "/es/", "/fr/", "/de/", "/it/", "/nl/"):
         page = client.get(path).text
         assert 'accept=".pdf,.djvu,.djv"' in page and "djvuDoor" in page and "want:djvu" in page, path
     r = client.post("/convert", files={"f": ("book.djvu", b"AT&TFORM\x00\x00", "image/vnd.djvu")})
