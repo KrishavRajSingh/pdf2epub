@@ -2112,7 +2112,7 @@ def build_epub(chapters, title: str, author: str, lang: str = "en", cover: bytes
                 parts.append(f'<h{k[1]} id="{sid}">{html.escape(_clean(t))}</h{k[1]}>')
                 sections.append((int(k[1]), _clean(t)[:120], sid))
             else:
-                parts.append(f"<p>{html.escape(_clean(t))}</p>")
+                parts.append(f"<p>{html.escape(_clean(t)).replace(VERSE_BREAK, '<br/>')}</p>")
         notes = [t for k, t in ch if k == "fn"]
         if notes:
             # ponytail: notes stay out of the prose and keep their page order; no back-links yet
@@ -3830,6 +3830,8 @@ def stats(response: Response):
 
 def _join(lines):
     """Join the wrapped lines of one paragraph; drop the hyphen at a line break."""
+    if len(lines) == 1 and VERSE_BREAK in lines[0]:
+        return VERSE_BREAK.join(" ".join(x.split()) for x in lines[0].split(VERSE_BREAK))
     out = ""
     for ln in lines:
         if not out:
@@ -4935,6 +4937,10 @@ def doc_lang(doc) -> str:
 NOTE_MARK_ONLY = re.compile(r"[*†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹]{1,6}")
 
 
+CODE_LINE = re.compile(r"^\s*(?:\$|>>>|#|//)\s|[{}=<>|\\_]|\w\(|\.\w+\(|--\w")
+VERSE_BREAK = "\u2028"  # a line break kept inside one paragraph (verse); <br/> in the EPUB
+
+
 def _paragraphs(rows, bbox, ocr=False):
     """Split one PDF block's lines into paragraphs: [(y0, size, [line, ...]), ...].
 
@@ -4965,6 +4971,19 @@ def _paragraphs(rows, bbox, ocr=False):
         return []
     bx0, bx1 = bbox[0], bbox[2]
     bw = max(bx1 - bx0, 1)
+    # ponytail (Jon 11-26, Dark Continents): a quoted poem is one block whose lines mostly stop short
+    # of its edge; verse lines start lowercase ("vibrate / vibrate you very essence of the dark"), so
+    # the carry-on rule below glued 17 lines into one. Such a block is verse: one paragraph, each
+    # printed line kept (VERSE_BREAK renders as a line break). Prose lines run to the edge.
+    # (only when 2+ short lines go on in lowercase, which wrapped prose never does: its lines fill the
+    # measure, and capitalised lines are split apart already. Each line on its own
+    # baseline: LaTeX writes a word per line object, "If / you / have". Code listings stay as they were)
+    if not ocr and len(rows) >= 4 and not any(r[0].rstrip().endswith("-") for r in rows[:-1]) \
+            and all(b[2][1] - a[2][1] > 0.6 * a[1] for a, b in zip(rows, rows[1:])) \
+            and not any(CODE_LINE.search(r[0]) for r in rows) \
+            and sum(bx1 - a[2][2] > bw * 0.2 and b[0][:1].islower() for a, b in zip(rows, rows[1:])) >= 2 \
+            and sum(bx1 - r[2][2] > bw * 0.2 for r in rows[:-1]) >= 0.5 * (len(rows) - 1):
+        return [(rows[0][2][1], max(r[1] for r in rows), [VERSE_BREAK.join(r[0].strip() for r in rows)])]
     left = min(r[2][0] for r in rows)
     groups = []
     for k, (txt, size, lb) in enumerate(rows):
@@ -5321,6 +5340,10 @@ def _blocks(doc):
                 yield i, y0, round(size, 1), _join(lines)
             if REFS_HEAD.fullmatch(" ".join(r[0] for r in rows)):
                 in_refs = True
+            # ponytail (Jon 11-26): a back-of-book index hangs like a reference list (a wrapped entry
+            # goes on indented) and its lines fill a narrow column, so whole columns ran together
+            elif re.fullmatch(r"index", " ".join(r[0] for r in rows).strip(), re.I) and i >= len(doc) * 0.6:
+                in_refs = True
         for f in figs:
             if not f["done"]:
                 pm = page.get_pixmap(matrix=pymupdf.Matrix(FIG_SCALE, FIG_SCALE), clip=f["page"])
@@ -5656,8 +5679,8 @@ def _structure(blocks, doc):
         if ocr and sz >= h2_cut and caps_title(t):
             return False  # a chapter title after a page that ends mid-sentence
         prev = cur[k][1]
-        if list_item.match(t) or SENT_END.search(prev):
-            return False
+        if list_item.match(t) or SENT_END.search(prev) or VERSE_BREAK in t or VERSE_BREAK in prev:
+            return False  # (a poem is a paragraph of its own: Jon 11-26)
         if re.search(r"[a-z]-$", prev) or t[:1].islower():
             return True
         if t[:1] in "—…" and t[1:2].islower():
@@ -5792,6 +5815,10 @@ def _structure(blocks, doc):
         elif title_sz and abs(sz - title_sz) < 0.06 and len(t) < 120 and re.search(r"[A-Za-z]{3}", t):
             flush()
             cur.append(("h1", t))
+        elif VERSE_BREAK in t and open_para() >= 0 and VERSE_BREAK in cur[open_para()][1] \
+                and t[:1].islower() and not SENT_END.search(cur[open_para()][1]):
+            k = open_para()  # a poem or list that runs on over the page: one block, line breaks kept
+            cur[k] = ("p", cur[k][1] + VERSE_BREAK + t)
         elif continues(t, sz):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
             # an OCR text layer that cut the paragraph into blocks) is the same paragraph. Pictures

@@ -12,16 +12,17 @@
  },
  "press_no_outline": {
   "path": "text",
-  "chapters": 5,
+  "chapters": 6,
   "headings": [
    "Introduction. Worlding Psychoanalysis",
    "1. Psychoanalysis and Archaeology",
    "2. Freud in the Sacred Grove",
-   "Notes"
+   "Notes",
+   "Index"
   ],
-  "paragraphs": 25,
+  "paragraphs": 29,
   "imgs": 0,
-  "words": 1232
+  "words": 1276
  },
  "print_ready_academic": {
   "path": "text",

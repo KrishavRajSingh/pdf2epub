@@ -699,6 +699,15 @@ def make_press_no_outline():
     for k in range(1, 4):
         pg.insert_text((68, 150 + k * 40), str(k), fontsize=8.5)
         pg.insert_text((84, 150 + k * 40), f"Mannoni, Prospero and Caliban, {30 + k}.", fontsize=8.5)
+    # a poem quoted in a chapter: verse lines start lowercase, so they were glued into one line
+    d[5].insert_text((88, 300), "vibrate\nvibrate you very essence of the dark\nthe word in the night\n"
+                     "sprung fully armed from the howling\nof a poisonous flower", fontsize=10.5)
+    # the index: entries hang (a wrapped entry goes on indented) and ran together as one paragraph
+    pg = d.new_page(width=432, height=666)
+    pg.insert_text((90, 112), "Index", fontsize=11.5)
+    for k, (x, t) in enumerate([(58, "Arendt, Hannah, 207"), (58, "Argentina: Dirty War in, 9, 81, 121; Langer in,"),
+                                (70, "5, 9; reparations in, 81"), (58, "Aron, Lewis, 18-19")]):
+        pg.insert_text((x, 150 + k * 12), t, fontsize=9)
     return d
 
 
@@ -834,9 +843,11 @@ CASES = {
     "press_no_outline": (make_press_no_outline, {
         "path": "text", "has": ["clocks were striking"],
         "hasnt": ["Worlding Psychoanalysis Introduction", "Psychoanalysis Worlding", "Genealogies"],
-        "para": ["2 Mannoni, Prospero and Caliban, 32."],
+        "para": ["2 Mannoni, Prospero and Caliban, 32.", "vibrate\u2028vibrate you very essence of the dark\u2028the word in the night\u2028"
+                 "sprung fully armed from the howling\u2028of a poisonous flower", "Arendt, Hannah, 207", "Aron, Lewis, 18-19",
+                 "Argentina: Dirty War in, 9, 81, 121; Langer in, 5, 9; reparations in, 81"],
         "toc": ["Introduction. Worlding Psychoanalysis", "1. Psychoanalysis and Archaeology",
-                "2. Freud in the Sacred Grove", "Notes"]}),
+                "2. Freud in the Sacred Grove", "Notes", "Index"]}),
     # Jon 11-23: print-ready InDesign book (crop marks, en-space contents, essay running feet, diagrams)
     "print_ready_academic": (make_print_ready_academic, {
         "path": "text", "has": ["The Cycle of Assemblages", "clocks were striking"],
