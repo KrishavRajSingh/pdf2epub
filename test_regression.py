@@ -638,6 +638,65 @@ def make_latex_book():
     return d
 
 
+def _press_page(d, foot=None, top=54):
+    """A 432x648 university-press page of 10.5pt prose with a 9pt running foot at y=588."""
+    pg = d.new_page(width=432, height=648)
+    pg.insert_textbox(pymupdf.Rect(60, top, 372, 560), f"On page {len(d)} the story goes on. " + PROSE * 2, fontsize=10.5)
+    if foot:
+        pg.insert_text((62, 596), foot, fontsize=9)
+    return pg
+
+
+def make_press_outline():
+    """Jon 11-26, The Political Clinic (InDesign): running foot "Introduction 11" / "32 Democracy's
+    Children" at the page foot (one word, so every one became a chapter); the outline says "1. On Good
+    Authority: Anna Freud, ..." while the page prints the title and a two-line subtitle in three blocks,
+    under a "CHAPTER ONE" label (contents split into "On Good Authority" + "Politics of Authority"); a
+    part page "PART ONE" over "Democracy's Children" for the bookmark "Part I. Democracy's Children"."""
+    d = _doc()
+    pg = _press_page(d, top=230)
+    pg.insert_text((180, 160), "Introduction", fontsize=17)
+    pg.insert_text((120, 190), "On Neutrality and Other Fictions", fontsize=14)
+    for k in (3, 4, 5):
+        _press_page(d, f"{k} Introduction" if k % 2 == 0 else f"Introduction {k}")
+    pg = d.new_page(width=432, height=648)
+    pg.insert_text((180, 250), "PART ONE", fontsize=12)
+    pg.insert_text((140, 290), "Democracy's Children", fontsize=17)
+    pg = _press_page(d, top=250)
+    pg.insert_text((180, 92), "CHAPTER ONE", fontsize=9)
+    pg.insert_text((150, 160), "On Good Authority", fontsize=17)
+    pg.insert_text((90, 190), "Anna Freud, Child Analysis, and the", fontsize=14)
+    pg.insert_text((140, 210), "Politics of Authority", fontsize=14)
+    for k in range(8, 22):  # a long chapter: the introduction's 3 feet are under a fifth of the pages
+        _press_page(d, f"{k} Democracy's Children" if k % 2 == 0 else f"On Good Authority {k}")
+    d.set_toc([[1, "Introduction: On Neutrality and Other Fictions", 1],
+               [1, "Part I. Democracy's Children", 5],
+               [2, "1. On Good Authority: Anna Freud, Child Analysis, and the Politics of Authority", 6]])
+    return d
+
+
+def make_press_no_outline():
+    """Jon 11-26, Dark Continents (PDFium, no outline): chapter titles at 11.5pt on a 10.5pt body
+    (x1.095, under the heading cut) so no chapter was found; the running foot is two blocks, the folio
+    "6" and "Introduction", so "Introduction" became a chapter on every page and "Worlding
+    Psychoanalysis" stayed in the prose."""
+    d = _doc()
+    d.new_page(width=432, height=666).insert_text((100, 200), "A Center Book", fontsize=10.5)
+    for title, feet in (("Introduction. Worlding Psychoanalysis", ("Introduction", "Worlding Psychoanalysis")),
+                        ("1. Psychoanalysis and Archaeology", ("Genealogies", "Psychoanalysis and Archaeology")),
+                        ("2. Freud in the Sacred Grove", ("Genealogies", "Freud in the Sacred Grove"))):
+        for k in range(7):
+            pg = d.new_page(width=432, height=666)
+            pg.insert_textbox(pymupdf.Rect(66, 140 if k == 0 else 58, 372, 590), f"On page {len(d)} the story goes on. " + PROSE * 2,
+                              fontsize=10.5)
+            if k == 0:
+                pg.insert_text((90, 112), title, fontsize=11.5)
+            else:
+                pg.insert_text((66 if k % 2 else 300, 621), str(len(d) + 1), fontsize=9.5)
+                pg.insert_text((80 if k % 2 else 200, 621), feet[k % 2], fontsize=9.5)
+    return d
+
+
 def make_ia_layer_quirks():
     """11-22 corpus (Ageless Spine, Reminiscences): a scan with an OCR layer whose drop cap is only in the
     picture ("an you imagine"), a photo between the two halves of a paragraph, and a running head that
@@ -759,6 +818,19 @@ def make_print_ready_academic():
 
 
 CASES = {
+    # Jon 11-26: one-word running feet, outline titles printed as title + subtitle blocks, part label
+    "press_outline": (make_press_outline, {
+        "path": "text", "has": ["clocks were striking"],
+        "hasnt": ["Introduction 3", "4 Introduction", "8 Democracy", "On Good Authority 9", "PART ONE",
+                  "CHAPTER ONE"],
+        "toc": ["Introduction On Neutrality and Other Fictions", "Part I. Democracy's Children",
+                "1. On Good Authority: Anna Freud, Child Analysis, and the Politics of Authority"]}),
+    # Jon 11-26: no outline, chapter titles one size step over the body, two-block running feet
+    "press_no_outline": (make_press_no_outline, {
+        "path": "text", "has": ["clocks were striking"],
+        "hasnt": ["Worlding Psychoanalysis Introduction", "Psychoanalysis Worlding", "Genealogies"],
+        "toc": ["Introduction. Worlding Psychoanalysis", "1. Psychoanalysis and Archaeology",
+                "2. Freud in the Sacred Grove"]}),
     # Jon 11-23: print-ready InDesign book (crop marks, en-space contents, essay running feet, diagrams)
     "print_ready_academic": (make_print_ready_academic, {
         "path": "text", "has": ["The Cycle of Assemblages", "clocks were striking"],
@@ -882,6 +954,8 @@ def check(name, rules, s, text):
         errs.append(f"{s['chapters']} chapters, want at most {rules['ch_max']}: {s['headings']}")
     if s["chapters"] < rules.get("ch_min", 0):
         errs.append(f"{s['chapters']} chapters, want at least {rules['ch_min']}: {s['headings']}")
+    if "toc" in rules and rules["_toc"] != rules["toc"]:
+        errs.append(f"contents {rules['_toc']}, want {rules['toc']}")
     if len(s["headings"]) < rules.get("h_min", 0):
         errs.append(f"headings {s['headings']}")
     return errs
@@ -907,7 +981,9 @@ def main():
         path, chapters = convert(doc)
         s, text = summary(path, chapters)
         new[name] = s
-        errs = check(name, dict(rules, _layer=_ocr_layer(doc)), s, text)
+        # every contents entry, in order: chapter titles and outline sections
+        toc = [t for ch in chapters for k, t in ch if k in ("h1", "s2", "s3") and isinstance(t, str)]
+        errs = check(name, dict(rules, _layer=_ocr_layer(doc), _toc=toc), s, text)
         items = [it for ch in chapters for it in ch]
         for kind, key in (("p", "para"), ("fn", "fn")):  # whole paragraphs / notes, not phrases
             errs += [f"no {kind} block {p!r}" for p in rules.get(key, []) if (kind, p) not in items]

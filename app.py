@@ -5332,8 +5332,20 @@ def _bookmarks(doc) -> dict:
         return {}
     out = {}
     for lvl, t, p in toc:
-        out.setdefault(p, []).append([min(lvl, 3), t, _bm_norm(t), False])
+        out.setdefault(p, []).append([min(lvl, 3), t, _bm_norm(t), False, _bm_head(t)])
     return out
+
+
+BM_LABEL = re.compile(r"^(?:(?:part|chapter|book)\s+[\w]+[.:]?\s+|\d{1,3}[.)]\s+)", re.I)
+
+
+def _bm_head(title: str) -> str:
+    """The title a page prints big, from a bookmark that also holds the label and subtitle:
+    "1. On Good Authority: Anna Freud, ..." -> "ongoodauthority", "Part I. Democracy's Children"
+    -> "democracyschildren". ponytail (Jon 11-26, The Political Clinic): the page sets the title, the
+    subtitle and "CHAPTER ONE" as separate blocks, none of them the whole bookmark, so 10 of 16
+    bookmarks never matched and the contents read "On Good Authority", "Politics of Authority"."""
+    return _bm_norm(BM_LABEL.sub("", title).split(":")[0])
 
 
 def _bm_match(bms: dict, page: int, t: str):
@@ -5348,6 +5360,10 @@ def _bm_match(bms: dict, page: int, t: str):
             if n == e[2] or (e[2].startswith(n) and len(n) >= 0.6 * len(e[2])) \
                     or (n.startswith(e[2]) and len(e[2]) >= 6 and len(n) <= len(e[2]) + 12):
                 return e
+    for p in (page, page + 1, page - 1):
+        for e in bms.get(p, []):
+            if not e[3] and len(n) >= 6 and n == e[4]:
+                return e  # the printed title of a bookmark that adds a label or subtitle
     # ponytail: a typed outline has typos ("The Cycle of Asemblages", Schizoanalytic
     # Cartographies 11-23) while the page spells it right; the chapter came out as "Assemblages (First
     # Global Approach)" with its "3 The Cycle of" lost. A long title one or two letters off is the same.
@@ -5500,10 +5516,47 @@ def _structure(blocks, doc):
     run_foots = {k for k, c in run_foots.items() if k and c >= 3
                  and (len(re.findall(r"[a-z]{3,}", k)) >= 2 or k in outline)}
 
+    # ponytail (Jon 11-26, The Political Clinic, Dark Continents): university presses foot each page
+    # with the chapter title and folio, "Introduction 11" (one word, so run_foots skipped it and it
+    # passed as a chapter heading on every page) or "6" and "Introduction" as two blocks (a chapter per
+    # page; "Worlding Psychoanalysis" stayed in the prose). Small type at one height at the foot,
+    # the same words on 3+ pages. A note ("Ibid.", "See note 4.") has a full stop and moves about.
+    def foot_word(t):  # "Preface xi" and "Preface" are one foot: the roman folio goes too
+        return re.sub(r"^[ivxlc]{1,7}\s+|\s+[ivxlc]{1,7}$", "", _furn_key(t))
+
+    foot_rows = {}
+    for p, y, sz, t in blocks:
+        if sz > 0 and isinstance(t, str) and y > foot_y and sz < fn_cut and len(t) < 80:
+            k = foot_word(t)
+            if k and "." not in k and re.search(r"[a-z]{3}", k):
+                foot_rows.setdefault((k, round(y)), set()).add(p)
+    run_feet = {k for (k, _), ps in foot_rows.items() if len(ps) >= 3}
+
     chapters, cur, cur_notes = [], [], []
     drop = None  # (letter, page) of a drop cap waiting for the paragraph it starts
     ocr = _ocr_layer(doc)
     bms = {} if ocr else _bookmarks(doc)
+    # ponytail (Jon 11-26, Dark Continents): Duke set the chapter titles at 11.5pt on a 10.5pt body
+    # (x1.095, under h2_cut) and the PDF has no outline: the EPUB had no chapter at all. When almost
+    # nothing reaches the cut, a size a step over the body that only short lines use, on 3+ pages,
+    # is the title size.
+    title_sz = 0
+    if not bms and not ocr:
+        big = {p for p, y, sz, t in blocks if sz >= h2_cut and isinstance(t, str) and re.search(r"[A-Za-z]{3}", t)}
+        if len(big) < 3:
+            sizes = {}
+            for p, y, sz, t in blocks:
+                if sz > 0 and isinstance(t, str) and body * 1.04 <= sz < h2_cut:
+                    c = sizes.setdefault(round(sz, 1), [set(), 0])
+                    c[0].add(p)
+                    c[1] = max(c[1], len(t))
+            title_sz = max((z for z, (ps, longest) in sizes.items() if len(ps) >= 3 and longest < 120), default=0)
+    # the printed contents page points at page numbers an e-book does not have, and its "Preface ix",
+    # "Index" lines read as chapters (Jon 11-26, Dark Continents); with an outline _blocks drops it
+    contents_pg = {p for p, y, sz, t in blocks if not bms and p < 15 and isinstance(t, str)
+                   and CONTENTS_HEAD.fullmatch(t.strip()) and (sz >= h2_cut or title_sz and abs(sz - title_sz) < 0.06)}
+    bm_first = min(bms) if bms else 0
+    bm_rest = None  # (page, norm) of a bookmark whose printed title came first: its subtitle lines go with it
     if bms:
         blocks = _bm_join(list(blocks), bms)
     list_item = re.compile(r"^(?:[-–•·*▪◦]|\d{1,3}[.)]|#)\s")
@@ -5609,6 +5662,10 @@ def _structure(blocks, doc):
             continue
         if y > foot_y and sz < fn_cut and len(t) < 80 and run_foots and foot_key(t) in run_foots:
             continue
+        if y > foot_y and sz < fn_cut and len(t) < 80 and (foot_word(t) in run_feet or head_word.match(t)):
+            continue  # (a heading word in small type at the foot is the foot of a 2-page preface)
+        if pno in contents_pg:
+            continue
         if (y < 60 or y > foot_y) and re.fullmatch(r"[ivxlcdm]{1,7}", t.strip(), re.I) and t.strip().lower() != "i":
             continue  # a roman page number in the front matter ("ix", "xiv")
         if not re.sub(r"[\s\ue000-\uf8ff\x00-\x1f\x7f]", "", t):
@@ -5632,11 +5689,28 @@ def _structure(blocks, doc):
         # and the repeated-header counter misses it; it sits at the top edge in smaller type.
         if y < head_cut and sz < fn_cut and len(t) < 120 and re.search(r"\d", t):
             continue
+        if bm_rest:
+            n = _bm_norm(t)
+            if bm_rest[0] == pno and sz >= h2_cut and len(n) >= 3 and n in bm_rest[1]:
+                continue  # the subtitle under it: the bookmark title already holds it
+            bm_rest = None
         bm = _bm_match(bms, pno, t) if bms and len(t) < 160 else None
         if bm:
             # the author's outline: level 1 starts a chapter, levels 2-3 are its sections ("s2", "s3",
             # headings that also get a contents entry)
             bm[3] = True
+            n = _bm_norm(t)
+            if n != bm[2] and (BM_LABEL.match(bm[1]) or ":" in bm[1]):
+                t = bm[1]  # "Traveling Analysis Wulf Sachs, ..." read without its "3." and colon: the outline's
+            if n == bm[4] != bm[2]:
+                # the page printed the title only: the bookmark names it whole ("1. On Good Authority:
+                # Anna Freud, ..."), so its label line ("CHAPTER ONE", "PART ONE") goes too
+                if cur and isinstance(cur[-1][1], str) and cur[-1][0] in ("h1", "h2", "p") \
+                        and re.fullmatch(r"(part|chapter|book)\s+[\w-]+", cur[-1][1].strip(), re.I) \
+                        and BM_LABEL.match(bm[1]):
+                    cur.pop()
+                t = bm[1]
+                bm_rest = (pno, bm[2])
             if bm[0] == 1:
                 flush()
                 cur.append(("h1", t))
@@ -5673,9 +5747,15 @@ def _structure(blocks, doc):
             last_fn_page = pno
         elif foot and open_note and pno == last_fn_page and open_note[1] < len(open_note[0]):
             _note_add(open_note, t)  # an unmarked small block under a note: its address, its rest
+        elif sz < fn_cut and head_word.match(t) and not re.match(r"(chapter|part|book)\b", t, re.I):
+            # ponytail: "Preface" in note type over its notes in the back (Jon 11-26) is no chapter
+            cur.append(("p", t))
         elif (head_word.match(t) or ch_title.match(t)) and len(t) < 120:
             flush()
             cur.append(("h1", re.sub(r"^(chapter|part)\s+\|", r"\1 1", t, flags=re.I)))
+        elif title_sz and abs(sz - title_sz) < 0.06 and len(t) < 120 and re.search(r"[A-Za-z]{3}", t):
+            flush()
+            cur.append(("h1", t))
         elif continues(t, sz):
             # ponytail: a block that picks up a sentence the last one left open (a new page, or
             # an OCR text layer that cut the paragraph into blocks) is the same paragraph. Pictures
@@ -5692,6 +5772,10 @@ def _structure(blocks, doc):
                 and not re.search(r"[^\W\d_]{3}", t) and not re.fullmatch(r"[\dIVXLCivxlc.\s]+", t):
             # ponytail: a notation set big ("-o-oo--oo--o oo-oo-", Schizoanalytic Cartographies 11-23)
             # has letters but no word; it came out as a chapter. A heading has a word or a number.
+            cur.append(("p", t))
+        elif bms and pno < bm_first and sz >= h2_cut and len(t) < 120 and any(k in ("h1", "h2") for k, _ in cur):
+            # ponytail: the title page before the outline's first entry ("The Political Clinic",
+            # "Psychoanalysis and Social Change", "in the Twentieth Century", author) is one entry (Jon 11-26)
             cur.append(("p", t))
         elif sz >= h1_cut and len(t) < 120 and not OPEN_END.search(t):
             if not (ocr and named >= 3):

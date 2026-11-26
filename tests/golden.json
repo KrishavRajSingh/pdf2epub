@@ -1,4 +1,27 @@
 {
+ "press_outline": {
+  "path": "text",
+  "chapters": 2,
+  "headings": [
+   "Introduction On Neutrality and Other Fictions",
+   "Part I. Democracy's Children"
+  ],
+  "paragraphs": 19,
+  "imgs": 0,
+  "words": 1106
+ },
+ "press_no_outline": {
+  "path": "text",
+  "chapters": 4,
+  "headings": [
+   "Introduction. Worlding Psychoanalysis",
+   "1. Psychoanalysis and Archaeology",
+   "2. Freud in the Sacred Grove"
+  ],
+  "paragraphs": 22,
+  "imgs": 0,
+  "words": 1213
+ },
  "print_ready_academic": {
   "path": "text",
   "chapters": 4,
