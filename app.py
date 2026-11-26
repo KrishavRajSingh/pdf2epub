@@ -689,9 +689,56 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
     sharp = 0
     if key and sharp_left(key) and any(c < SHARP_CONF for c in confs.values()):
         sharp = sharp_pages(doc, pages, confs, lang, key, read, img=lambda i: _strip_pen(doc[i])[0])
+    for i in range(len(pages) - 1):
+        try:
+            pages[i] = (_page_end_hyphen(doc[i], pages[i][0], pages[i + 1][0]), pages[i][1])
+        except Exception:
+            pass  # ponytail: a page that can't be looked at keeps its text as read
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "layer_scan": len(doc), "drive_failed": failed,
                       "inked": len(inked), "sharp": sharp}), flush=True)
     return pages
+
+
+def _page_end_hyphen(page, text: str, nxt: str) -> str:
+    """The page's text with a final "com." turned into "com-" when the picture shows a hyphen there.
+
+    ponytail (davehasl19, Tales of Terror 11-26): the printed "Glasgow com-" at a page foot was a
+    faint short dash; Drive read it as "com.", so the sentence ended there and "pany, and was..."
+    on the next page became its own paragraph. Only the ink decides, never the word: the mark
+    after the page's last word is found with the old layer's word box; a hyphen sits halfway up
+    the letters, a full stop on the line they stand on. Measured on the whole book: hyphens
+    0.35-0.52 of the letter height, full stops 0.07-0.21."""
+    m = re.search(r"([A-Za-z]+)\.$", text.rstrip())
+    first = next((ln for ln in nxt.splitlines() if re.search(r"[a-z]", ln)), "")
+    if not m or not first.lstrip("\"'‘“ ")[:1].islower():
+        return text
+    word = m.group(1).lower()
+    ws = [w for w in page.get_text("words") if w[4].strip("-.,;:'’‘\"­").lower().startswith(word)]
+    if not ws:
+        return text
+    w = max(ws, key=lambda w: (w[3], w[2]))  # the lowest, rightmost one: the page's last line
+    lh = w[3] - w[1]
+    clip = pymupdf.Rect(w[0], w[1] - lh * 0.3, min(page.rect.x1, w[2] + lh * 1.5), w[3] + lh * 0.3)
+    pix = page.get_pixmap(dpi=300, clip=clip, colorspace=pymupdf.csGRAY)
+    W, H, s = pix.width, pix.height, pix.samples
+    ink = [[s[y * W + x] < 128 for x in range(W)] for y in range(H)]
+    rows = [sum(r) for r in ink]
+    cols = [sum(ink[y][x] for y in range(H)) for x in range(W)]
+    dense = [y for y in range(H) if rows[y] > max(rows) * 0.4]
+    xs = [x for x in range(W) if cols[x]]
+    if not dense or not xs:
+        return text
+    xtop, base = dense[0], dense[-1]
+    xh = max(base - xtop, 1)
+    x1 = x0 = xs[-1]
+    while x0 > 0 and any(cols[x0 - k] for k in (1, 2, 3) if x0 - k >= 0):
+        x0 -= 1
+    by = [y for y in range(H) if any(ink[y][x0:x1 + 1])]
+    bw, bh = x1 - x0 + 1, by[-1] - by[0] + 1
+    rel = (base - (by[0] + by[-1]) / 2) / xh
+    if bh <= xh * 0.5 and bh <= bw <= xh * 1.2 and 0.3 <= rel <= 0.8:
+        return text.rstrip()[:-1] + "-"
+    return text
 
 
 def _put_caps(text: str, caps: list) -> str:

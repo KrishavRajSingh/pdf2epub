@@ -358,7 +358,35 @@ def anthology_contents():
     assert "IALTHOUGH" not in text and "VAT the" not in text and "AT the time" in text, text[:300]
 
 
+def page_end_hyphen():
+    """A word split at the page foot ("com-" / "pany") whose faint hyphen Drive read as "com.":
+    the picture says hyphen, so the word joins and the paragraph goes on (davehasl19, Tales of
+    Terror 11-26). A real full stop at the foot, before a lowercase page, stays a full stop."""
+    def doc(last):
+        d = pymupdf.open()
+        for words in (["She", "had", "been", "chartered", "by", "a", "Glasgow", last], ["pany,", "and", "was"]):
+            art = pymupdf.open()
+            ap = art.new_page(width=320, height=520)
+            ap.insert_text((30, 480), " ".join(words), fontsize=11, fontname="tiro")
+            png = ap.get_pixmap(dpi=200).tobytes("png")
+            pg = d.new_page(width=320, height=520)
+            pg.insert_image(pg.rect, stream=png)
+            pg.insert_text((30, 480), " ".join(words), fontsize=11, fontname="tiro", render_mode=3)
+        return d
+    nxt = "TALES OF TERROR\npany, and was then loading up at the West Quay."
+    d = doc("com-")
+    got = pdf2epub._page_end_hyphen(d[0], "She had been chartered by a Glasgow com.", nxt)
+    assert got.endswith("Glasgow com-"), got
+    paras = [t for ch in pdf2epub.ocr_chapters(["STORY\n" + got, nxt.split("\n", 1)[1]]) for k, t in ch if k == "p"]
+    assert any("Glasgow company, and was" in t for t in paras), paras
+    d = doc("men.")
+    got = pdf2epub._page_end_hyphen(d[0], "She had been chartered by a Glasgow men.", nxt)
+    assert got.endswith("Glasgow men."), got
+    print("ok page_end_hyphen")
+
+
 if __name__ == "__main__":
+    page_end_hyphen()
     anthology_contents()
     reread()
     chapters()
