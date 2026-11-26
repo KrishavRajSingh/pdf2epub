@@ -1433,6 +1433,15 @@ def text_cover(doc) -> bytes | None:
         pic = max((abs(r & p.rect) for i in p.get_images() for r in p.get_image_rects(i[0])), default=0)
         if pic < 0.4 * area and len(p.get_text("words")) >= 60:
             return None
+        # ponytail: a half-title in body type ("A John Hope Franklin Center Book", Jon 11-26) went out as
+        # a white tile; with no picture, only display type (a typeset cover) makes it a cover
+        # a cover cut into tiles (te-loya: 10 strips) is a picture page too: their areas add up
+        tiles = sum(abs(r & p.rect) for i in p.get_images() for r in p.get_image_rects(i[0]))
+        if pic < 0.4 * area and tiles < 0.4 * area:
+            big = max((s["size"] for b in p.get_text("dict")["blocks"] for ln in b.get("lines", [])
+                       for s in ln["spans"] if s["text"].strip()), default=0)
+            if big < 1.6 * (_body_size(doc) or 10.5):
+                return None
         return _jpeg(p.get_pixmap(dpi=SCAN_FIG_DPI))
     except Exception:
         return None

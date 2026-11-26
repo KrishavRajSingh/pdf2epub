@@ -194,7 +194,8 @@ def text_pdf_cover():
     c = pdf2epub.text_cover(d)
     assert c and c[:2] == b"\xff\xd8"
     t = pymupdf.open()
-    t.new_page().insert_text((72, 100), "The Quiet Harbor")
+    # a typeset title page (display type); a half-title in body type is no cover (Jon 11-26, test_cover.py)
+    t.new_page().insert_text((72, 100), "The Quiet Harbor", fontsize=30)
     for _ in range(25):
         t.new_page()
     assert pdf2epub.text_cover(t), "title-only page 1 = cover"
