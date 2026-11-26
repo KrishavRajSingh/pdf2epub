@@ -3079,6 +3079,10 @@ def thanks(request: Request):
     lib = bool(key) and not pack and sharp_left(key) > 0
     days = LIBRARY_DAYS if lib else BATCH_DAYS
     pname = "Credit pack" if pack else ("Library pass" if lib else ("Batch pass" if batch else "Shelf"))
+    next_step = ("Your key is saved in this browser. Go to the <a href=\"/\">converter</a> and upload: "
+                 + ("the page shows your credits left, and a book only spends credits past the free part. "
+                    "Tick AI reading for faded scans." if pack else
+                    "no monthly limit, any number of books up to 2,000 pages each, scans get OCR (expect the usual OCR typos)."))
     if pack:
         intro = (f"The Credit pack is {PACK_CREDITS} credits that never expire. A book spends credits only past "
                  "the free part: a text PDF or a scan that already has text 1 credit per 10 pages, a scan that "
@@ -3104,7 +3108,7 @@ def thanks(request: Request):
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/fonts.css">
-<title>Thanks - pdf2epub Shelf</title>
+<title>Thanks - pdf2epub {pname}</title>
 <style>:root{{--bg:#faf7f0;--card:#fffdf8;--line:#e4ded2;--txt:#1b1916;--dim:#5b564d;--acc:#6b4ce6;--serif:"Newsreader",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}}
 .wrap{{max-width:620px;margin:0 auto;padding:56px 20px}}
@@ -3118,8 +3122,7 @@ b{{color:var(--txt)}}a{{color:var(--acc)}}code{{font-family:ui-monospace,Menlo,m
 {key_html}
 <div class="card">
 <p><b>What happens next</b></p>
-<p>Your key is saved in this browser. Go to the <a href="/">converter</a> and upload: no monthly limit,
-any number of books up to 2,000 pages each, scans get OCR (expect the usual OCR typos).</p>
+<p>{next_step}</p>
 <p>A file the converter chokes on? Email it to <code>{SHELF_MAIL}</code> with the book title in the subject line
 and we will rerun it on the big-file converter.</p>
 <p>Nothing is stored. The PDF is never saved and the EPUB is deleted after the download, same as the
