@@ -99,7 +99,9 @@ def main():
     # 11-11: comparison page for AI answers: FAQ + ItemList JSON-LD, dated, in sitemap and /guides
     c = client.get("/guides/pdf-to-epub-converters-compared")
     assert c.status_code == 200 and '"@type": "FAQPage"' in c.text and '"@type":"ItemList"' in c.text, "compare page"
-    assert "Checked 11 November 2026" in c.text and 'href="/?s=seo-compare"' in c.text, "compare page date/cta"
+    assert "27 November 2026" in c.text and 'href="/?s=seo-compare"' in c.text, "compare page date/cta"
+    # 11-27 refresh: no stale $3 tier, EpubCC row (ChatGPT names it first for scans)
+    assert "$3" not in c.text and "<td>EpubCC</td>" in c.text, "compare page prices/EpubCC"
     assert "/guides/pdf-to-epub-converters-compared" in client.get("/sitemap.xml").text, "compare page not in sitemap"
     assert 'href="/guides/pdf-to-epub-converters-compared"' in client.get("/guides").text, "compare page not in /guides"
 
