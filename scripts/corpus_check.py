@@ -10,6 +10,8 @@ through the same path as /convert, and measured:
   splits   paragraphs cut at a page end (open sentence, next one starts lowercase)
   h1       one-letter headings (a drop cap or an icon read as a title)
   rephead  short lines repeated 4+ times (running heads or footers left in the text)
+  lone     1-3 word paragraphs that are not dialogue or headings: a word OCR lifted out of its line
+           ("ness." after "the whole busi- The woman", davehasl19 11-28; words and splits don't see it)
   toc      contents entries        words  words kept        suspect  app._suspect() verdict
 
 Results go to <dir>/results/YYYY-MM-DD.json; the run is compared with the newest earlier file and
@@ -44,8 +46,10 @@ def measure(chapters, pages: int) -> dict:
     latin = sum(c.isascii() for c in "".join(paras[:200])) > 0.6 * max(1, len("".join(paras[:200])))
     splits = sum(1 for a, b in zip(paras, paras[1:]) if latin and b[:1].islower() and not OPEN_END.search(a))
     rep = collections.Counter(p for p in paras if len(p) < 60 and len(p.split()) <= 8 and p[:1] not in "\"“‘'>$#")
+    lone = sum(1 for p in paras if 1 <= len(p.split()) <= 3 and p[:1] not in "\"“‘'>$#([-–—*"
+               and re.search(r"[a-z]", p) and rep[p] < 4)
     return {"chapters": len(chapters), "toc": len(heads), "h1": sum(1 for h in heads if len(h.strip()) <= 2 and not re.fullmatch(r"[IVXLC]+\.?", h.strip())),
-            "splits": splits, "rephead": sum(c for c in rep.values() if c >= 4),
+            "splits": splits, "lone": lone, "rephead": sum(c for c in rep.values() if c >= 4),
             "words": sum(len(p.split()) for p in paras), "suspect": app._suspect(chapters, pages) or ""}
 
 
@@ -99,7 +103,7 @@ def run_one(path: str) -> tuple[str, dict]:
         return name, {"error": f"{type(e).__name__}: {e}"[:200]}
 
 
-WORSE = {"splits": 2, "h1": 0, "rephead": 3, "toc_jump": 0.5, "words": 0.05}
+WORSE = {"splits": 2, "lone": 2, "h1": 0, "rephead": 3, "toc_jump": 0.5, "words": 0.05}
 
 
 def compare(old: dict, new: dict) -> list[str]:
@@ -113,8 +117,8 @@ def compare(old: dict, new: dict) -> list[str]:
         if "error" in m:
             out.append(f"{name}: now fails ({m['error']})")
             continue
-        for k in ("splits", "h1", "rephead"):
-            if m[k] > o[k] + WORSE[k]:
+        for k in ("splits", "lone", "h1", "rephead"):
+            if k in o and m[k] > o[k] + WORSE[k]:
                 out.append(f"{name}: {k} {o[k]} -> {m[k]}")
         if o["words"] and m["words"] < o["words"] * (1 - WORSE["words"]):
             out.append(f"{name}: words {o['words']} -> {m['words']} (text lost?)")
@@ -141,12 +145,12 @@ def main():
     today = res / f"{datetime.date.today():%Y-%m-%d}.json"
     earlier = sorted(p for p in res.glob("*.json") if p != today)
     old = json.loads(earlier[-1].read_text()) if earlier else {}
-    print(f"{'book':34}{'kind':>5}{'ch':>5}{'toc':>5}{'h1':>4}{'split':>6}{'rep':>5}{'words':>8}  suspect")
+    print(f"{'book':34}{'kind':>5}{'ch':>5}{'toc':>5}{'h1':>4}{'split':>6}{'lone':>5}{'rep':>5}{'words':>8}  suspect")
     for name, m in new.items():
         if "error" in m:
             print(f"{name:34} ERROR {m['error']}")
             continue
-        print(f"{name:34}{m['kind']:>5}{m['chapters']:5}{m['toc']:5}{m['h1']:4}{m['splits']:6}{m['rephead']:5}"
+        print(f"{name:34}{m['kind']:>5}{m['chapters']:5}{m['toc']:5}{m['h1']:4}{m['splits']:6}{m.get('lone', 0):5}{m['rephead']:5}"
               f"{m['words']:8}  {m['suspect']}")
     # --only adds its rows to today's file (or to the last run's rows when today has none yet)
     mine = json.loads(today.read_text()) if today.exists() else old
