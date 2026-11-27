@@ -683,7 +683,7 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
         return None
     for i in sorted(drove):  # pages Drive read; a failed page keeps the old layer's text as it is
             try:
-                pages[i] = (_put_caps(pages[i][0], _cap_rows(doc[i])), pages[i][1])
+                pages[i] = (_lone_words(doc[i], _put_caps(pages[i][0], _cap_rows(doc[i]))), pages[i][1])
             except Exception:
                 pass  # ponytail: a page whose layer can't be read keeps Drive's text as it is
     sharp = 0
@@ -739,6 +739,54 @@ def _page_end_hyphen(page, text: str, nxt: str) -> str:
     if bh <= xh * 0.5 and bh <= bw <= xh * 1.2 and 0.3 <= rel <= 0.8:
         return text.rstrip()[:-1] + "-"
     return text
+
+
+def _lone_words(page, text: str) -> str:
+    """Drive's page text with a word it cut loose put back where the old layer has it.
+
+    ponytail (davehasl19, Tales of Terror 11-28): justified type leaves a wide gap after a full
+    stop, and Drive made the word on the far side of it a block of its own, printed after the
+    paragraph: "the whole busi- The woman ..." then "ness." alone; "true, weeks" then "Three"
+    alone (~40 spots in that book). The layer's words are bad ("T he", "6pell") but in order, so
+    the match is on letters only: 6 letters before + the lone word + 6 after must be in the
+    layer, at exactly one gap of Drive's text that is not the word's own place. One neighbour
+    word was not enough ("and | the" put "kept me going." in another sentence). A short line
+    that really is a paragraph ("'Yes.'") matches only at its own place, so it stays; a gap only
+    marks away from that place is the same place ("lady or gentleman | ?'" + "'A gentleman.'")."""
+    key = lambda w: re.sub(r"[\W_]+", "", w).lower()
+    layer = key(page.get_text())
+    paras = text.split("\n\n")
+    k = 0
+    while k < len(paras):
+        lone = key(paras[k])
+        if not 1 <= len(paras[k].split()) <= 3 or len(lone) < 2 or not re.search("[a-z]", lone) or lone not in layer:
+            k += 1
+            continue
+        toks = [(q, m.end(), key(m.group())) for q, p in enumerate(paras) if q != k for m in re.finditer(r"\S+", p)]
+        keys = [t[2] for t in toks]
+        at, own = [0], None  # letters before each gap; own = the word's own place
+        for t in range(len(toks)):
+            at.append(at[-1] + len(keys[t]))
+            if t + 1 < len(toks) and toks[t][0] < k < toks[t + 1][0]:
+                own = at[-1]
+        if own is None:
+            own = 0 if not toks or toks[0][0] > k else at[-1]
+        spots, home = [], False
+        for t in range(len(toks) - 1):
+            before, after = "".join(keys[max(0, t - 5):t + 1])[-6:], "".join(keys[t + 1:t + 7])[:6]
+            if len(before) == len(after) == 6 and before + lone + after in layer:
+                if at[t + 1] == own:
+                    home = True  # fits where it is ("his | son.'" and "Son! | Owen" both fit)
+                else:
+                    spots.append(toks[t][:2])
+        if home or len(spots) != 1:
+            k += 1
+            continue
+        q, end = spots[0]
+        paras[q] = paras[q][:end] + " " + paras[k].strip() + paras[q][end:]
+        del paras[k]
+        k = 0  # indexes moved: look again from the top
+    return "\n\n".join(paras)
 
 
 def _put_caps(text: str, caps: list) -> str:

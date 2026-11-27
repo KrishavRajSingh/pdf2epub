@@ -386,7 +386,41 @@ def page_end_hyphen():
     print("ok page_end_hyphen")
 
 
+def lone_words():
+    """Justified type leaves wide gaps after a full stop; Drive cut the word before or after the gap
+    into a block of its own and printed it after the paragraph: "the whole busi- The woman ..."
+    then "ness." alone, and "Three" alone before "'You may well ... true, weeks after" (davehasl19,
+    Tales of Terror 11-28). The old layer has the words in order, so a lone word goes back between
+    the two words it sits between there. A short line that really is its own paragraph stays."""
+    lines = ["doctor, there is something uncanny about the whole busi-",
+             "ness. The woman is an unnatural woman. She is a she-",
+             "devil. And from my heart I pity and sorrow for my poor boy.'",
+             "'Good heavens, you don't say so !'",
+             "'You may well look surprised, but it's true. Three",
+             "weeks after our marriage Jack and I were at Wiesbaden.",
+             "'Yes.'", "upon me. upon me, and then he left."]
+    d = pymupdf.open()
+    pg = d.new_page(width=420, height=520)
+    for k, ln in enumerate(lines):
+        pg.insert_text((30, 40 + k * 14), ln, fontsize=9, render_mode=3)
+    drive = ("doctor, there is something uncanny about the whole busi- The woman is an unnatural woman. "
+             "She is a she- devil. And from my heart I pity and sorrow for my poor boy.'\n\nness.\n\n"
+             "'Good heavens, you don't say so !'\n\nThree\n\n"
+             "'You may well look surprised, but it's true, weeks after our marriage Jack and I were at Wiesbaden.\n\n"
+             "'Yes.'\n\nupon me. upon me, and then he left.")
+    got = pdf2epub._lone_words(pg, drive)
+    want = ("doctor, there is something uncanny about the whole busi- ness. The woman is an unnatural woman. "
+            "She is a she- devil. And from my heart I pity and sorrow for my poor boy.'\n\n"
+            "'Good heavens, you don't say so !'\n\n"
+            "'You may well look surprised, but it's true, Three weeks after our marriage Jack and I were at Wiesbaden.\n\n"
+            "'Yes.'\n\nupon me. upon me, and then he left.")
+    assert got == want, got
+    assert pdf2epub._lone_words(pg, want) == want  # already in place: nothing moves
+    print("ok lone_words")
+
+
 if __name__ == "__main__":
+    lone_words()
     page_end_hyphen()
     anthology_contents()
     reread()
