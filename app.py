@@ -2610,7 +2610,9 @@ function packBtn(kind,n){const c=cost(kind,n),b=Math.floor(500/c);
 // came from the hard wall (2 of 18 wall readers); since the free 150-page preview (11-07) 0 of 136 paid.
 function seen(){return window.previewDone?'Your first '+PN+' pages are downloaded. Open the EPUB and check the paragraphs and chapters.<br>':''}
 // 11-24: 62 readers saw this pitch in a week, 4 clicked. One tap says why the rest left.
-function nobuy(){const r=[['price','Too expensive'],['enough','The free part was enough'],['calibre','I use Calibre or another tool'],['unsure','Not sure the full book comes out right']];
+// 11-28: the old "free part" reason got 3 of 4 taps, but over the limit there is no free part since 11-22,
+// so the answer said nothing. Now: just looking, and can't pay online (most wall readers are outside the US).
+function nobuy(){const r=[['price','Too expensive'],['later','Just looking for now'],['card','I can’t pay online'],['calibre','I use Calibre or another tool'],['unsure','Not sure the full book comes out right']];
  return '<div id="nobuy" style="margin-top:14px;font-size:13px;color:#5b564d">Not buying? Tell me why (one tap): '
  +r.map(x=>'<button data-nobuy="'+x[0]+'" style="'+GHOST+'font-size:13px;padding:4px 10px">'+x[1]+'</button>').join('')+'</div>'}
 function pitchPages(n){const k=multi();return seen()+(k?multiBox(n,k):'')+'This PDF has '+(n||'over 150')+' pages. The free converter stops at 150.<br>'

@@ -533,6 +533,7 @@ def test_nobuy_reason():
     c = TestClient(a.app)
     html = c.get("/").text
     assert "function nobuy()" in html and "+nobuy()}" in html and "data-nobuy" in html
+    assert "free part was enough" not in html and "'card'" in html  # 11-28: no free part over the limit
     r = c.post("/e", content=b'{"n":"nobuy","v":"abcdefgh12","why":"price"}',
                headers={"user-agent": "Mozilla/5.0 (Macintosh) Safari/605"})
     assert r.status_code == 204
