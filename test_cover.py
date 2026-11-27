@@ -6,7 +6,7 @@ its own tile with the title; a white one shows nothing.
 """
 import pymupdf
 
-from app import text_cover
+from app import text_cover, cover_title_author
 
 
 def book(first):
@@ -45,4 +45,17 @@ assert text_cover(book(half_title)) is None, "half-title in body type is no cove
 assert text_cover(book(typeset_cover)), "a typeset cover (title in display type) is kept"
 assert text_cover(book(picture_cover)), "a picture cover is kept"
 assert text_cover(book(tiled_cover)), "a cover made of strips is kept"
-print("ok: text_cover")
+
+def press_front(pg):  # Dark Continents: half-title, series page, title page, all in body type
+    pg.insert_text((150, 120), "A John Hope Franklin Center Book", fontsize=10.5)
+
+
+d = book(press_front)
+d2 = pymupdf.open()
+d2.insert_pdf(d, to_page=0)
+d2.new_page(width=432, height=666).insert_text((150, 120), "Post-Contemporary\nInterventions\nSeries Editors:", fontsize=10.5)
+d2.insert_pdf(d, from_page=1)
+d2 = pymupdf.open(stream=d2.tobytes(), filetype="pdf")
+assert cover_title_author(d2) == ("", ""), cover_title_author(d2)
+assert cover_title_author(book(typeset_cover)) == ("Dark Continents", "Ranjana Khanna"), cover_title_author(book(typeset_cover))
+print("ok: text_cover, title guess")

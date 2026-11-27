@@ -2002,6 +2002,10 @@ def cover_title_author(doc) -> tuple[str, str]:
     if not lines:
         return "", ""
     top = max(sz for sz, *_ in lines)
+    if top < 1.03 * (_body_size(doc) or 0):
+        # ponytail (Jon 11-26, Dark Continents): pages 1-2 are a half-title and a series page in body type,
+        # so "A John Hope Franklin Center Book" became the book's name on his shelf. A title is display type.
+        return "", ""
     head = [l for l in lines if l[0] == top]
     page = head[0][1]
     title = " ".join(l[3] for l in sorted(head, key=lambda l: l[2]) if l[1] == page)
