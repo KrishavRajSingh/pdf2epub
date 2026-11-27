@@ -419,7 +419,39 @@ def lone_words():
     print("ok lone_words")
 
 
+def ai_first():
+    """Layer scans: the AI reads first, up to AI_LAYER_PAGES and the day budget; Drive reads the rest
+    and any page the AI fails (11-28). The AI's text is put in Drive's shape: a running head and its
+    page number on one line become two, a heading block on single lines becomes paragraphs."""
+    d = _layer_doc(n=4, ink=())
+    calls = []
+    def ai(img, lang):
+        calls.append("ai")
+        return None if len(calls) == 2 else "THE CAVE OF BLOOD 181\nX\nTHE STORY\n" + LINE + " ai."
+    keep = (pdf2epub._sharp_page, pdf2epub._drive_page, pdf2epub.OPENROUTER_KEY, pdf2epub.DRIVE_REFRESH,
+            pdf2epub.AI_LAYER_PAGES, pdf2epub.DRIVE_THREADS)
+    try:
+        pdf2epub._sharp_page, pdf2epub._drive_page = ai, lambda img, lang: LINE + " drive."
+        pdf2epub.OPENROUTER_KEY, pdf2epub.DRIVE_REFRESH, pdf2epub.AI_LAYER_PAGES = "k", "r", 3
+        pdf2epub.DRIVE_THREADS = 1
+        got = [t for t, _ in pdf2epub.layer_scan_pages(d, "en", "")]
+    finally:
+        (pdf2epub._sharp_page, pdf2epub._drive_page, pdf2epub.OPENROUTER_KEY, pdf2epub.DRIVE_REFRESH,
+         pdf2epub.AI_LAYER_PAGES, pdf2epub.DRIVE_THREADS) = keep
+    assert got[0].startswith("THE CAVE OF BLOOD\n\n181\n\nX\n\nTHE STORY"), got[0][:60]
+    assert got[1].endswith("drive.") and got[2].endswith("ai.") and got[3].endswith("drive."), [g[-6:] for g in got]
+    assert calls == ["ai"] * 3, calls  # page 4 is past AI_LAYER_PAGES: Drive only
+    day, pdf2epub.AI_DAY_PAGES = pdf2epub.AI_DAY_PAGES, 5
+    try:
+        pdf2epub._AI_DAY.update(d="", n=0)
+        assert [pdf2epub._ai_reserve(3), pdf2epub._ai_reserve(3), pdf2epub._ai_reserve(3)] == [3, 2, 0]
+    finally:
+        pdf2epub.AI_DAY_PAGES = day
+    print("ok ai_first")
+
+
 if __name__ == "__main__":
+    ai_first()
     lone_words()
     page_end_hyphen()
     anthology_contents()

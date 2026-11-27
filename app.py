@@ -643,6 +643,38 @@ def _strip_pen(page) -> tuple[bytes, bool]:
     return buf.getvalue(), inked
 
 
+AI_LAYER_PAGES = 600  # ponytail (11-28): ~$0.0012 a page; a $1 layer book past ~600 pages would cost more than it nets
+AI_DAY_PAGES = 5000  # ~$6 a day at most, so a bot uploading scans can't run up the bill
+_AI_DAY = {"d": "", "n": 0}
+
+
+def _ai_reserve(n: int) -> int:
+    """Pages the AI may read for this book: n, or what is left of today's budget."""
+    with _SHARP_LOCK:
+        today = datetime.now(timezone.utc).date().isoformat()
+        if _AI_DAY["d"] != today:
+            _AI_DAY.update(d=today, n=0)
+        n = max(0, min(n, AI_DAY_PAGES - _AI_DAY["n"]))
+        _AI_DAY["n"] += n
+        return n
+
+
+def _sharp_norm(text: str) -> str:
+    """The AI's page text in Drive's shape, which the scan chapter finder reads: one paragraph per
+    line, and a page number apart from its running head ("THE SPECTRE OF RISLIP ABBEY 179" ->
+    two lines; the AI keeps them together, Drive splits them; together they became a heading)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    out = []
+    for k, ln in enumerate(lines):
+        if k in (0, len(lines) - 1) and len(ln) < 80 and not re.search(r"[a-z]{3}", ln) and not re.search(r"\.\s*\.", ln):
+            m = re.fullmatch(r"(\d{1,4})\s+(.+)", ln) or re.fullmatch(r"(.+?)\s+(\d{1,4})", ln)
+            if m:
+                out += [m.group(1), m.group(2)]
+                continue
+        out.append(ln)
+    return "\n\n".join(out)
+
+
 def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> list | None:
     """Pages of a scan that carries someone else's OCR layer, read again: pen ink removed, Google
     Drive's OCR first, then for paid keys the AI re-read on inked pages and failed reads.
@@ -652,9 +684,29 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
     ponytail: Internet Archive and similar scans come with an old OCR layer that the text path
     copied as-is; three books from one r/ebooks reader (11-18..11-21) all had misreads the printed
     page does not ("imtil", "PON SO LORN" for "A Story", handwriting as words). Drive read each one
-    clean and costs nothing, so it runs for every reader; only the AI pass is paid."""
-    drive = drive or (_drive_page if DRIVE_REFRESH else None)
-    if not drive or not len(doc):
+    clean and costs nothing, so it runs for every reader; only the AI pass is paid.
+
+    ponytail (11-28, davehasl19 Tales of Terror): the AI model now reads first, for free previews
+    and paid books alike, up to AI_LAYER_PAGES per book and AI_DAY_PAGES a day; Drive reads the
+    rest and any page the AI fails. Same 338 pages: lone words 12 -> 2, running heads 16 -> 0,
+    ~100 more words right ("fled" not "fed"), 15/15 stories, ~$0.40. Drive's words were 99.9%
+    right; its page order (a word lifted out of its line) was what readers wrote in about."""
+    ai_used = set()
+    if drive is None:
+        if not (OPENROUTER_KEY or DRIVE_REFRESH) or not len(doc):
+            return None
+        first = set(range(_ai_reserve(min(len(doc), AI_LAYER_PAGES)) if OPENROUTER_KEY else 0))
+
+        def read_page(i, img):
+            if i in first:
+                t = _sharp_page(img, lang)
+                if t:
+                    ai_used.add(i)
+                    return _sharp_norm(t)
+            return _drive_page(img, lang) if DRIVE_REFRESH else None
+    else:
+        read_page = lambda i, img: drive(img, lang)
+    if not len(doc):
         return None
     pages, confs, inked, failed, drove = [], {}, set(), 0, set()
     step = DRIVE_THREADS * 8  # ponytail: a 2,000-page paid book would hold ~400MB of page images at once
@@ -667,7 +719,7 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
             except Exception:
                 win[i] = (doc[i].get_pixmap(dpi=150).tobytes("jpg", jpg_quality=88), False)
         with ThreadPoolExecutor(DRIVE_THREADS) as ex:
-            got = list(ex.map(lambda i: drive(win[i][0], lang), part))
+            got = list(ex.map(lambda i: read_page(i, win[i][0]), part))
         for i, text in zip(part, got):
             if IA_NOTICE.search(doc[i].get_text()):
                 text = ""  # the archive's own "Digitized by" page, not the book
@@ -676,7 +728,7 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
             elif text:
                 drove.add(i)
             pages.append((doc[i].get_text() if text is None else text, 1.0))
-            confs[i] = 0.0 if (text is None or win[i][1]) else 100.0
+            confs[i] = 0.0 if (text is None or (win[i][1] and i not in ai_used)) else 100.0
             if win[i][1]:
                 inked.add(i)
     if failed > len(doc) / 2:
@@ -695,7 +747,7 @@ def layer_scan_pages(doc, lang: str, key: str = "", drive=None, read=None) -> li
         except Exception:
             pass  # ponytail: a page that can't be looked at keeps its text as read
     print(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "layer_scan": len(doc), "drive_failed": failed,
-                      "inked": len(inked), "sharp": sharp}), flush=True)
+                      "inked": len(inked), "sharp": sharp, "ai": len(ai_used)}), flush=True)
     return pages
 
 
